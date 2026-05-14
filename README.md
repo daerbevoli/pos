@@ -1,4 +1,4 @@
-# SuperPOS
+# POS
 
 A self-contained supermarket Point of Sale application built with Python + PyQt6.
 
@@ -14,7 +14,7 @@ A self-contained supermarket Point of Sale application built with Python + PyQt6
 
 ### 1. Create a virtual environment
 ```bash
-python3.11 -m venv venv
+python3.13 -m venv venv
 source venv/bin/activate        # Linux/Mac
 venv\Scripts\activate           # Windows
 ```
