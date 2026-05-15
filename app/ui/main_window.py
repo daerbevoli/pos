@@ -1,13 +1,12 @@
 """
 Main Window
-The root window with tab navigation: POS, Inventory, Reports, Settings.
+Sidebar button navigation: POS, Articles, Reports, Settings.
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QLabel, QPushButton, QStatusBar
+    QLabel, QPushButton, QStatusBar, QStackedWidget, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
 from datetime import datetime
 
 from app.ui.pos_screen import POSScreen
@@ -23,7 +22,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("SKBC")
         self.setMinimumSize(1024, 768)
-
+        self._nav_buttons = []
+        self._right_buttons = []
         self._build_ui()
         self._start_clock()
         self._check_low_stock()
@@ -31,11 +31,11 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ── Header bar ────────────────────────────────────────────────────────
+        # ── Header ────────────────────────────────────────────────────────────
         header = QWidget()
         header.setObjectName("header")
         header.setFixedHeight(60)
@@ -43,7 +43,7 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(20, 0, 20, 0)
 
         store_label = QLabel("SKBC")
-        store_label.setObjectName("skbc")
+        store_label.setObjectName("storeName")
         header_layout.addWidget(store_label)
         header_layout.addStretch()
 
@@ -51,29 +51,75 @@ class MainWindow(QMainWindow):
         self.clock_label.setObjectName("clockLabel")
         header_layout.addWidget(self.clock_label)
 
-        layout.addWidget(header)
+        root.addWidget(header)
 
-        # ── Tab navigation ────────────────────────────────────────────────────
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("mainTabs")
-        self.tabs.setTabPosition(QTabWidget.TabPosition.West)
+        # ── Body: sidebar + content ───────────────────────────────────────────
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
 
-        self.pos_screen = POSScreen()
+        # ── Sidebar ───────────────────────────────────────────────────────────
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(160)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 20, 0, 20)
+        sidebar_layout.setSpacing(4)
+        sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        nav_items = [
+            ("🛒", "POS",      0),
+            ("📦", "Articles", 1),
+            ("#",   "Clients", 2),
+            ("📊", "Reports",  3),
+            ("⚙️", "Settings", 4)]
+
+        for icon, label, index in nav_items:
+            btn = QPushButton(f"{icon}\n{label}")
+            btn.setObjectName("navBtn")
+            btn.setFixedHeight(80)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _, i=index: self._navigate(i))
+            sidebar_layout.addWidget(btn)
+            self._nav_buttons.append(btn)
+
+        sidebar_layout.addStretch()
+        body.addWidget(sidebar)
+
+
+        # ── Vertical divider ──────────────────────────────────────────────────
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.VLine)
+        divider.setObjectName("sidebarDivider")
+        body.addWidget(divider)
+
+        # ── Stacked content area ──────────────────────────────────────────────
+        self.stack = QStackedWidget()
+        self.pos_screen       = POSScreen()
         self.inventory_screen = InventoryScreen()
-        self.reports_screen = ReportsScreen()
-        self.settings_screen = SettingsScreen()
+        self.reports_screen   = ReportsScreen()
+        self.settings_screen  = SettingsScreen()
 
-        self.tabs.addTab(self.pos_screen, "🛒  POS")
-        self.tabs.addTab(self.inventory_screen, "📦  Articles")
-        self.tabs.addTab(self.reports_screen, "📊  Reports")
-        self.tabs.addTab(self.settings_screen, "⚙️  Settings")
+        self.stack.addWidget(self.pos_screen)
+        self.stack.addWidget(self.inventory_screen)
+        self.stack.addWidget(self.reports_screen)
+        self.stack.addWidget(self.settings_screen)
 
-        layout.addWidget(self.tabs)
+        body.addWidget(self.stack, stretch=1)
+        root.addLayout(body, stretch=1)
 
         # ── Status bar ────────────────────────────────────────────────────────
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
+
+        # Start on POS screen
+        self._navigate(0)
+
+    def _navigate(self, index: int):
+        self.stack.setCurrentIndex(index)
+        for i, btn in enumerate(self._nav_buttons):
+            btn.setChecked(i == index)
 
     def _start_clock(self):
         self._update_clock()
@@ -90,5 +136,5 @@ class MainWindow(QMainWindow):
             low = ProductService.get_low_stock_products(session)
             if low:
                 self.status_bar.showMessage(
-                    f"⚠️  {len(low)} product(s) are low on stock — check Inventory tab"
+                    f"⚠️  {len(low)} product(s) are low on stock — check Articles tab"
                 )

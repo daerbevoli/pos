@@ -42,6 +42,7 @@ class POSScreen(QWidget):
         # Barcode / search input
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
+        self.search_input.setFixedSize(800, 100)
         self.search_input.setObjectName("barcodeInput")
         self.search_input.setPlaceholderText("Scan barcode or type product name…")
         self.search_input.setFixedHeight(54)
@@ -55,7 +56,9 @@ class POSScreen(QWidget):
         search_row.addWidget(search_btn)
         left.addLayout(search_row)
 
-        # Cart table
+        # Cart table + side buttons
+        cart_row = QHBoxLayout()
+
         self.cart_table = QTableWidget(0, 5)
         self.cart_table.setObjectName("cartTable")
         self.cart_table.setHorizontalHeaderLabels(["Product", "Price", "Qty", "Total", ""])
@@ -65,22 +68,51 @@ class POSScreen(QWidget):
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        left.addWidget(self.cart_table)
+        cart_row.addWidget(self.cart_table)
+
+        # + / - buttons beside the table
+        side_btns = QVBoxLayout()
+        side_btns.setAlignment(Qt.AlignmentFlag.AlignTop)
+        side_btns.setSpacing(6)
+
+        plus_btn = QPushButton("+")
+        plus_btn.setObjectName("plusBtn")
+        plus_btn.setFixedSize(50, 50)
+        plus_btn.clicked.connect(self._increase_product)
+        side_btns.addWidget(plus_btn)
+
+        minus_btn = QPushButton("-")
+        minus_btn.setObjectName("minusBtn")
+        minus_btn.setFixedSize(50, 50)
+        minus_btn.clicked.connect(self._decrease_product)
+        side_btns.addWidget(minus_btn)
+
+        # discount_btn = QPushButton("%")
+        # discount_btn.setObjectName("discountBtn")
+        # discount_btn.setFixedSize(50, 50)
+        # discount_btn.clicked.connect(self._apply_discount)
+        # side_btns.addWidget(minus_btn)
+
+
+
+        cart_row.addLayout(side_btns)
+        left.addLayout(cart_row)
+
 
         # Quick action buttons
         actions_row = QHBoxLayout()
-        clear_btn = QPushButton("🗑 Clear Cart")
+        clear_btn = QPushButton("Clear")
         clear_btn.setObjectName("dangerBtn")
         clear_btn.clicked.connect(self._clear_cart)
         actions_row.addWidget(clear_btn)
 
-        void_btn = QPushButton("❌ Void Last Sale")
+        void_btn = QPushButton("❌")
         void_btn.setObjectName("warningBtn")
         void_btn.clicked.connect(self._void_last_sale)
         actions_row.addWidget(void_btn)
         left.addLayout(actions_row)
 
-        layout.addLayout(left, stretch=3)
+        layout.addLayout(left, stretch=4)
 
         # ── Right panel: totals and payment ──────────────────────────────────
         right = QVBoxLayout()
@@ -111,13 +143,13 @@ class POSScreen(QWidget):
         right.addStretch()
 
         # Payment buttons
-        cash_btn = QPushButton("💵  CASH")
+        cash_btn = QPushButton("CASH")
         cash_btn.setObjectName("payBtn")
         cash_btn.setFixedHeight(70)
         cash_btn.clicked.connect(lambda: self._open_payment("cash"))
         right.addWidget(cash_btn)
 
-        card_btn = QPushButton("💳  CARD")
+        card_btn = QPushButton("CARD")
         card_btn.setObjectName("payBtnSecondary")
         card_btn.setFixedHeight(70)
         card_btn.clicked.connect(lambda: self._open_payment("card"))
@@ -157,7 +189,7 @@ class POSScreen(QWidget):
                     return
             if product:
                 self.cart.add_product(product)
-                self._refresh_cart()
+                self._refresh_cart(select_last=True)
                 self.search_input.clear()
             else:
                 QMessageBox.warning(self, "Not Found", f"No product found for: {query}")
@@ -169,7 +201,7 @@ class POSScreen(QWidget):
             dialog.set_query(initial_query)
         if dialog.exec() and dialog.selected_product:
             self.cart.add_product(dialog.selected_product)
-            self._refresh_cart()
+            self._refresh_cart(select_last=True )
         self.search_input.setFocus()
 
     def _clear_cart(self):
@@ -185,9 +217,12 @@ class POSScreen(QWidget):
 
     # ── UI refresh ────────────────────────────────────────────────────────────
 
-    def _refresh_cart(self):
+    def _refresh_cart(self, select_last=False):
+        # Remember which product was selected
+        selected_id = self._get_selected_product_id()
+
         self.cart_table.setRowCount(0)
-        for item in self.cart.items:
+        for item in self.cart.items.values():
             row = self.cart_table.rowCount()
             self.cart_table.insertRow(row)
             self.cart_table.setItem(row, 0, QTableWidgetItem(item.product_name))
@@ -201,6 +236,13 @@ class POSScreen(QWidget):
             remove_btn.clicked.connect(lambda _, pid=product_id: self._remove_item(pid))
             self.cart_table.setCellWidget(row, 4, remove_btn)
             self.cart_table.setRowHeight(row, 48)
+
+        # Restore selection
+        if select_last or not self.cart.items:
+            self.cart_table.selectRow(self.cart_table.rowCount() - 1)
+        elif selected_id is not None and selected_id in self.cart.items:
+            row = list(self.cart.items.keys()).index(selected_id)
+            self.cart_table.selectRow(row)
 
         self._refresh_totals()
 
@@ -239,3 +281,28 @@ class POSScreen(QWidget):
             self.cart.clear()
             self._refresh_cart()
             self.search_input.setFocus()
+
+    def _get_selected_product_id(self):
+        row = self.cart_table.currentRow()
+        print(row)
+        if row < 0:  # -1 means nothing selected
+            return None
+        # Get product_id from the cart items list at that row position
+        return list(self.cart.items.keys())[row]
+
+    def _increase_product(self):
+        product_id = self._get_selected_product_id()
+        if product_id is None:
+            return
+        self.cart.items[product_id].quantity += 1
+        self._refresh_cart()
+
+    def _decrease_product(self):
+        product_id = self._get_selected_product_id()
+        if product_id is None:
+            return
+        if self.cart.items[product_id].quantity > 1:
+            self.cart.items[product_id].quantity -= 1
+        else:
+            return
+        self._refresh_cart()

@@ -2,8 +2,7 @@
 Sales Service
 Handles checkout, sale creation, and sales history.
 """
-from datetime import datetime, date
-from typing import Optional
+from datetime import date
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -29,14 +28,13 @@ class CartItem:
 
 @dataclass
 class Cart:
-    """The active cart before finalizing a sale."""
-    items: list[CartItem] = field(default_factory=list)
+    items: dict[int, CartItem] = field(default_factory=dict)  # key = product_id
     global_discount: float = 0.0
     tax_rate: float = 0.0
 
     @property
     def subtotal(self) -> float:
-        return round(sum(i.line_total for i in self.items), 2)
+        return round(sum(i.line_total for i in self.items.values()), 2)
 
     @property
     def tax_amount(self) -> float:
@@ -48,31 +46,32 @@ class Cart:
 
     @property
     def item_count(self) -> int:
-        return sum(int(i.quantity) for i in self.items)
+        return sum(int(i.quantity) for i in self.items.values())
 
     def add_product(self, product: Product, quantity: float = 1.0):
         """Add a product or increase quantity if already in cart."""
-        for item in self.items:
-            if item.product_id == product.id:
-                item.quantity += quantity
-                return
-        self.items.append(CartItem(
-            product_id=product.id,
-            product_name=product.name,
-            product_barcode=product.barcode or "",
-            unit_price=product.price,
-            quantity=quantity,
-            unit=product.unit
-        ))
+        if product.id in self.items:
+            self.items[product.id].quantity += quantity
+        else:
+            self.items[product.id] = (CartItem(
+                product_id=product.id,
+                product_name=product.name,
+                product_barcode=product.barcode or "",
+                unit_price=product.price,
+                quantity=quantity,
+                unit=product.unit
+            ))
 
-    def remove_item(self, product_id: int):
-        self.items = [i for i in self.items if i.product_id != product_id]
+    def remove_item(self, product_id):
+        self.items.pop(product_id, None)
 
-    def update_quantity(self, product_id: int, quantity: float):
-        for item in self.items:
-            if item.product_id == product_id:
-                item.quantity = quantity
-                return
+    def update_quantity(self, product_id, quantity):
+        if product_id in self.items:
+            self.items[product_id].quantity = quantity
+
+    def increase_quantity(self, product_id: int):
+        if product_id in self.items:
+            self.items[product_id].quantity += 1
 
     def clear(self):
         self.items.clear()

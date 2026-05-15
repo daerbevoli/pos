@@ -131,3 +131,20 @@ class Settings(Base):
 
     def __repr__(self):
         return f"<Setting {self.key}={self.value}>"
+
+class Client(Base):
+    __tablename__ = "clients"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False)
+    address = Column(String(50), unique=True, nullable=True)
+    phone = Column(String(50), unique=True, nullable=True)
+    email = Column(String(50), unique=True, nullable=True)
+    vatNumber = Column(String(50), unique=True, nullable=False)
+    website = Column(String(50), unique=True, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    def __repr__(self):
+        return f"<Client {self.name} {self.vatNumber}>"
+
+
