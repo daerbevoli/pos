@@ -71,7 +71,7 @@ class InventoryScreen(QWidget):
         self.summary_label = QLabel()
         layout.addWidget(self.summary_label)
 
-    def refresh(self):
+    def  refresh(self):
         with get_session() as session:
             # Refresh category filter
             cats = ProductService.get_all_categories(session)

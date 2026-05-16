@@ -54,10 +54,10 @@ class ClientService:
         if not client:
             return None
         for key, value in kwargs.items():
-            setattr(Client, key, value)
+            setattr(client, key, value)
         session.commit()
-        session.refresh(Client)
-        return Client
+        session.refresh(client)
+        return client
 
     @staticmethod
     def deactivate(session: Session, client_id: int) -> bool:

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
 
+from app.ui.client_screen import ClientScreen
 from app.ui.pos_screen import POSScreen
 from app.ui.inventory_screen import InventoryScreen
 from app.ui.reports_screen import ReportsScreen
@@ -97,11 +98,13 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.pos_screen       = POSScreen()
         self.inventory_screen = InventoryScreen()
+        self.client_screen = ClientScreen()
         self.reports_screen   = ReportsScreen()
         self.settings_screen  = SettingsScreen()
 
         self.stack.addWidget(self.pos_screen)
         self.stack.addWidget(self.inventory_screen)
+        self.stack.addWidget(self.client_screen)
         self.stack.addWidget(self.reports_screen)
         self.stack.addWidget(self.settings_screen)
 
