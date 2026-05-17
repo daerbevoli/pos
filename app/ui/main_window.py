@@ -2,6 +2,7 @@
 Main Window
 Sidebar button navigation: POS, Articles, Reports, Settings.
 """
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QStatusBar, QStackedWidget, QFrame
@@ -42,9 +43,19 @@ class MainWindow(QMainWindow):
         header.setFixedHeight(60)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(20, 0, 20, 0)
-
-        store_label = QLabel("SKBC")
+        store_label = QLabel()
         store_label.setObjectName("storeName")
+
+        pixmap = QPixmap("./resources/icons/Logo.png")
+
+        store_label.setPixmap(
+            pixmap.scaled(
+                180, 100,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+        )
+
         header_layout.addWidget(store_label)
         header_layout.addStretch()
 
@@ -69,14 +80,14 @@ class MainWindow(QMainWindow):
         sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         nav_items = [
-            ("🛒", "POS",      0),
-            ("📦", "Articles", 1),
-            ("#",   "Clients", 2),
-            ("📊", "Reports",  3),
-            ("⚙️", "Settings", 4)]
+            ("POS",      0),
+            ("Articles", 1),
+            ("Clients", 2),
+            ("Reports",  3),
+            ("Settings", 4)]
 
-        for icon, label, index in nav_items:
-            btn = QPushButton(f"{icon}\n{label}")
+        for label, index in nav_items:
+            btn = QPushButton(f"{label}")
             btn.setObjectName("navBtn")
             btn.setFixedHeight(80)
             btn.setCheckable(True)

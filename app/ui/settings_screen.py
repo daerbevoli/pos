@@ -40,6 +40,7 @@ class SettingsScreen(QWidget):
         store_form.addRow("Tax Rate:", self.tax_rate)
         store_form.addRow("Currency Symbol:", self.currency)
         store_form.addRow("Receipt Footer:", self.receipt_footer)
+        store_form.addRow("Logo")
         layout.addWidget(store_group)
 
         # ── Printer config ────────────────────────────────────────────────────
