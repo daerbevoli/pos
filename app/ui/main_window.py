@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
 
+from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
 from app.ui.pos_screen import POSScreen
 from app.ui.inventory_screen import InventoryScreen
@@ -43,20 +44,13 @@ class MainWindow(QMainWindow):
         header.setFixedHeight(60)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(20, 0, 20, 0)
-        store_label = QLabel()
-        store_label.setObjectName("storeName")
 
-        pixmap = QPixmap("./resources/icons/Logo.png")
+        self.store_label = QLabel()
+        self.store_label.setObjectName("storeName")
 
-        store_label.setPixmap(
-            pixmap.scaled(
-                180, 100,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-        )
+        self._set_store_label(self.store_label)
 
-        header_layout.addWidget(store_label)
+        header_layout.addWidget(self.store_label)
         header_layout.addStretch()
 
         self.clock_label = QLabel()
@@ -118,6 +112,9 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.client_screen)
         self.stack.addWidget(self.reports_screen)
         self.stack.addWidget(self.settings_screen)
+        self.settings_screen.settings_saved.connect(
+            lambda: self._set_store_label(self.store_label)
+        )
 
         body.addWidget(self.stack, stretch=1)
         root.addLayout(body, stretch=1)
@@ -129,6 +126,23 @@ class MainWindow(QMainWindow):
 
         # Start on POS screen
         self._navigate(0)
+
+    def _set_store_label(self, label):
+        with get_session() as session:
+            path = SettingsService.get(session, "logo_path", "")
+
+            if path:
+                pixmap = QPixmap(path)
+                label.setPixmap(
+                    pixmap.scaled(
+                        180, 100,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                )
+            else:
+                store_name = SettingsService.get(session, "store_name", "")
+                label.setText(store_name)
 
     def _navigate(self, index: int):
         self.stack.setCurrentIndex(index)

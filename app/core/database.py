@@ -56,12 +56,12 @@ def _seed_defaults():
             ("store_name", "My Supermarket", "Store name shown on receipts"),
             ("store_address", "", "Store address for receipts"),
             ("store_phone", "", "Store phone number"),
-            ("tax_rate", "0.0", "VAT/tax rate as a decimal (e.g. 0.21 for 21%)"),
             ("currency_symbol", "€", "Currency symbol"),
             ("receipt_footer", "Thank you for shopping with us!", "Receipt footer text"),
             ("receipt_printer_vendor_id", "", "USB vendor ID for receipt printer"),
             ("receipt_printer_product_id", "", "USB product ID for receipt printer"),
             ("label_printer_vendor_id", "", "USB vendor ID for label printer"),
+            # ("logo", "Browse logo", "Logo shown on receipts")
         ]
         for key, value, desc in defaults:
             exists = session.query(Settings).filter_by(key=key).first()
