@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QHBoxLayout, QComboBox, QDoubleSpinBox, QMessageBox
 )
+from PyQt6.QtCore import Qt, QEvent
+
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.models.models import Product
@@ -65,7 +67,30 @@ class ProductDialog(QDialog):
                 self.category.addItem(cat.name, cat.id)
         form.addRow("Category:", self.category)
 
-        layout.addLayout(form)
+        self._fields = [
+            self.barcode, self.name, self.price, self.tax,
+            self.stock, self.min_stock, self.unit, self.category,
+        ]
+        for field in self._fields:
+            field.installEventFilter(self)
+
+        up_btn = QPushButton("↑")
+        down_btn = QPushButton("↓")
+        up_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        down_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        up_btn.clicked.connect(lambda: self._navigate(-1))
+        down_btn.clicked.connect(lambda: self._navigate(1))
+
+        up_down_col = QVBoxLayout()
+        up_down_col.addStretch()
+        up_down_col.addWidget(up_btn)
+        up_down_col.addWidget(down_btn)
+        up_down_col.addStretch()
+
+        form_row = QHBoxLayout()
+        form_row.addLayout(form)
+        form_row.addLayout(up_down_col)
+        layout.addLayout(form_row)
 
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
@@ -77,6 +102,22 @@ class ProductDialog(QDialog):
         save_btn.clicked.connect(self._save)
         btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Up:
+                self._navigate(-1)
+                return True
+            elif key == Qt.Key.Key_Down:
+                self._navigate(1)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _navigate(self, direction: int):
+        focused = self.focusWidget()
+        idx = self._fields.index(focused) if focused in self._fields else 0
+        self._fields[(idx + direction) % len(self._fields)].setFocus()
 
     def _populate(self, p: Product):
         self.barcode.setText(p.barcode or "")

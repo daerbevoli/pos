@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QHBoxLayout, QMessageBox
 )
+from PyQt6.QtCore import Qt, QEvent
 
 from app.models.models import Client
 
@@ -43,7 +44,27 @@ class ClientDialog(QDialog):
         self.phone.setPlaceholderText("Phone")
         form.addRow("Phone:", self.phone)
 
-        layout.addLayout(form)
+        self._fields = [self.name, self.address, self.vatNumber, self.email, self.phone]
+        for field in self._fields:
+            field.installEventFilter(self)
+
+        up_btn = QPushButton("↑")
+        down_btn = QPushButton("↓")
+        up_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        down_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        up_btn.clicked.connect(lambda: self._navigate(-1))
+        down_btn.clicked.connect(lambda: self._navigate(1))
+
+        up_down_col = QVBoxLayout()
+        up_down_col.addStretch()
+        up_down_col.addWidget(up_btn)
+        up_down_col.addWidget(down_btn)
+        up_down_col.addStretch()
+
+        form_row = QHBoxLayout()
+        form_row.addLayout(form)
+        form_row.addLayout(up_down_col)
+        layout.addLayout(form_row)
 
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
@@ -56,7 +77,21 @@ class ClientDialog(QDialog):
         btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
 
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Up:
+                self._navigate(-1)
+                return True
+            elif key == Qt.Key.Key_Down:
+                self._navigate(1)
+                return True
+        return super().eventFilter(obj, event)
 
+    def _navigate(self, direction: int):
+        focused = self.focusWidget()
+        idx = self._fields.index(focused) if focused in self._fields else 0
+        self._fields[(idx + direction) % len(self._fields)].setFocus()
 
     def _populate(self, client: Client):
         self.name.setText(client.name)

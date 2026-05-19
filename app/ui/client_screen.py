@@ -103,6 +103,7 @@ class ClientScreen(QWidget):
         for label, row, col, handler in actions:
             btn = QPushButton(label)
             btn.setObjectName("clientActionBtn")
+
             btn.setFixedHeight(50)
             if label == "OK":
                 btn.setObjectName("clientOkBtn")
@@ -291,11 +292,17 @@ class ClientScreen(QWidget):
             with get_session() as session:
                 ClientService.create(session, **dialog.get_data())
             self.filtered_clients.append(dialog.get_data())
-            self._refresh()
+        self._refresh()
 
-    def _edit_client(self):
-        if self.selected_client:
-            print(f"Edit: {self.selected_client['name']}")
+    def _edit_client(self, client_id: int):
+        with get_session() as session:
+            client = ClientService.get_by_id(session, client_id=client_id)
+            if not client:
+                return
+            dialog = ClientDialog(self, client)
+            if dialog.exec():
+                ClientService.update(session, client_id, **dialog.get_data())
+        self._refresh()
 
     def _delete_client(self):
         if self.selected_client:
