@@ -30,19 +30,14 @@ class CartItem:
 class Cart:
     items: dict[int, CartItem] = field(default_factory=dict)  # key = product_id
     global_discount: float = 0.0
-    tax_rate: float = 0.0
 
     @property
     def subtotal(self) -> float:
         return round(sum(i.line_total for i in self.items.values()), 2)
 
     @property
-    def tax_amount(self) -> float:
-        return round(self.subtotal * self.tax_rate, 2)
-
-    @property
     def total(self) -> float:
-        return round(self.subtotal + self.tax_amount - self.global_discount, 2)
+        return round(self.subtotal - self.global_discount, 2)
 
     @property
     def item_count(self) -> int:
@@ -112,7 +107,6 @@ class SalesService:
             sale_number=sale_number,
             total_amount=cart.subtotal,
             discount_amount=cart.global_discount,
-            tax_amount=cart.tax_amount,
             final_amount=cart.total,
             payment_method=payment_method,
             amount_tendered=amount_tendered,
@@ -123,7 +117,7 @@ class SalesService:
         session.add(sale)
         session.flush()  # Get sale.id without committing
 
-        for cart_item in cart.items:
+        for cart_item in cart.items.values():
             # Add sale line item
             sale_item = SaleItem(
                 sale_id=sale.id,
