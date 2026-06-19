@@ -4,6 +4,8 @@ Grid-button touchscreen layout: sale tabs, ticket list, function grid,
 payment row, and a numpad + category/product grid — modeled on classic
 register touchscreen POS terminals (Lightspeed/Tilroy/Tlecom-style).
 """
+import sys
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
@@ -17,43 +19,18 @@ from app.core.product_service import ProductService
 from app.core.sales_service import Cart, SalesService
 from app.core.settings_service import SettingsService
 from app.ui.dialogs.product_search_dialog import ProductSearchDialog
+from app.utils.utils import TicketTab, CategoryButton, FunctionButton, TapToDismissOverlay
 
+from app.ui.dialogs.numpad_dialog import NumpadDialog
 
-class TicketTab(QPushButton):
-    """One of the V1 / V2 / V3 sale-slot tabs along the top."""
-    def __init__(self, index: int):
-        super().__init__()
-        self.index = index
-        self.setObjectName("ticketTab")
-        self.setCheckable(True)
-        self.setFixedHeight(64)
-        self._set_label(f"V {index}", "")
+import logging
 
-    def _set_label(self, title: str, amount: str):
-        text = f"{title}\n{amount}" if amount else title
-        self.setText(text)
-
-
-class FunctionButton(QPushButton):
-    """A square-ish function key in the right-hand control grid."""
-    def __init__(self, label: str, role: str = "func"):
-        super().__init__(label)
-        self.setObjectName(role)
-        self.setMinimumHeight(56)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-
-class CategoryButton(QPushButton):
-    """A colored department / category / product key in the bottom grid."""
-    def __init__(self, label: str, role: str):
-        super().__init__(label)
-        self.setObjectName(role)
-        self.setMinimumHeight(56)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+ADMIN_CODE = "2060" # Make env var or be able to be set
 
 
 class POSScreen(QWidget):
     MAX_TABS = 5
+    isAdmin = False
 
     def __init__(self):
         super().__init__()
@@ -63,6 +40,7 @@ class POSScreen(QWidget):
         self._load_settings()
         self._build_ui()
         self._start_clock()
+        self.overlay = TapToDismissOverlay(self)  # <-- add this
 
     # ── Setup ────────────────────────────────────────────────────────────
 
@@ -74,6 +52,8 @@ class POSScreen(QWidget):
         self.cashier_name = settings.get("cashier_name", "Cashier")
 
     def _build_ui(self):
+        logging.info("Build UI called")
+
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
         root.setSpacing(6)
@@ -114,7 +94,7 @@ class POSScreen(QWidget):
         self.clock_label = QLabel("")
         self.clock_label.setObjectName("clockLabel")
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.status_label = QLabel(f"Sale ({self.cashier_name})")
+        self.status_label = QLabel(f"{self.cashier_name}")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         clock_box.addWidget(self.clock_label)
@@ -159,7 +139,7 @@ class POSScreen(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setObjectName("barcodeInput")
         self.search_input.setPlaceholderText("Scan barcode or type product name…")
-        self.search_input.setFixedHeight(40)
+        self.search_input.setMinimumHeight(32)
         self.search_input.returnPressed.connect(self._on_barcode_enter)
         col.addWidget(self.search_input)
 
@@ -180,7 +160,8 @@ class POSScreen(QWidget):
         self.status_line = QLabel("")
         self.status_line.setObjectName("inlineStatus")
         self.status_line.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_line.setFixedHeight(28)
+        self.status_line.setMinimumHeight(22)
+        self.status_line.setMaximumHeight(36)
         col.addWidget(self.status_line)
 
         # Dedicated numeric entry — discount amount or tendered amount,
@@ -191,7 +172,7 @@ class POSScreen(QWidget):
         self.amount_input = QLineEdit()
         self.amount_input.setObjectName("amountInput")
         self.amount_input.setPlaceholderText("Type a number, then €/% discount or Cash/Bancontact…")
-        self.amount_input.setFixedHeight(44)
+        self.amount_input.setMinimumHeight(34)
         self.amount_input.returnPressed.connect(lambda: self._open_payment("cash"))
         amount_row.addWidget(amount_label)
         amount_row.addWidget(self.amount_input, stretch=1)
@@ -217,12 +198,12 @@ class POSScreen(QWidget):
 
         self.btn_up = FunctionButton("↑", "navBtn")
         self.btn_plus = FunctionButton("+", "navBtn")
-        self.btn_clear = FunctionButton("Clear", "ClearBtn")
+        self.btn_clear = FunctionButton("Clear", "clearBtn")
 
         self.btn_down = FunctionButton("↓", "navBtn")
         self.btn_minus = FunctionButton("-", "navBtn")
         self.btn_item_name = FunctionButton("Item\nname", "secFunc")
-        self.btn_functions = FunctionButton("Functions", "secFunc")
+        self.btn_admin = FunctionButton("Admin", "secFunc")
 
         self.btn_disc_amt = FunctionButton("€\ndiscount", "discountBtn")
         self.btn_disc_pct = FunctionButton("%\ndiscount", "discountBtn")
@@ -242,7 +223,7 @@ class POSScreen(QWidget):
             (self.btn_clear, 1, 5, 1, 1),
 
             (self.btn_down, 2, 0, 1, 1), (self.btn_minus, 2, 1, 1, 1),
-            (self.btn_item_name, 2, 3, 1, 1), (self.btn_functions, 2, 5, 1, 1),
+            (self.btn_item_name, 2, 3, 1, 1), (self.btn_admin, 2, 5, 1, 1),
 
             (self.btn_disc_amt, 3, 0, 1, 1), (self.btn_disc_pct, 3, 1, 1, 1),
             (self.btn_barcode, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1),
@@ -295,6 +276,8 @@ class POSScreen(QWidget):
         self.btn_disc_amt.clicked.connect(self._apply_amount_discount)
         self.btn_up.clicked.connect(lambda: self._move_selection(-1))
         self.btn_down.clicked.connect(lambda: self._move_selection(1))
+
+        self.btn_admin.clicked.connect(self._admin)
 
         return col
 
@@ -349,7 +332,7 @@ class POSScreen(QWidget):
         for label, r, c in keys:
             btn = QPushButton(label)
             btn.setObjectName("numKey" if label not in ("⌫",) else "numKeyDel")
-            btn.setMinimumHeight(56)
+            btn.setMinimumHeight(36)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.clicked.connect(lambda _, l=label: self._numpad_press(l))
             numpad.addWidget(btn, r, c)
@@ -443,55 +426,47 @@ class POSScreen(QWidget):
         self._refresh_cart()
 
     def _apply_percent_discount(self):
+        if self.cart.item_count == 0:
+            self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
+            return
+
         value = self._read_amount_input()
         if value is None:
-            self.status_line.setText("Enter a number first to apply a % discount")
+            self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
             return
         pct = min(value, 100.0)
         discount_amount = self.cart.subtotal * (pct / 100.0)
         self.cart.global_discount = discount_amount
         self.amount_input.clear()
 
-        row = self.cart_table.rowCount()
-
-        self.cart_table.insertRow(row)
-
-        discount_str = str(round(discount_amount, 2))
-        discount = [
-            QTableWidgetItem(""),
-            QTableWidgetItem("DISCOUNT  " + str(pct) + "%"),
-            QTableWidgetItem(""),
-            QTableWidgetItem('-' + discount_str),
-        ]
-
-        font = QFont()
-        font.setBold(True)
-
-        for col, item in enumerate(discount):
-            item.setFont(font)
-            item.setBackground(QBrush(QColor(145, 230, 120)))
-            self.cart_table.setItem(row, col, item)
-
-        self.cart_table.setRowHeight(row, 50)
-
-        self.status_line.setText(f"Discount applied: {pct:.0f}% (-{self.currency}{discount_amount:.2f})")
+        self._show_discount(discount_amount, "%")
         self.amount_input.setFocus()
 
     def _apply_amount_discount(self):
+        if self.cart.item_count == 0:
+            self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
+            return
+
         value = self._read_amount_input()
         if value is None:
-            self.status_line.setText("Enter a number first to apply a € discount")
+            self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
             return
         # Clamp: a discount can never exceed the subtotal.
         discount_amount = min(value, self.cart.subtotal)
         self.cart.global_discount = discount_amount
         self.amount_input.clear()
-        self._refresh_cart()
-        self.status_line.setText(f"Discount applied: -{self.currency}{discount_amount:.2f}")
+
+        self._show_discount(discount_amount, "€")
         self.amount_input.setFocus()
+
+
+
 
     # Subtotal gets added at every press and removed at item addition
     def _show_subtotal(self):
+        if self.cart.item_count == 0:
+            self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
+            return
         row = self.cart_table.rowCount()
 
         self.cart_table.insertRow(row)
@@ -511,7 +486,7 @@ class POSScreen(QWidget):
             item.setBackground(QBrush(QColor(255, 230, 120)))
             self.cart_table.setItem(row, col, item)
 
-        self.cart_table.setRowHeight(row, 50)
+        self.cart_table.setRowHeight(row, 25)
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
@@ -526,7 +501,7 @@ class POSScreen(QWidget):
             self.cart_table.setItem(row, 1, QTableWidgetItem(item.product_name))
             self.cart_table.setItem(row, 2, QTableWidgetItem(f"{self.currency}{item.unit_price:.2f}"))
             self.cart_table.setItem(row, 3, QTableWidgetItem(f"{self.currency}{item.line_total:.2f}"))
-            self.cart_table.setRowHeight(row, 40)
+            self.cart_table.setRowHeight(row, 25)
 
         if select_last or not self.cart.items:
             self.cart_table.selectRow(self.cart_table.rowCount() - 1)
@@ -545,7 +520,7 @@ class POSScreen(QWidget):
 
     def _open_payment(self, method: str):
         if not self.cart.items:
-            self.status_line.setText("Add items before payment")
+            self._show_overlay("Add items before payment.", title="Empty Ticket", kind="error")
             return
 
         typed = self._read_amount_input()
@@ -621,4 +596,45 @@ class POSScreen(QWidget):
         except ValueError:
             return None
         return max(0.0, value)
+
+    def _admin(self):
+        if self.isAdmin:
+            self.isAdmin = False
+            self.status_label.setText("Cashier")
+            return
+
+        dialog = NumpadDialog(title="Enter Quantity", parent=self)
+        if dialog.exec():
+            code = dialog.value
+            if code == ADMIN_CODE:
+                self.isAdmin = True
+                self.status_label.setText("Admin")
+            return
+
+    def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
+        self.overlay.show_message(message, title=title, kind=kind)
+
+    def _show_discount(self, amount: float, pct_or_curr: str):
+        row = self.cart_table.rowCount()
+
+        self.cart_table.insertRow(row)
+
+        discount_str = str(round(amount, 2))
+        discount = [
+            QTableWidgetItem(""),
+            QTableWidgetItem("DISCOUNT  " + str(amount) + pct_or_curr),
+            QTableWidgetItem(""),
+            QTableWidgetItem('-' + discount_str),
+        ]
+
+        font = QFont()
+        font.setBold(True)
+
+        for col, item in enumerate(discount):
+            item.setFont(font)
+            item.setBackground(QBrush(QColor(145, 230, 120)))
+            self.cart_table.setItem(row, col, item)
+
+        self.cart_table.setRowHeight(row, 25)
+
 

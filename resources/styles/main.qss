@@ -23,7 +23,7 @@ QPushButton#ticketTab {
     border-radius: 4px;
     font-size: 13px;
     font-weight: 600;
-    min-height: 64px;
+    min-height: 40px;
     padding: 2px;
 }
 

@@ -31,25 +31,25 @@ class InventoryScreen(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by name or barcode…")
-        self.search_input.setFixedHeight(44)
+        self.search_input.setFixedHeight(30)
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=2)
 
         self.category_filter = QComboBox()
-        self.category_filter.setFixedHeight(44)
+        self.category_filter.setFixedHeight(30)
         self.category_filter.addItem("All Categories", None)
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 
         self.low_stock_btn = QPushButton("⚠️ Low Stock Only")
         self.low_stock_btn.setCheckable(True)
-        self.low_stock_btn.setFixedHeight(44)
+        self.low_stock_btn.setFixedHeight(30)
         self.low_stock_btn.toggled.connect(self.refresh)
         toolbar.addWidget(self.low_stock_btn)
 
         add_btn = QPushButton("＋ Add Product")
         add_btn.setObjectName("primaryBtn")
-        add_btn.setFixedHeight(44)
+        add_btn.setFixedHeight(25)
         add_btn.clicked.connect(self._add_product)
         toolbar.addWidget(add_btn)
 
@@ -64,7 +64,6 @@ class InventoryScreen(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
 
         # ── Summary row ───────────────────────────────────────────────────────
@@ -132,23 +131,23 @@ class InventoryScreen(QWidget):
             actions_layout.setSpacing(4)
 
             edit_btn = QPushButton("✏️")
-            edit_btn.setFixedSize(36, 36)
+            edit_btn.setFixedSize(30, 30)
             edit_btn.clicked.connect(lambda _, pid=p.id: self._edit_product(pid))
             actions_layout.addWidget(edit_btn)
 
             stock_btn = QPushButton("📦")
-            stock_btn.setFixedSize(36, 36)
+            stock_btn.setFixedSize(30, 30)
             stock_btn.setToolTip("Adjust stock")
             stock_btn.clicked.connect(lambda _, pid=p.id: self._adjust_stock(pid))
             actions_layout.addWidget(stock_btn)
 
             del_btn = QPushButton("🗑️")
-            del_btn.setFixedSize(36, 36)
+            del_btn.setFixedSize(30, 30)
             del_btn.clicked.connect(lambda _, pid=p.id: self._delete_product(pid))
             actions_layout.addWidget(del_btn)
 
             self.table.setCellWidget(row, 7, actions)
-            self.table.setRowHeight(row, 50)
+            self.table.setRowHeight(row, 30)
 
     def _add_product(self):
         dialog = ProductDialog(self)

@@ -5,7 +5,7 @@ Sidebar button navigation: POS, Articles, Reports, Settings.
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QStatusBar, QStackedWidget, QFrame
+    QLabel, QPushButton, QStatusBar, QStackedWidget, QFrame, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
@@ -18,6 +18,8 @@ from app.ui.reports_screen import ReportsScreen
 from app.ui.settings_screen import SettingsScreen
 from app.core.database import get_session
 from app.core.product_service import ProductService
+
+from app.utils.utils import SideButton
 
 
 class MainWindow(QMainWindow):
@@ -41,7 +43,8 @@ class MainWindow(QMainWindow):
         # ── Header ────────────────────────────────────────────────────────────
         header = QWidget()
         header.setObjectName("header")
-        header.setFixedHeight(60)
+        header.setMinimumHeight(50)
+        header.setMaximumHeight(70)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(20, 0, 20, 0)
 
@@ -67,7 +70,7 @@ class MainWindow(QMainWindow):
         # ── Sidebar ───────────────────────────────────────────────────────────
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(160)
+        sidebar.setFixedWidth(120)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 20, 0, 20)
         sidebar_layout.setSpacing(4)
@@ -81,9 +84,7 @@ class MainWindow(QMainWindow):
             ("Settings", 4)]
 
         for label, index in nav_items:
-            btn = QPushButton(f"{label}")
-            btn.setObjectName("navBtn")
-            btn.setFixedHeight(80)
+            btn = SideButton(label, "navBtn")
             btn.setCheckable(True)
             btn.clicked.connect(lambda _, i=index: self._navigate(i))
             sidebar_layout.addWidget(btn)

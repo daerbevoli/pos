@@ -41,7 +41,7 @@ class ProductDialog(QDialog):
         form.addRow("Selling Price *:", self.price)
 
         self.tax = QComboBox()
-        self.tax.addItems(['0 %', '6 %', '12 %', '21 %'])
+        self.tax.addItems(['0', '6', '12', '21'])
         form.addRow("Tax :", self.tax)
 
         self.stock = QDoubleSpinBox()
@@ -147,7 +147,7 @@ class ProductDialog(QDialog):
             "barcode": self.barcode.text().strip() or None,
             "name": self.name.text().strip(),
             "price": self.price.value(),
-            "tax": self.tax.currentText(),
+            "tax": int(self.tax.currentText()),
             "stock_quantity": self.stock.value(),
             "min_stock_level": self.min_stock.value(),
             "unit": self.unit.currentText(),
