@@ -400,3 +400,125 @@ QLineEdit#amountInput {
 QLineEdit#amountInput:focus {
     border-color: #2ecc71;
 }
+
+
+/* ── Inventory table (alternate-row fix) ─────────────────── */
+QTableWidget#inventoryTable {
+    background-color: #ffffff;
+    alternate-background-color: #f4f1ec;
+    color: #1c2430;
+}
+
+QTableWidget#inventoryTable::item {
+    color: #1c2430;
+}
+
+/* ── Article detail panel ("Artikel selecteren" style) ───── */
+QFrame#articleDetailPanel {
+    background-color: #eef1f5;
+    border: 1px solid #c3cbd6;
+    border-radius: 6px;
+}
+
+QFrame#articleFieldFrame {
+    background-color: #ffffff;
+    border: 1px solid #c3cbd6;
+    border-radius: 4px;
+}
+
+QLabel#articleDetailTitle {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1c2430;
+}
+
+QLabel#articleFieldCaption {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1c2430;
+}
+
+QLabel#articleFieldValue {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2c3a52;
+}
+
+QPushButton#newArticleBtn {
+    background-color: #4a90d9;
+    border: 1px solid #2f74bd;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+QPushButton#newArticleBtn:hover {
+    background-color: #3b7fc4;
+}
+
+QPushButton#deleteArticleBtn {
+    background-color: #d94f3f;
+    border: 1px solid #b3392b;
+    color: #fff5f2;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+QPushButton#deleteArticleBtn:hover {
+    background-color: #c2402f;
+}
+
+/** Add product dialog **/
+QFrame#fieldRow {
+    background-color: #f4f6f9;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+QFrame#fieldRow[active="true"] {
+    background-color: #ddeeff;
+    border: 1px solid #4a90d9;
+    border-radius: 4px;
+}
+QLabel#fieldLabel {
+    font-weight: 600;
+    color: #2c3a52;
+    font-size: 14px;
+}
+QLabel#pickerField {
+    background-color: #ffffff;
+    border: 1px solid #c3cbd6;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 14px;
+}
+QLabel#pickerField:focus {
+    border-color: #4a90d9;
+}
+QFrame#pickerPanel {
+    background-color: #e8ecf2;
+    border: 1px solid #c3cbd6;
+    border-radius: 4px;
+    margin: 0 8px;
+}
+QLabel#pickerTitle {
+    font-weight: 700;
+    font-size: 13px;
+    color: #2c3a52;
+}
+QPushButton#pickerBtn {
+    background-color: #d6dde6;
+    border: 1px solid #aab4c2;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 36px;
+}
+QPushButton#pickerBtn:hover {
+    background-color: #c5ccd8;
+}
+QPushButton#pickerBtn[selected="true"] {
+    background-color: #4a90d9;
+    border-color: #2f74bd;
+    color: #ffffff;
+}
