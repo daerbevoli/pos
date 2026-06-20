@@ -1,11 +1,14 @@
 """
 Inventory Screen
-View, add, edit products and manage stock levels.
+Table list of products on top; selecting a row opens an "Artikel
+selecteren"-style detail panel below, with a field list on the left and a
+function-key grid on the right (New/Modify/Delete article, Price label,
+Shelf label, Pre-pack, Print shelf, Search by barcode/key, OK/Cancel).
 """
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QComboBox
+    QHeaderView, QMessageBox, QComboBox, QFrame, QSizePolicy
 )
 from PyQt6.QtCore import Qt
 
@@ -13,6 +16,153 @@ from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.ui.dialogs.product_dialog import ProductDialog
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
+
+
+class DetailFunctionButton(QPushButton):
+    """A function key in the article-detail panel's right-hand grid."""
+    def __init__(self, label: str, role: str = "secFunc"):
+        super().__init__(label)
+        self.setObjectName(role)
+        self.setMinimumHeight(50)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+
+class ArticleDetailPanel(QFrame):
+    """
+    "Detail view for a single product:
+    a field list on the left, a function-key grid on the right.
+    Hidden until a row is selected in the table above it.
+    """
+    def __init__(self, parent_screen):
+        super().__init__(parent_screen)
+        self.parent_screen = parent_screen
+        self.current_product_id = None
+        self.setObjectName("articleDetailPanel")
+        self._build_ui()
+        self.hide()
+
+    def _build_ui(self):
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
+
+        # ── Left: field list ────────────────────────────────────────────
+        field_frame = QFrame()
+        field_frame.setObjectName("articleFieldFrame")
+        field_col = QVBoxLayout(field_frame)
+        field_col.setSpacing(10)
+
+        title = QLabel("Select article")
+        title.setObjectName("articleDetailTitle")
+        field_col.addWidget(title)
+
+        self.field_labels = {}
+        field_names = [
+            ("name", "Name:"),
+            ("department", "Department:"),
+            ("unit", "Unit:"),
+            ("price", "Price:"),
+            ("barcode", "Barcode:"),
+            ("active", "Active:"),
+            ("stock", "Stock:")
+        ]
+        for key, caption in field_names:
+            row = QHBoxLayout()
+            cap_label = QLabel(caption)
+            cap_label.setObjectName("articleFieldCaption")
+            cap_label.setFixedWidth(120)
+            value_label = QLabel("—")
+            value_label.setObjectName("articleFieldValue")
+            row.addWidget(cap_label)
+            row.addWidget(value_label, stretch=1)
+            field_col.addLayout(row)
+            self.field_labels[key] = value_label
+
+        field_col.addStretch()
+        outer.addWidget(field_frame, stretch=3)
+
+        # ── Right: function-key grid ────────────────────────────────────
+        grid = QGridLayout()
+        grid.setSpacing(4)
+
+        self.btn_new = DetailFunctionButton("New\narticle", "newArticleBtn")
+        self.btn_modify = DetailFunctionButton("Modify\narticle", "secFunc")
+        self.btn_delete = DetailFunctionButton("Delete\narticle", "deleteArticleBtn")
+        self.btn_error = DetailFunctionButton("Error", "errorBtn")
+
+        self.btn_print_label = DetailFunctionButton("Print\nlabel", "secFunc")
+        self.btn_cancel = DetailFunctionButton("Cancel", "cancelBtn")
+
+
+        self.btn_search_barcode = DetailFunctionButton("Search by\nbarcode", "secFunc")
+        self.btn_search_key = DetailFunctionButton("Search by\nkey", "secFunc")
+        self.btn_ok = DetailFunctionButton("OK", "okBtn")
+
+        layout_map = [
+            (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
+            (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
+
+            (self.btn_cancel, 1, 0), (self.btn_search_barcode, 1, 1),
+            (self.btn_search_key, 1, 2), (self.btn_ok, 1, 3),
+        ]
+        for widget, r, c in layout_map:
+            grid.addWidget(widget, r, c)
+
+        for c in range(4):
+            grid.setColumnStretch(c, 1)
+        for r in range(5):
+            grid.setRowStretch(r, 1)
+
+        outer.addLayout(grid, stretch=4)
+
+        # Wire actions to the parent screen's existing service calls
+        self.btn_new.clicked.connect(self.parent_screen._add_product)
+        self.btn_modify.clicked.connect(self._on_modify)
+        self.btn_delete.clicked.connect(self._on_delete)
+        self.btn_error.clicked.connect(self.hide)
+        self.btn_cancel.clicked.connect(self.hide)
+        self.btn_ok.clicked.connect(self.hide)
+        self.btn_search_barcode.clicked.connect(self._on_search_barcode)
+        self.btn_search_key.clicked.connect(self._on_search_key)
+
+    # ── Display ──────────────────────────────────────────────────────────
+
+    def show_product(self, product):
+        self.current_product_id = product.id
+        self.field_labels["name"].setText(product.name or "—")
+        dept = product.category.name if getattr(product, "category", None) else "—"
+        self.field_labels["department"].setText(dept)
+        self.field_labels["unit"].setText(product.unit or "—")
+        self.field_labels["price"].setText(f"€{product.price:.2f}")
+        self.field_labels["barcode"].setText(product.barcode or "—")
+        is_active = getattr(product, "is_active", True)
+        self.field_labels["active"].setText("Yes" if is_active else "No")
+        self.field_labels["stock"].setText(str(product.stock_quantity))
+        self.show()
+
+    # ── Actions ──────────────────────────────────────────────────────────
+
+    def _on_modify(self):
+        if self.current_product_id is None:
+            return
+        self.parent_screen._edit_product(self.current_product_id)
+
+    def _on_delete(self):
+        if self.current_product_id is None:
+            return
+        self.parent_screen._delete_product(self.current_product_id)
+        self.hide()
+
+    def _on_search_barcode(self):
+        self.parent_screen.search_input.setFocus()
+        self.parent_screen.search_input.setPlaceholderText("Scan or type barcode…")
+
+    def _on_search_key(self):
+        self.parent_screen.search_input.setFocus()
+        self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
+
+    def _stub_action(self, label: str):
+        QMessageBox.information(self, label, f"{label} — coming soon.")
 
 
 class InventoryScreen(QWidget):
@@ -31,25 +181,25 @@ class InventoryScreen(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by name or barcode…")
-        self.search_input.setFixedHeight(30)
+        self.search_input.setFixedHeight(44)
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=2)
 
         self.category_filter = QComboBox()
-        self.category_filter.setFixedHeight(30)
+        self.category_filter.setFixedHeight(44)
         self.category_filter.addItem("All Categories", None)
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 
-        self.low_stock_btn = QPushButton("⚠️ Low Stock Only")
+        self.low_stock_btn = QPushButton("Low Stock")
         self.low_stock_btn.setCheckable(True)
-        self.low_stock_btn.setFixedHeight(30)
+        self.low_stock_btn.setFixedHeight(44)
         self.low_stock_btn.toggled.connect(self.refresh)
         toolbar.addWidget(self.low_stock_btn)
 
         add_btn = QPushButton("＋ Add Product")
         add_btn.setObjectName("primaryBtn")
-        add_btn.setFixedHeight(25)
+        add_btn.setFixedHeight(44)
         add_btn.clicked.connect(self._add_product)
         toolbar.addWidget(add_btn)
 
@@ -57,6 +207,7 @@ class InventoryScreen(QWidget):
 
         # ── Product table ─────────────────────────────────────────────────────
         self.table = QTableWidget(0, 8)
+        self.table.setObjectName("inventoryTable")
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Name", "Category", "Price", "Tax", "Stock", "Unit", "Actions"
         ])
@@ -64,13 +215,20 @@ class InventoryScreen(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.table)
+        self.table.itemSelectionChanged.connect(self._on_row_selected)
+        layout.addWidget(self.table, stretch=3)
+
+        # ── Article detail panel (hidden until a row is selected) ──────────────
+        self.detail_panel = ArticleDetailPanel(self)
+        layout.addWidget(self.detail_panel, stretch=2)
 
         # ── Summary row ───────────────────────────────────────────────────────
         self.summary_label = QLabel()
         layout.addWidget(self.summary_label)
 
-    def  refresh(self):
+        self._product_cache = {}
+
+    def refresh(self):
         with get_session() as session:
             # Refresh category filter
             cats = ProductService.get_all_categories(session)
@@ -106,11 +264,15 @@ class InventoryScreen(QWidget):
                 + (f" — {sum(1 for p in products if p.is_low_stock)} low stock" if products else "")
             )
 
+        # self.detail_panel.hide()
+
     def _populate_table(self, products, session):
         self.table.setRowCount(0)
+        self._product_cache = {}
         for p in products:
             row = self.table.rowCount()
             self.table.insertRow(row)
+            self._product_cache[row] = p.id
 
             self.table.setItem(row, 0, QTableWidgetItem(p.barcode or ""))
             self.table.setItem(row, 1, QTableWidgetItem(p.name))
@@ -131,23 +293,38 @@ class InventoryScreen(QWidget):
             actions_layout.setSpacing(4)
 
             edit_btn = QPushButton("✏️")
-            edit_btn.setFixedSize(30, 30)
+            edit_btn.setFixedSize(36, 36)
             edit_btn.clicked.connect(lambda _, pid=p.id: self._edit_product(pid))
             actions_layout.addWidget(edit_btn)
 
             stock_btn = QPushButton("📦")
-            stock_btn.setFixedSize(30, 30)
+            stock_btn.setFixedSize(36, 36)
             stock_btn.setToolTip("Adjust stock")
             stock_btn.clicked.connect(lambda _, pid=p.id: self._adjust_stock(pid))
             actions_layout.addWidget(stock_btn)
 
             del_btn = QPushButton("🗑️")
-            del_btn.setFixedSize(30, 30)
+            del_btn.setFixedSize(36, 36)
             del_btn.clicked.connect(lambda _, pid=p.id: self._delete_product(pid))
             actions_layout.addWidget(del_btn)
 
             self.table.setCellWidget(row, 7, actions)
-            self.table.setRowHeight(row, 30)
+            self.table.setRowHeight(row, 50)
+
+    # ── Detail panel wiring ─────────────────────────────────────────────────
+
+    def _on_row_selected(self):
+        row = self.table.currentRow()
+        if row < 0 or row not in self._product_cache:
+            self.detail_panel.hide()
+            return
+        product_id = self._product_cache[row]
+        with get_session() as session:
+            product = ProductService.get_by_id(session, product_id)
+            if product:
+                self.detail_panel.show_product(product)
+            else:
+                self.detail_panel.hide()
 
     def _add_product(self):
         dialog = ProductDialog(self)

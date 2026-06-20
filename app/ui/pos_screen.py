@@ -18,6 +18,7 @@ from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.sales_service import Cart, SalesService
 from app.core.settings_service import SettingsService
+from app.ui.dialogs.client_search_dialog import ClientSearchDialog
 from app.ui.dialogs.product_search_dialog import ProductSearchDialog
 from app.utils.utils import TicketTab, CategoryButton, FunctionButton, TapToDismissOverlay
 
@@ -278,6 +279,8 @@ class POSScreen(QWidget):
         self.btn_down.clicked.connect(lambda: self._move_selection(1))
 
         self.btn_admin.clicked.connect(self._admin)
+
+        self.btn_customer.clicked.connect(lambda: self._open_client_search_dialog())
 
         return col
 
@@ -636,5 +639,14 @@ class POSScreen(QWidget):
             self.cart_table.setItem(row, col, item)
 
         self.cart_table.setRowHeight(row, 25)
+
+    def _open_client_search_dialog(self, initial_query=""):
+        dialog = ClientSearchDialog(self)
+        if initial_query:
+            dialog.set_query(initial_query)
+        if dialog.exec() and dialog.selected_product:
+            self.cart.add_product(dialog.selected_product)
+            self._refresh_cart(select_last=True)
+        self.search_input.setFocus()
 
 

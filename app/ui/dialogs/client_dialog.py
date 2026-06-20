@@ -117,3 +117,5 @@ class ClientDialog(QDialog):
             "email": self.email.text(),
             "phone": self.phone.text()
         }
+
+
