@@ -64,21 +64,25 @@ QLabel#ticketTitle {
 }
 
 QLabel#ticketDate {
-    font-size: 18px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 700;
     color: #2c3a52;
 }
 
-QLineEdit#barcodeInput {
-    background-color: #ffffff;
-    border: 1px solid #c3cbd6;
-    border-radius: 4px;
-    padding: 6px 10px;
-    font-size: 14px;
+QLineEdit#combinedInput {
+    background-color: transparent;
+    border: none;
+    border-top: 1px solid #d8c9bd;
+    border-radius: 0;
+    padding: 8px 10px;
+    font-size: 17px;
+    font-weight: 600;
+    color: #1c2430;
+    selection-background-color: #4a90d9;
 }
 
-QLineEdit#barcodeInput:focus {
-    border-color: #4a90d9;
+QLineEdit#combinedInput:focus {
+    border-top: 2px solid #4a90d9;
 }
 
 /* ── Cart / ticket table ─────────────────────────────────── */
@@ -97,6 +101,22 @@ QTableWidget#cartTable::item {
 QTableWidget#cartTable::item:selected {
     background-color: #0975B0;
     color: #1c2430;
+}
+
+/* Frozen state after payment */
+QTableWidget#cartTable:disabled {
+    background-color: #ccc5be;
+    color: #665C57;
+    gridline-color: #b8b0a8;
+}
+
+QTableWidget#cartTable:disabled::item {
+    color: #7a6a62;
+}
+
+QTableWidget#cartTable:disabled::item:selected {
+    background-color: #b8b0a8;
+    color: #5a4a42;
 }
 
 QHeaderView::section {
@@ -379,26 +399,6 @@ QLabel#inlineStatus {
     background-color: #e3f4e8;
     border: 1px solid #b9dfc4;
     border-radius: 4px;
-}
-
-QLabel#amountLabel {
-    font-size: 14px;
-    font-weight: 700;
-    color: #2c3a52;
-}
-
-QLineEdit#amountInput {
-    background-color: #ffffff;
-    border: 2px solid #4a90d9;
-    border-radius: 4px;
-    padding: 6px 10px;
-    font-size: 18px;
-    font-weight: 700;
-    color: #103330;
-}
-
-QLineEdit#amountInput:focus {
-    border-color: #2ecc71;
 }
 
 

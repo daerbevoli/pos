@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QFrame, QSizePolicy, QButtonGroup
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime, QTime
 from PyQt6.QtGui import QFont, QBrush, QColor
 
 from app.core.database import get_session
@@ -41,7 +41,8 @@ class POSScreen(QWidget):
         self._load_settings()
         self._build_ui()
         self._start_clock()
-        self.overlay = TapToDismissOverlay(self)  # <-- add this
+        self.overlay = TapToDismissOverlay(self)
+        self.sale_finished = False
 
     # ── Setup ────────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ class POSScreen(QWidget):
 
         root.addLayout(self._build_bottom_grid(), stretch=4)
 
-        QTimer.singleShot(100, self.search_input.setFocus)
+        QTimer.singleShot(100, self.combined_input.setFocus)
 
     # ── Top: sale-slot tabs + clock ─────────────────────────────────────
 
@@ -119,6 +120,7 @@ class POSScreen(QWidget):
     def _tick(self):
         now = QDateTime.currentDateTime()
         self.clock_label.setText(now.toString("dd-MM-yyyy   HH:mm"))
+        self.ticket_date.setText(now.toString("HH:mm"))
 
     # ── Left: ticket header + cart table ────────────────────────────────
 
@@ -136,14 +138,6 @@ class POSScreen(QWidget):
         header.addWidget(self.ticket_date)
         col.addLayout(header)
 
-        # Hidden scan/search input — barcode scanner still types into this
-        self.search_input = QLineEdit()
-        self.search_input.setObjectName("barcodeInput")
-        self.search_input.setPlaceholderText("Scan barcode or type product name…")
-        self.search_input.setMinimumHeight(32)
-        self.search_input.returnPressed.connect(self._on_barcode_enter)
-        col.addWidget(self.search_input)
-
         self.cart_table = QTableWidget(0, 4)
         self.cart_table.setObjectName("cartTable")
         self.cart_table.setHorizontalHeaderLabels(["Qty", "Description", "Price", "Total"])
@@ -156,28 +150,12 @@ class POSScreen(QWidget):
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         col.addWidget(self.cart_table, stretch=1)
 
-        # Inline status line — shows discount/payment/change feedback,
-        # replaces what would otherwise be a popup dialog.
-        self.status_line = QLabel("")
-        self.status_line.setObjectName("inlineStatus")
-        self.status_line.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_line.setMinimumHeight(22)
-        self.status_line.setMaximumHeight(36)
-        col.addWidget(self.status_line)
-
-        # Dedicated numeric entry — discount amount or tendered amount,
-        # depending on which button is pressed next.
-        amount_row = QHBoxLayout()
-        amount_label = QLabel("Amount:")
-        amount_label.setObjectName("amountLabel")
-        self.amount_input = QLineEdit()
-        self.amount_input.setObjectName("amountInput")
-        self.amount_input.setPlaceholderText("Type a number, then €/% discount or Cash/Bancontact…")
-        self.amount_input.setMinimumHeight(34)
-        self.amount_input.returnPressed.connect(lambda: self._open_payment("cash"))
-        amount_row.addWidget(amount_label)
-        amount_row.addWidget(self.amount_input, stretch=1)
-        col.addLayout(amount_row)
+        self.combined_input = QLineEdit()
+        self.combined_input.setObjectName("combinedInput")
+        self.combined_input.setPlaceholderText("Scan barcode, search product or enter amount…")
+        self.combined_input.setMinimumHeight(34)
+        self.combined_input.returnPressed.connect(self._on_barcode_enter)
+        col.addWidget(self.combined_input)
 
         return col
 
@@ -208,7 +186,7 @@ class POSScreen(QWidget):
 
         self.btn_disc_amt = FunctionButton("€\ndiscount", "discountBtn")
         self.btn_disc_pct = FunctionButton("%\ndiscount", "discountBtn")
-        self.btn_barcode = FunctionButton("Barcode", "secFunc")
+        self.btn_barcode = FunctionButton("Search\narticle", "secFunc")
         self.btn_drawer = FunctionButton("Drawer", "secFunc")
 
         self.btn_customer = FunctionButton("Customer", "customerBtn")
@@ -352,13 +330,13 @@ class POSScreen(QWidget):
 
     def _numpad_press(self, label: str):
         if label == "⌫":
-            self.amount_input.setText(self.amount_input.text()[:-1])
+            self.combined_input.setText(self.combined_input.text()[:-1])
         elif label == ",":
-            if "." not in self.amount_input.text():
-                self.amount_input.insert(".")
+            if "." not in self.combined_input.text():
+                self.combined_input.insert(".")
         else:
-            self.amount_input.insert(label)
-        self.amount_input.setFocus()
+            self.combined_input.insert(label)
+        self.combined_input.setFocus()
 
     # ── Tab (sale-slot) switching ────────────────────────────────────────
 
@@ -369,6 +347,7 @@ class POSScreen(QWidget):
         self.cart = self.tabs_data[idx]
         self.ticket_title.setText(f"V {idx}")
         self._refresh_cart()
+        self.combined_input.setFocus()
 
     def _update_tab_label(self, idx: int):
         cart = self.tabs_data.get(idx)
@@ -380,9 +359,11 @@ class POSScreen(QWidget):
     # ── Cart interactions (unchanged backend wiring) ─────────────────────
 
     def _on_barcode_enter(self):
-        query = self.search_input.text().strip()
+        query = self.combined_input.text().strip()
         if not query:
             return
+        if self.sale_finished:
+            self._unfreeze_ticket()
         with get_session() as session:
             product = ProductService.get_by_barcode(session, query)
             if not product:
@@ -390,45 +371,54 @@ class POSScreen(QWidget):
                 if len(results) == 1:
                     product = results[0]
                 elif len(results) > 1:
-                    self.search_input.clear()
+                    self.combined_input.clear()
                     self._open_search_dialog(query)
                     return
             if product:
                 self.cart.add_product(product)
                 self._refresh_cart(select_last=True)
-                self.search_input.clear()
+                self.combined_input.clear()
             else:
                 QMessageBox.warning(self, "Not Found", f"No product found for: {query}")
-        self.search_input.clear()
+        self.combined_input.clear()
 
     def _open_search_dialog(self, initial_query=""):
         dialog = ProductSearchDialog(self)
         if initial_query:
             dialog.set_query(initial_query)
         if dialog.exec() and dialog.selected_product:
+            if self.sale_finished:
+                self._unfreeze_ticket()
             self.cart.add_product(dialog.selected_product)
             self._refresh_cart(select_last=True)
-        self.search_input.setFocus()
+        self.combined_input.setFocus()
 
     def _clear_cart(self):
         if not self.cart.items:
             return
         if QMessageBox.question(self, "Clear Ticket", "Remove all items?") == QMessageBox.StandardButton.Yes:
-            self.cart.clear()
-            self.cart.global_discount = 0.0
-            self.amount_input.clear()
-            self.search_input.clear()
-            self.status_line.setText("")
-            self._refresh_cart()
+            if self.sale_finished:
+                self._unfreeze_ticket()
+            else:
+                self.cart.clear()
+                self.cart.global_discount = 0.0
+                self.combined_input.clear()
+                self._refresh_cart()
+        self.combined_input.setFocus()
 
     def _remove_selected(self):
+        if self.sale_finished:
+            return
         product_id = self._get_selected_product_id()
         if product_id is None:
             return
         self.cart.remove_item(product_id)
         self._refresh_cart()
+        self.combined_input.setFocus()
 
     def _apply_percent_discount(self):
+        if self.sale_finished:
+            return
         if self.cart.item_count == 0:
             self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
             return
@@ -440,12 +430,14 @@ class POSScreen(QWidget):
         pct = min(value, 100.0)
         discount_amount = self.cart.subtotal * (pct / 100.0)
         self.cart.global_discount = discount_amount
-        self.amount_input.clear()
+        self.combined_input.clear()
 
-        self._show_discount(discount_amount, "%")
-        self.amount_input.setFocus()
+        self._show_discount(pct, discount_amount, "%")
+        self.combined_input.setFocus()
 
     def _apply_amount_discount(self):
+        if self.sale_finished:
+            return
         if self.cart.item_count == 0:
             self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
             return
@@ -457,13 +449,10 @@ class POSScreen(QWidget):
         # Clamp: a discount can never exceed the subtotal.
         discount_amount = min(value, self.cart.subtotal)
         self.cart.global_discount = discount_amount
-        self.amount_input.clear()
+        self.combined_input.clear()
 
-        self._show_discount(discount_amount, "€")
-        self.amount_input.setFocus()
-
-
-
+        self._show_discount(value, discount_amount, "€")
+        self.combined_input.setFocus()
 
     # Subtotal gets added at every press and removed at item addition
     def _show_subtotal(self):
@@ -549,19 +538,30 @@ class POSScreen(QWidget):
             "bancontact": "Bancontact", "meal_voucher": "Meal voucher"
         }.get(method, method.title())
 
-        if change > 0:
-            self.status_line.setText(
-                f"Paid {self.currency}{tendered:.2f} ({method_label}) — Change {self.currency}{change:.2f}"
-            )
-        else:
-            self.status_line.setText(f"Paid {self.currency}{tendered:.2f} ({method_label})")
+        # if change > 0:
+        #     self.status_line.setText(
+        #         f"Paid {self.currency}{tendered:.2f} ({method_label}) — Change {self.currency}{change:.2f}"
+        #     )
+        # else:
+        #     self.status_line.setText(f"Paid {self.currency}{tendered:.2f} ({method_label})")
 
-        self.amount_input.clear()
-        self.cart.global_discount = 0.0
+        self._freeze_ticket()
+
+
+    def _freeze_ticket(self):
+        self.sale_finished = True
+        self.cart_table.setEnabled(False)
+        self.combined_input.clear()
+        self.combined_input.setPlaceholderText("Scan to start new sale…")
+        self.combined_input.setFocus()
+
+    def _unfreeze_ticket(self):
+        self.sale_finished = False
         self.cart.clear()
+        self.cart.global_discount = 0.0
+        self.cart_table.setEnabled(True)
+        self.combined_input.setPlaceholderText("Scan barcode, search product or enter amount…")
         self._refresh_cart()
-        self.amount_input.setFocus()
-
 
     def _get_selected_product_id(self):
         row = self.cart_table.currentRow()
@@ -590,8 +590,7 @@ class POSScreen(QWidget):
         self._refresh_cart()
 
     def _read_amount_input(self) -> float | None:
-        """Parse the dedicated amount field. Returns None if empty/invalid."""
-        text = self.amount_input.text().strip().replace(",", ".")
+        text = self.combined_input.text().strip().replace(",", ".")
         if not text:
             return None
         try:
@@ -617,15 +616,16 @@ class POSScreen(QWidget):
     def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
         self.overlay.show_message(message, title=title, kind=kind)
 
-    def _show_discount(self, amount: float, pct_or_curr: str):
+    def _show_discount(self, value: float, amount: float, pct_or_curr: str):
         row = self.cart_table.rowCount()
 
         self.cart_table.insertRow(row)
 
         discount_str = str(round(amount, 2))
+        print(discount_str, amount)
         discount = [
             QTableWidgetItem(""),
-            QTableWidgetItem("DISCOUNT  " + str(amount) + pct_or_curr),
+            QTableWidgetItem("DISCOUNT  " + str(value) + pct_or_curr),
             QTableWidgetItem(""),
             QTableWidgetItem('-' + discount_str),
         ]
@@ -645,8 +645,10 @@ class POSScreen(QWidget):
         if initial_query:
             dialog.set_query(initial_query)
         if dialog.exec() and dialog.selected_product:
+            if self.sale_finished:
+                self._unfreeze_ticket()
             self.cart.add_product(dialog.selected_product)
             self._refresh_cart(select_last=True)
-        self.search_input.setFocus()
+        self.combined_input.setFocus()
 
 

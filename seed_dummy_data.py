@@ -7,63 +7,63 @@ from app.models.models import Category, Product, Client
 
 DUMMY_PRODUCTS = [
     # Fruit & Vegetables
-    {"barcode": "2000000000001", "name": "Banana (kg)",       "price": 1.49, "stock_quantity": 50,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
-    {"barcode": "2000000000002", "name": "Apple Gala (kg)",   "price": 1.99, "stock_quantity": 40,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
-    {"barcode": "2000000000003", "name": "Tomato (kg)",        "price": 2.29, "stock_quantity": 30,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
-    {"barcode": "2000000000004", "name": "Carrot (kg)",        "price": 0.99, "stock_quantity": 35,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
-    {"barcode": "2000000000005", "name": "Broccoli",           "price": 1.29, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Fruit & Vegetables"},
+    {"barcode": "01", "name": "Banana (kg)",       "price": 1.49, "stock_quantity": 50,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
+    {"barcode": "02", "name": "Apple Gala (kg)",   "price": 1.99, "stock_quantity": 40,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
+    {"barcode": "03", "name": "Tomato (kg)",        "price": 2.29, "stock_quantity": 30,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
+    {"barcode": "04", "name": "Carrot (kg)",        "price": 0.99, "stock_quantity": 35,  "unit": "kg",  "tax": 6,  "category": "Fruit & Vegetables"},
+    {"barcode": "05", "name": "Broccoli",           "price": 1.29, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Fruit & Vegetables"},
 
     # Dairy & Eggs
-    {"barcode": "2000000000010", "name": "Whole Milk 1L",      "price": 1.09, "stock_quantity": 60,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
-    {"barcode": "2000000000011", "name": "Butter 250g",        "price": 2.49, "stock_quantity": 25,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
-    {"barcode": "2000000000012", "name": "Eggs x12",           "price": 3.29, "stock_quantity": 30,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
-    {"barcode": "2000000000013", "name": "Greek Yogurt 500g",  "price": 1.89, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
-    {"barcode": "2000000000014", "name": "Cheddar Cheese 200g","price": 2.99, "stock_quantity": 18,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
+    {"barcode": "10", "name": "Whole Milk 1L",      "price": 1.09, "stock_quantity": 60,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
+    {"barcode": "11", "name": "Butter 250g",        "price": 2.49, "stock_quantity": 25,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
+    {"barcode": "12", "name": "Eggs x12",           "price": 3.29, "stock_quantity": 30,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
+    {"barcode": "13", "name": "Greek Yogurt 500g",  "price": 1.89, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
+    {"barcode": "14", "name": "Cheddar Cheese 200g","price": 2.99, "stock_quantity": 18,  "unit": "pcs", "tax": 6,  "category": "Dairy & Eggs"},
 
     # Meat & Fish
-    {"barcode": "2000000000020", "name": "Chicken Breast (kg)","price": 7.99, "stock_quantity": 15,  "unit": "kg",  "tax": 6,  "category": "Meat & Fish"},
-    {"barcode": "2000000000021", "name": "Ground Beef (kg)",   "price": 9.49, "stock_quantity": 10,  "unit": "kg",  "tax": 6,  "category": "Meat & Fish"},
-    {"barcode": "2000000000022", "name": "Salmon Fillet (kg)", "price": 14.99,"stock_quantity": 8,   "unit": "kg",  "tax": 6,  "category": "Meat & Fish"},
-    {"barcode": "2000000000023", "name": "Bacon 200g",         "price": 3.49, "stock_quantity": 22,  "unit": "pcs", "tax": 6,  "category": "Meat & Fish"},
+    {"barcode": "20", "name": "Chicken Breast (kg)","price": 7.99, "stock_quantity": 15,  "unit": "kg",  "tax": 6,  "category": "Meat & Fish"},
+    {"barcode": "21", "name": "Ground Beef (kg)",   "price": 9.49, "stock_quantity": 10,  "unit": "kg",  "tax": 6,  "category": "Meat & Fish"},
+    {"barcode": "22", "name": "Salmon Fillet (kg)", "price": 14.99,"stock_quantity": 8,   "unit": "kg",  "tax": 6,  "category": "Meat & Fish"},
+    {"barcode": "23", "name": "Bacon 200g",         "price": 3.49, "stock_quantity": 22,  "unit": "pcs", "tax": 6,  "category": "Meat & Fish"},
 
     # Bakery
-    {"barcode": "2000000000030", "name": "White Bread 800g",   "price": 1.69, "stock_quantity": 25,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
-    {"barcode": "2000000000031", "name": "Croissant",          "price": 0.89, "stock_quantity": 30,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
-    {"barcode": "2000000000032", "name": "Sourdough Loaf",     "price": 3.29, "stock_quantity": 12,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
-    {"barcode": "2000000000033", "name": "Baguette",           "price": 1.19, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
+    {"barcode": "30", "name": "White Bread 800g",   "price": 1.69, "stock_quantity": 25,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
+    {"barcode": "31", "name": "Croissant",          "price": 0.89, "stock_quantity": 30,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
+    {"barcode": "32", "name": "Sourdough Loaf",     "price": 3.29, "stock_quantity": 12,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
+    {"barcode": "33", "name": "Baguette",           "price": 1.19, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Bakery"},
 
     # Frozen
-    {"barcode": "2000000000040", "name": "Frozen Pizza Margherita","price": 3.99,"stock_quantity": 15,"unit": "pcs","tax": 21, "category": "Frozen"},
-    {"barcode": "2000000000041", "name": "Frozen Peas 500g",   "price": 1.49, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Frozen"},
-    {"barcode": "2000000000042", "name": "Ice Cream Vanilla 1L","price": 4.49, "stock_quantity": 10,  "unit": "pcs", "tax": 21, "category": "Frozen"},
-    {"barcode": "2000000000043", "name": "Frozen Fries 1kg",   "price": 2.29, "stock_quantity": 18,  "unit": "pcs", "tax": 6,  "category": "Frozen"},
+    {"barcode": "40", "name": "Frozen Pizza Margherita","price": 3.99,"stock_quantity": 15,"unit": "pcs","tax": 21, "category": "Frozen"},
+    {"barcode": "41", "name": "Frozen Peas 500g",   "price": 1.49, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Frozen"},
+    {"barcode": "42", "name": "Ice Cream Vanilla 1L","price": 4.49, "stock_quantity": 10,  "unit": "pcs", "tax": 21, "category": "Frozen"},
+    {"barcode": "43", "name": "Frozen Fries 1kg",   "price": 2.29, "stock_quantity": 18,  "unit": "pcs", "tax": 6,  "category": "Frozen"},
 
     # Beverages
-    {"barcode": "2000000000050", "name": "Still Water 1.5L",   "price": 0.69, "stock_quantity": 80,  "unit": "pcs", "tax": 6,  "category": "Beverages"},
-    {"barcode": "2000000000051", "name": "Orange Juice 1L",    "price": 2.19, "stock_quantity": 35,  "unit": "pcs", "tax": 6,  "category": "Beverages"},
-    {"barcode": "2000000000052", "name": "Cola 330ml Can",     "price": 1.09, "stock_quantity": 60,  "unit": "pcs", "tax": 21, "category": "Beverages"},
-    {"barcode": "2000000000053", "name": "Beer 330ml",         "price": 1.49, "stock_quantity": 48,  "unit": "pcs", "tax": 21, "category": "Beverages"},
-    {"barcode": "2000000000054", "name": "Coffee Beans 250g",  "price": 5.99, "stock_quantity": 20,  "unit": "pcs", "tax": 21, "category": "Beverages"},
+    {"barcode": "50", "name": "Still Water 1.5L",   "price": 0.69, "stock_quantity": 80,  "unit": "pcs", "tax": 6,  "category": "Beverages"},
+    {"barcode": "51", "name": "Orange Juice 1L",    "price": 2.19, "stock_quantity": 35,  "unit": "pcs", "tax": 6,  "category": "Beverages"},
+    {"barcode": "52", "name": "Cola 330ml Can",     "price": 1.09, "stock_quantity": 60,  "unit": "pcs", "tax": 21, "category": "Beverages"},
+    {"barcode": "53", "name": "Beer 330ml",         "price": 1.49, "stock_quantity": 48,  "unit": "pcs", "tax": 21, "category": "Beverages"},
+    {"barcode": "54", "name": "Coffee Beans 250g",  "price": 5.99, "stock_quantity": 20,  "unit": "pcs", "tax": 21, "category": "Beverages"},
 
     # Snacks & Confectionery
-    {"barcode": "2000000000060", "name": "Potato Chips 150g",  "price": 1.99, "stock_quantity": 40,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
-    {"barcode": "2000000000061", "name": "Milk Chocolate 100g","price": 1.49, "stock_quantity": 35,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
-    {"barcode": "2000000000062", "name": "Mixed Nuts 200g",    "price": 3.79, "stock_quantity": 25,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
-    {"barcode": "2000000000063", "name": "Gummy Bears 200g",   "price": 1.29, "stock_quantity": 30,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
+    {"barcode": "60", "name": "Potato Chips 150g",  "price": 1.99, "stock_quantity": 40,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
+    {"barcode": "61", "name": "Milk Chocolate 100g","price": 1.49, "stock_quantity": 35,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
+    {"barcode": "62", "name": "Mixed Nuts 200g",    "price": 3.79, "stock_quantity": 25,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
+    {"barcode": "63", "name": "Gummy Bears 200g",   "price": 1.29, "stock_quantity": 30,  "unit": "pcs", "tax": 21, "category": "Snacks & Confectionery"},
 
     # Cleaning & Household
-    {"barcode": "2000000000070", "name": "Washing Liquid 1L",  "price": 4.99, "stock_quantity": 15,  "unit": "pcs", "tax": 21, "category": "Cleaning & Household"},
-    {"barcode": "2000000000071", "name": "Toilet Paper x8",    "price": 3.49, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Cleaning & Household"},
-    {"barcode": "2000000000072", "name": "Dish Soap 500ml",    "price": 1.79, "stock_quantity": 18,  "unit": "pcs", "tax": 21, "category": "Cleaning & Household"},
+    {"barcode": "70", "name": "Washing Liquid 1L",  "price": 4.99, "stock_quantity": 15,  "unit": "pcs", "tax": 21, "category": "Cleaning & Household"},
+    {"barcode": "71", "name": "Toilet Paper x8",    "price": 3.49, "stock_quantity": 20,  "unit": "pcs", "tax": 6,  "category": "Cleaning & Household"},
+    {"barcode": "72", "name": "Dish Soap 500ml",    "price": 1.79, "stock_quantity": 18,  "unit": "pcs", "tax": 21, "category": "Cleaning & Household"},
 
     # Personal Care
-    {"barcode": "2000000000080", "name": "Shampoo 300ml",      "price": 3.29, "stock_quantity": 15,  "unit": "pcs", "tax": 21, "category": "Personal Care"},
-    {"barcode": "2000000000081", "name": "Toothpaste 75ml",    "price": 1.99, "stock_quantity": 20,  "unit": "pcs", "tax": 21, "category": "Personal Care"},
-    {"barcode": "2000000000082", "name": "Deodorant 150ml",    "price": 2.49, "stock_quantity": 12,  "unit": "pcs", "tax": 21, "category": "Personal Care"},
+    {"barcode": "80", "name": "Shampoo 300ml",      "price": 3.29, "stock_quantity": 15,  "unit": "pcs", "tax": 21, "category": "Personal Care"},
+    {"barcode": "81", "name": "Toothpaste 75ml",    "price": 1.99, "stock_quantity": 20,  "unit": "pcs", "tax": 21, "category": "Personal Care"},
+    {"barcode": "82", "name": "Deodorant 150ml",    "price": 2.49, "stock_quantity": 12,  "unit": "pcs", "tax": 21, "category": "Personal Care"},
 
     # Other
-    {"barcode": "2000000000090", "name": "Plastic Bag",        "price": 0.10, "stock_quantity": 500, "unit": "pcs", "tax": 21, "category": "Other"},
-    {"barcode": "2000000000091", "name": "Gift Wrapping",      "price": 1.50, "stock_quantity": 50,  "unit": "pcs", "tax": 21, "category": "Other"},
+    {"barcode": "90", "name": "Plastic Bag",        "price": 0.10, "stock_quantity": 500, "unit": "pcs", "tax": 21, "category": "Other"},
+    {"barcode": "91", "name": "Gift Wrapping",      "price": 1.50, "stock_quantity": 50,  "unit": "pcs", "tax": 21, "category": "Other"},
 ]
 
 
