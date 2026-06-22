@@ -72,7 +72,7 @@ QLabel#ticketDate {
 QLineEdit#combinedInput {
     background-color: transparent;
     border: none;
-    border-top: 1px solid #d8c9bd;
+    border-top: 2px solid #4a90d9;
     border-radius: 0;
     padding: 8px 10px;
     font-size: 17px;
@@ -81,8 +81,13 @@ QLineEdit#combinedInput {
     selection-background-color: #4a90d9;
 }
 
-QLineEdit#combinedInput:focus {
-    border-top: 2px solid #4a90d9;
+QLabel#paymentLabel {
+    background-color: #ccc5be;
+    color: #5a4a42;
+    padding: 8px 10px;
+    font-size: 15px;
+    font-weight: 700;
+    border-top: 2px solid #b8b0a8;
 }
 
 /* ── Cart / ticket table ─────────────────────────────────── */
@@ -104,17 +109,17 @@ QTableWidget#cartTable::item:selected {
 }
 
 /* Frozen state after payment */
-QTableWidget#cartTable:disabled {
+QTableWidget#cartTable[frozen="true"] {
     background-color: #ccc5be;
     color: #665C57;
     gridline-color: #b8b0a8;
 }
 
-QTableWidget#cartTable:disabled::item {
+QTableWidget#cartTable[frozen="true"]::item {
     color: #7a6a62;
 }
 
-QTableWidget#cartTable:disabled::item:selected {
+QTableWidget#cartTable[frozen="true"]::item:selected {
     background-color: #b8b0a8;
     color: #5a4a42;
 }

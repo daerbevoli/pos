@@ -84,7 +84,6 @@ class ReportsScreen(QWidget):
         self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.sales_table.setAlternatingRowColors(True)
         layout.addWidget(self.sales_table)
 
     def _make_card(self, title: str, value: str) -> QGroupBox:

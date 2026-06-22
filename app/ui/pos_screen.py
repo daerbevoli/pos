@@ -9,7 +9,7 @@ import sys
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QFrame, QSizePolicy, QButtonGroup
+    QHeaderView, QMessageBox, QFrame, QSizePolicy, QButtonGroup, QStackedWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime, QTime
 from PyQt6.QtGui import QFont, QBrush, QColor
@@ -20,7 +20,7 @@ from app.core.sales_service import Cart, SalesService
 from app.core.settings_service import SettingsService
 from app.ui.dialogs.client_search_dialog import ClientSearchDialog
 from app.ui.dialogs.product_search_dialog import ProductSearchDialog
-from app.utils.utils import TicketTab, CategoryButton, FunctionButton, TapToDismissOverlay
+from app.utils.utils import TicketTab, CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 
 from app.ui.dialogs.numpad_dialog import NumpadDialog
 
@@ -38,19 +38,22 @@ class POSScreen(QWidget):
         self.cart = Cart()
         self.tabs_data = {1: self.cart}     # ticket-slot -> Cart
         self.active_tab = 1
+
+        self.overlay = TapToDismissOverlay(self)
+        self.sale_finished = False
+        self.isInvoice = False
+
         self._load_settings()
         self._build_ui()
         self._start_clock()
-        self.overlay = TapToDismissOverlay(self)
-        self.sale_finished = False
 
     # ── Setup ────────────────────────────────────────────────────────────
 
     def _load_settings(self):
+
         with get_session() as session:
             settings = SettingsService.get_all(session)
         self.currency = settings.get("currency_symbol", "€")
-
         self.cashier_name = settings.get("cashier_name", "Cashier")
 
     def _build_ui(self):
@@ -138,7 +141,7 @@ class POSScreen(QWidget):
         header.addWidget(self.ticket_date)
         col.addLayout(header)
 
-        self.cart_table = QTableWidget(0, 4)
+        self.cart_table = TicketTable(0, 4)
         self.cart_table.setObjectName("cartTable")
         self.cart_table.setHorizontalHeaderLabels(["Qty", "Description", "Price", "Total"])
         self.cart_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -148,14 +151,37 @@ class POSScreen(QWidget):
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        self.client_label = QLabel("Hello")
+        self.client_label.setObjectName("clientLabel")
+        self.client_label.setMinimumHeight(34)
+        self.client_label.setStyleSheet("color: #0000ff; background-color: #fbf3ee; font: bold;")
+        self.client_label.setVisible(False)
+        col.addWidget(self.client_label)
+
+
+        self.cart_table.backspace_pressed.connect(self._remove_selected)
+        self.cart_table.enter_pressed.connect(self._on_barcode_enter)
+        self.cart_table.text_entered.connect(self._on_ticket_text)
+
         col.addWidget(self.cart_table, stretch=1)
 
         self.combined_input = QLineEdit()
         self.combined_input.setObjectName("combinedInput")
-        self.combined_input.setPlaceholderText("Scan barcode, search product or enter amount…")
+        self.combined_input.setPlaceholderText("")
         self.combined_input.setMinimumHeight(34)
         self.combined_input.returnPressed.connect(self._on_barcode_enter)
-        col.addWidget(self.combined_input)
+
+        self.payment_label = QLabel()
+        self.payment_label.setObjectName("paymentLabel")
+        self.payment_label.setMinimumHeight(34)
+        self.payment_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        self.input_stack = QStackedWidget()
+        self.input_stack.addWidget(self.combined_input)  # index 0 — normal
+        self.input_stack.addWidget(self.payment_label)   # index 1 — frozen
+        col.addWidget(self.input_stack)
+
 
         return col
 
@@ -189,7 +215,7 @@ class POSScreen(QWidget):
         self.btn_barcode = FunctionButton("Search\narticle", "secFunc")
         self.btn_drawer = FunctionButton("Drawer", "secFunc")
 
-        self.btn_customer = FunctionButton("Customer", "customerBtn")
+        self.btn_customer = FunctionButton("Client", "customerBtn")
         self.btn_card = FunctionButton("Card", "cardBtn")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
@@ -358,6 +384,12 @@ class POSScreen(QWidget):
 
     # ── Cart interactions (unchanged backend wiring) ─────────────────────
 
+    def _on_ticket_text(self, text: str):
+        """Forward a character typed while the cart table has focus to the input."""
+        if self.sale_finished:
+            self._unfreeze_ticket()
+        self.combined_input.insert(text)
+
     def _on_barcode_enter(self):
         query = self.combined_input.text().strip()
         if not query:
@@ -379,7 +411,7 @@ class POSScreen(QWidget):
                 self._refresh_cart(select_last=True)
                 self.combined_input.clear()
             else:
-                QMessageBox.warning(self, "Not Found", f"No product found for: {query}")
+                self._show_overlay("Unknown barcode", kind="error")
         self.combined_input.clear()
 
     def _open_search_dialog(self, initial_query=""):
@@ -396,14 +428,11 @@ class POSScreen(QWidget):
     def _clear_cart(self):
         if not self.cart.items:
             return
-        if QMessageBox.question(self, "Clear Ticket", "Remove all items?") == QMessageBox.StandardButton.Yes:
-            if self.sale_finished:
-                self._unfreeze_ticket()
-            else:
-                self.cart.clear()
-                self.cart.global_discount = 0.0
-                self.combined_input.clear()
-                self._refresh_cart()
+        if QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
+            self.cart.clear()
+            self.cart.global_discount = 0.0
+            self.combined_input.clear()
+            self._refresh_cart()
         self.combined_input.setFocus()
 
     def _remove_selected(self):
@@ -531,36 +560,47 @@ class POSScreen(QWidget):
                 payment_method=method,
                 amount_tendered=tendered
             )
+            if self.isInvoice:
+                invoice = SalesService.finalize_invoice(
+                    session,
+                    cart=self.cart,
+                    payment_method=method,
+                    amount_tendered=tendered,
+                    notes="",
+                    client_id=self.client_id
+                )
 
         change = max(0.0, tendered - total)
+
+        self._freeze_ticket(method, tendered, change)
+
+
+    def _freeze_ticket(self, method: str, tendered: float, change: float):
+        self.sale_finished = True
+        self.cart_table.setProperty("frozen", "true")
+        self.cart_table.style().unpolish(self.cart_table)
+        self.cart_table.style().polish(self.cart_table)
+        self.combined_input.clear()
+
         method_label = {
             "cash": "Cash", "card": "Card",
             "bancontact": "Bancontact", "meal_voucher": "Meal voucher"
         }.get(method, method.title())
-
-        # if change > 0:
-        #     self.status_line.setText(
-        #         f"Paid {self.currency}{tendered:.2f} ({method_label}) — Change {self.currency}{change:.2f}"
-        #     )
-        # else:
-        #     self.status_line.setText(f"Paid {self.currency}{tendered:.2f} ({method_label})")
-
-        self._freeze_ticket()
-
-
-    def _freeze_ticket(self):
-        self.sale_finished = True
-        self.cart_table.setEnabled(False)
-        self.combined_input.clear()
-        self.combined_input.setPlaceholderText("Scan to start new sale…")
-        self.combined_input.setFocus()
+        parts = [f"PAID BY  {method_label}", f"{self.currency}{tendered:.2f}"]
+        if change > 0:
+            parts.append(f"Change: {self.currency}{change:.2f}")
+        self.payment_label.setText("    |    ".join(parts))
+        self.input_stack.setCurrentIndex(1)
+        self.cart_table.setFocus()
 
     def _unfreeze_ticket(self):
         self.sale_finished = False
         self.cart.clear()
         self.cart.global_discount = 0.0
-        self.cart_table.setEnabled(True)
-        self.combined_input.setPlaceholderText("Scan barcode, search product or enter amount…")
+        self.cart_table.setProperty("frozen", "false")
+        self.cart_table.style().unpolish(self.cart_table)
+        self.cart_table.style().polish(self.cart_table)
+        self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
 
     def _get_selected_product_id(self):
@@ -644,10 +684,12 @@ class POSScreen(QWidget):
         dialog = ClientSearchDialog(self)
         if initial_query:
             dialog.set_query(initial_query)
-        if dialog.exec() and dialog.selected_product:
+        if dialog.exec() and dialog.selected_client:
             if self.sale_finished:
                 self._unfreeze_ticket()
-            self.cart.add_product(dialog.selected_product)
+            self.client_label.setText("INVOICE - " + dialog.selected_client.name)
+            self.client_label.setVisible(True)
+            self.client_id = dialog.selected_client.id
             self._refresh_cart(select_last=True)
         self.combined_input.setFocus()
 

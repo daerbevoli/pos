@@ -1,6 +1,25 @@
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget
 
+
+class TicketTable(QTableWidget):
+    backspace_pressed = pyqtSignal()
+    text_entered = pyqtSignal(str)
+    enter_pressed = pyqtSignal()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        text = event.text()
+        mods = event.modifiers()
+        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.backspace_pressed.emit()
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.enter_pressed.emit()
+        elif (text and text.isprintable()
+              and not mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+            self.text_entered.emit(text)
+        else:
+            super().keyPressEvent(event)
 
 class TicketTab(QPushButton):
     """One of the V1 / V2 / V3 sale-slot tabs along the top."""

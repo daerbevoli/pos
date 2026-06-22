@@ -6,7 +6,7 @@ from datetime import date
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.models import Sale, SaleItem, Product
+from app.models.models import Sale, SaleItem, Product, Invoice
 from app.core.product_service import ProductService
 
 
@@ -82,6 +82,7 @@ class SalesService:
             func.date(Sale.created_at) == date.today()
         ).scalar() or 0
         return f"S-{today}-{count + 1:04d}"
+
 
     @staticmethod
     def finalize_sale(
@@ -166,6 +167,67 @@ class SalesService:
             sale.notes = (sale.notes or "") + f"\nVoided: {notes}"
         session.commit()
         return True
+
+    @staticmethod
+    def finalize_invoice(
+        session: Session,
+        cart: Cart,
+        payment_method: str = "cash",
+        amount_tendered: float = None,
+        notes: str = None,
+        client_id: int = None
+    ) -> Invoice:
+        if not cart.items:
+            raise ValueError("Cannot finalize an empty cart.")
+
+        sale_number = SalesService._generate_sale_number(session)
+        change = None
+        if payment_method == "cash" and amount_tendered is not None:
+            change = round(amount_tendered - cart.total, 2)
+
+        sale = Sale(
+            sale_number=sale_number,
+            total_amount=cart.subtotal,
+            discount_amount=cart.global_discount,
+            final_amount=cart.total,
+            payment_method=payment_method,
+            amount_tendered=amount_tendered,
+            change_given=change,
+            notes=notes,
+            status="completed"
+        )
+        session.add(sale)
+        session.flush()
+
+        for cart_item in cart.items.values():
+            session.add(SaleItem(
+                sale_id=sale.id,
+                product_id=cart_item.product_id,
+                product_name=cart_item.product_name,
+                product_barcode=cart_item.product_barcode,
+                quantity=cart_item.quantity,
+                unit_price=cart_item.unit_price,
+                discount=cart_item.discount,
+                line_total=cart_item.line_total
+            ))
+            ProductService.adjust_stock(
+                session,
+                product_id=cart_item.product_id,
+                quantity_change=-cart_item.quantity,
+                movement_type="sale",
+                reference=sale_number
+            )
+
+        invoice = Invoice(
+            sale_id=sale.id,
+            client_id=client_id,
+            invoice_number=sale_number.replace("S-", "I-", 1)
+        )
+        session.add(invoice)
+        session.commit()
+        session.refresh(sale)
+        session.refresh(invoice)
+        return invoice
 
     # ── Reports / Queries ─────────────────────────────────────────────────────
 

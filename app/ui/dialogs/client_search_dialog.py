@@ -75,5 +75,5 @@ class ClientSearchDialog(QDialog):
         row = self.table.currentRow()
         if row < 0 or row >= len(self._clients):
             return
-        self.selected_product = self._clients[row]
+        self.selected_client = self._clients[row]
         self.accept()

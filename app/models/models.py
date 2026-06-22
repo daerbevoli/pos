@@ -147,4 +147,10 @@ class Client(Base):
     def __repr__(self):
         return f"<Client {self.name} {self.vatNumber}>"
 
+class Invoice(Base):
+    __tablename__ = "invoices"
 
+    id = Column(Integer, primary_key=True)
+    sale_id = Column(Integer, ForeignKey("sales.id"), unique=True)
+    client_id = Column(Integer, ForeignKey("clients.id"))
+    invoice_number = Column(String, unique=True)
