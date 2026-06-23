@@ -41,11 +41,15 @@ class POSScreen(QWidget):
 
         self.overlay = TapToDismissOverlay(self)
         self.sale_finished = False
-        self.isInvoice = False
+        self.is_invoice = False
 
         self._load_settings()
         self._build_ui()
         self._start_clock()
+
+    @property
+    def cart_active(self) -> bool:
+        return bool(self.cart.items) or self.is_invoice
 
     # ── Setup ────────────────────────────────────────────────────────────
 
@@ -148,6 +152,7 @@ class POSScreen(QWidget):
         self.cart_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.cart_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.cart_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.cart_table.horizontalHeader().setVisible(False)
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -398,14 +403,6 @@ class POSScreen(QWidget):
             self._unfreeze_ticket()
         with get_session() as session:
             product = ProductService.get_by_barcode(session, query)
-            if not product:
-                results = ProductService.search(session, query)
-                if len(results) == 1:
-                    product = results[0]
-                elif len(results) > 1:
-                    self.combined_input.clear()
-                    self._open_search_dialog(query)
-                    return
             if product:
                 self.cart.add_product(product)
                 self._refresh_cart(select_last=True)
@@ -426,12 +423,16 @@ class POSScreen(QWidget):
         self.combined_input.setFocus()
 
     def _clear_cart(self):
-        if not self.cart.items:
+        if not self.cart_active:
+            logging.info("Cart is not active")
             return
         if QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
             self.cart.clear()
             self.cart.global_discount = 0.0
             self.combined_input.clear()
+            self.client_label.setVisible(False)
+            self.client_id = None
+            self.is_invoice = False
             self._refresh_cart()
         self.combined_input.setFocus()
 
@@ -560,7 +561,7 @@ class POSScreen(QWidget):
                 payment_method=method,
                 amount_tendered=tendered
             )
-            if self.isInvoice:
+            if self.is_invoice:
                 invoice = SalesService.finalize_invoice(
                     session,
                     cart=self.cart,
@@ -690,6 +691,7 @@ class POSScreen(QWidget):
             self.client_label.setText("INVOICE - " + dialog.selected_client.name)
             self.client_label.setVisible(True)
             self.client_id = dialog.selected_client.id
+            self.is_invoice = True
             self._refresh_cart(select_last=True)
         self.combined_input.setFocus()
 

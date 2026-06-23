@@ -35,9 +35,9 @@ class ProductService:
             session.query(Product)
             .filter(
                 Product.is_active == True,
-                (Product.name.ilike(term)) | (Product.barcode.ilike(term))
+                (Product.barcode.startswith(term)) | (Product.name.startswith(term))
             )
-            .order_by(Product.name)
+            .order_by(Product.barcode)
             .limit(50)
             .all()
         )
