@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QComboBox, QFrame, QSizePolicy
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
@@ -39,7 +39,6 @@ class ArticleDetailPanel(QFrame):
         self.current_product_id = None
         self.setObjectName("articleDetailPanel")
         self._build_ui()
-        self.hide()
 
     def _build_ui(self):
         outer = QHBoxLayout(self)
@@ -93,7 +92,6 @@ class ArticleDetailPanel(QFrame):
         self.btn_print_label = DetailFunctionButton("Print\nlabel", "secFunc")
         self.btn_cancel = DetailFunctionButton("Cancel", "cancelBtn")
 
-
         self.btn_search_barcode = DetailFunctionButton("Search by\nbarcode", "secFunc")
         self.btn_search_key = DetailFunctionButton("Search by\nkey", "secFunc")
         self.btn_ok = DetailFunctionButton("OK", "okBtn")
@@ -102,8 +100,10 @@ class ArticleDetailPanel(QFrame):
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
             (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
 
-            (self.btn_cancel, 1, 0), (self.btn_search_barcode, 1, 1),
+            (self.btn_search_barcode, 1, 1),
             (self.btn_search_key, 1, 2), (self.btn_ok, 1, 3),
+
+            (self.btn_cancel, 2, 3)
         ]
         for widget, r, c in layout_map:
             grid.addWidget(widget, r, c)
@@ -119,13 +119,20 @@ class ArticleDetailPanel(QFrame):
         self.btn_new.clicked.connect(self.parent_screen._add_product)
         self.btn_modify.clicked.connect(self._on_modify)
         self.btn_delete.clicked.connect(self._on_delete)
-        self.btn_error.clicked.connect(self.hide)
-        self.btn_cancel.clicked.connect(self.hide)
-        self.btn_ok.clicked.connect(self.hide)
+        self.btn_error.clicked.connect(self._clear)
+        self.btn_cancel.clicked.connect(self._clear)
+        self.btn_ok.clicked.connect(self._clear)
         self.btn_search_barcode.clicked.connect(self._on_search_barcode)
         self.btn_search_key.clicked.connect(self._on_search_key)
 
     # ── Display ──────────────────────────────────────────────────────────
+
+    def _clear(self):
+        if self.current_product_id is not None:
+            self.current_product_id = None
+            for label in self.field_labels.values():
+                label.setText("—")
+
 
     def show_product(self, product):
         self.current_product_id = product.id
@@ -166,6 +173,8 @@ class ArticleDetailPanel(QFrame):
 
 
 class InventoryScreen(QWidget):
+    navigate = pyqtSignal(int)
+
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -176,7 +185,11 @@ class InventoryScreen(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        # ── Toolbar ───────────────────────────────────────────────────────────
+        # ── Article detail panel (always visible) ─────────────────────────────
+        self.detail_panel = ArticleDetailPanel(self)
+        layout.addWidget(self.detail_panel)
+
+        # ── Search / filter bar ───────────────────────────────────────────────
         toolbar = QHBoxLayout()
 
         self.search_input = QLineEdit()
@@ -216,11 +229,7 @@ class InventoryScreen(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
-        layout.addWidget(self.table, stretch=3)
-
-        # ── Article detail panel (hidden until a row is selected) ──────────────
-        self.detail_panel = ArticleDetailPanel(self)
-        layout.addWidget(self.detail_panel, stretch=2)
+        layout.addWidget(self.table, stretch=1)
 
         # ── Summary row ───────────────────────────────────────────────────────
         self.summary_label = QLabel()
@@ -264,7 +273,6 @@ class InventoryScreen(QWidget):
                 + (f" — {sum(1 for p in products if p.is_low_stock)} low stock" if products else "")
             )
 
-        # self.detail_panel.hide()
 
     def _populate_table(self, products, session):
         self.table.setRowCount(0)
@@ -316,7 +324,7 @@ class InventoryScreen(QWidget):
     def _on_row_selected(self):
         row = self.table.currentRow()
         if row < 0 or row not in self._product_cache:
-            self.detail_panel.hide()
+            self.detail_panel._clear()
             return
         product_id = self._product_cache[row]
         with get_session() as session:
@@ -324,7 +332,7 @@ class InventoryScreen(QWidget):
             if product:
                 self.detail_panel.show_product(product)
             else:
-                self.detail_panel.hide()
+                self.detail_panel._clear()
 
     def _add_product(self):
         dialog = ProductDialog(self)
@@ -363,3 +371,6 @@ class InventoryScreen(QWidget):
             with get_session() as session:
                 ProductService.deactivate(session, product_id)
             self.refresh()
+
+    def _clear(self):
+        self.navigate.emit(0)

@@ -56,13 +56,6 @@ class CategoryButton(QPushButton):
         self.setMinimumHeight(36)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-class SideButton(QPushButton):
-    """A square-ish side button."""
-    def __init__(self, label: str, role: str):
-        super().__init__(label)
-        self.setObjectName(role)
-        self.setMinimumHeight(36)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
 class TapToDismissOverlay(QWidget):
     """

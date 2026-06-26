@@ -19,7 +19,7 @@ from app.ui.settings_screen import SettingsScreen
 from app.core.database import get_session
 from app.core.product_service import ProductService
 
-from app.utils.utils import SideButton
+from app.utils.utils import FunctionButton
 
 
 class MainWindow(QMainWindow):
@@ -28,7 +28,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("SKBC")
         self.setMinimumSize(1024, 768)
         self._nav_buttons = []
-        self._right_buttons = []
         self._build_ui()
         self._start_clock()
         self._check_low_stock()
@@ -67,32 +66,6 @@ class MainWindow(QMainWindow):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # ── Sidebar ───────────────────────────────────────────────────────────
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(120)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(0, 20, 0, 20)
-        sidebar_layout.setSpacing(4)
-        sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        nav_items = [
-            ("POS",      0),
-            ("Articles", 1),
-            ("Clients", 2),
-            ("Reports",  3),
-            ("Settings", 4)]
-
-        for label, index in nav_items:
-            btn = SideButton(label, "navBtn")
-            btn.setCheckable(True)
-            btn.clicked.connect(lambda _, i=index: self._navigate(i))
-            sidebar_layout.addWidget(btn)
-            self._nav_buttons.append(btn)
-
-        sidebar_layout.addStretch()
-        body.addWidget(sidebar)
-
 
         # ── Vertical divider ──────────────────────────────────────────────────
         divider = QFrame()
@@ -111,19 +84,17 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.pos_screen)
         self.stack.addWidget(self.inventory_screen)
         self.stack.addWidget(self.client_screen)
-        self.stack.addWidget(self.reports_screen)
         self.stack.addWidget(self.settings_screen)
+        self.stack.addWidget(self.reports_screen)
         self.settings_screen.settings_saved.connect(
             lambda: self._set_store_label(self.store_label)
         )
 
+        self.pos_screen.navigate.connect(self._navigate)
+        self.client_screen.navigate.connect(self._navigate)
+
         body.addWidget(self.stack, stretch=1)
         root.addLayout(body, stretch=1)
-
-        # ── Status bar ────────────────────────────────────────────────────────
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
 
         # Start on POS screen
         self._navigate(0)

@@ -32,6 +32,7 @@ ADMIN_CODE = "2060" # Make env var or be able to be set
 class POSScreen(QWidget):
     MAX_TABS = 5
     isAdmin = False
+    navigate = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
@@ -212,17 +213,20 @@ class POSScreen(QWidget):
 
         self.btn_down = FunctionButton("↓", "navBtn")
         self.btn_minus = FunctionButton("-", "navBtn")
-        self.btn_item_name = FunctionButton("Item\nname", "secFunc")
         self.btn_admin = FunctionButton("Admin", "secFunc")
 
         self.btn_disc_amt = FunctionButton("€\ndiscount", "discountBtn")
         self.btn_disc_pct = FunctionButton("%\ndiscount", "discountBtn")
-        self.btn_barcode = FunctionButton("Search\narticle", "secFunc")
         self.btn_drawer = FunctionButton("Drawer", "secFunc")
 
-        self.btn_customer = FunctionButton("Client", "customerBtn")
         self.btn_card = FunctionButton("Card", "cardBtn")
         self.btn_ok = FunctionButton("OK", "okBtn")
+
+        self.btn_articles = FunctionButton("Articles", "secFunc")
+        self.btn_client = FunctionButton("Client", "customerBtn")
+        self.btn_settings = FunctionButton("Settings", "secFunc")
+        self.btn_reports = FunctionButton("Reports", "reportsBtn")
+
 
         layout_map = [
             (self.btn_left, 0, 0, 1, 1), (self.btn_right, 0, 1, 1, 1),
@@ -233,12 +237,12 @@ class POSScreen(QWidget):
             (self.btn_clear, 1, 5, 1, 1),
 
             (self.btn_down, 2, 0, 1, 1), (self.btn_minus, 2, 1, 1, 1),
-            (self.btn_item_name, 2, 3, 1, 1), (self.btn_admin, 2, 5, 1, 1),
+            (self.btn_settings, 2, 3, 1, 1), (self.btn_admin, 2, 5, 1, 1),
 
             (self.btn_disc_amt, 3, 0, 1, 1), (self.btn_disc_pct, 3, 1, 1, 1),
-            (self.btn_barcode, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1),
+            (self.btn_articles, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1), (self.btn_reports, 3, 5, 1, 1),
 
-            (self.btn_customer, 4, 2, 1, 1), (self.btn_card, 4, 3, 1, 1),
+            (self.btn_client, 4, 2, 1, 1), (self.btn_card, 4, 3, 1, 1),
             (self.btn_ok, 4, 5, 1, 1),
         ]
         for widget, r, c, rs, cs in layout_map:
@@ -275,7 +279,6 @@ class POSScreen(QWidget):
         self.btn_minus.clicked.connect(self._decrease_product)
         self.btn_clear.clicked.connect(self._clear_cart)
         self.btn_error.clicked.connect(self._remove_selected)
-        self.btn_barcode.clicked.connect(lambda: self._open_search_dialog())
         self.btn_subtotal.clicked.connect(self._show_subtotal)
         self.btn_cash.clicked.connect(lambda: self._open_payment("cash"))
         self.btn_card.clicked.connect(lambda: self._open_payment("card"))
@@ -289,7 +292,11 @@ class POSScreen(QWidget):
 
         self.btn_admin.clicked.connect(self._admin)
 
-        self.btn_customer.clicked.connect(lambda: self._open_client_search_dialog())
+        self.btn_articles.clicked.connect(lambda: self._emit_signal(1))
+        self.btn_client.clicked.connect(lambda: self._emit_signal(2))
+        self.btn_settings.clicked.connect(lambda: self._emit_signal(3))
+        self.btn_reports.clicked.connect(lambda: self._emit_signal(4))
+
 
         return col
 
@@ -694,5 +701,13 @@ class POSScreen(QWidget):
             self.is_invoice = True
             self._refresh_cart(select_last=True)
         self.combined_input.setFocus()
+
+    def _emit_signal(self, signal: int):
+        if signal == 4 and not self.isAdmin:
+            logging.warn("Report access with admin privileges")
+            self._show_overlay("Only Admin", title="No Permission", kind="error")
+            return
+
+        self.navigate.emit(signal)
 
 

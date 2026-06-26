@@ -7,12 +7,12 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QFrame, QSizePolicy
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from app.core.client_service import ClientService
 from app.ui.dialogs.client_dialog import ClientDialog
 from app.core.database import get_session
-
+from app.utils.utils import FunctionButton
 
 # ── Dummy client data (replace with DB later) ─────────────────────────────────
 DUMMY_CLIENTS = [
@@ -38,6 +38,9 @@ DUMMY_CLIENTS = [
 
 
 class ClientScreen(QWidget):
+
+    navigate = pyqtSignal(int)
+
     def __init__(self):
         super().__init__()
         self.selected_client = None
@@ -83,41 +86,10 @@ class ClientScreen(QWidget):
         top.addWidget(detail_frame, stretch=3)
 
         # Action buttons panel
-        action_grid = QGridLayout()
-        action_grid.setSpacing(6)
-
-        actions = [
-            ("New Client",    0, 0, self._add_client),
-            ("Edit Client",   0, 1, self._edit_client),
-            ("Delete Client", 0, 2, self._delete_client),
-            ("↑",             1, 0, self._scroll_up),
-            ("🔄 Refresh",   1, 1, self._refresh),
-            ("↓",             2, 0, self._scroll_down),
-            ("Print",         3, 0, self._print_client),
-            ("Address Label", 3, 1, self._print_label),
-            ("OK",            3, 2, self._confirm_client),
-            ("Cancel",        1, 2, self._cancel),
-        ]
-
-        self.ok_btn = None
-        for label, row, col, handler in actions:
-            btn = QPushButton(label)
-            btn.setObjectName("clientActionBtn")
-
-            btn.setFixedHeight(50)
-            if label == "OK":
-                btn.setObjectName("clientOkBtn")
-                self.ok_btn = btn
-            elif label == "Cancel":
-                btn.setObjectName("clientCancelBtn")
-            elif label == "Delete Client":
-                btn.setObjectName("clientDeleteBtn")
-            btn.clicked.connect(handler)
-            action_grid.addWidget(btn, row, col)
-
-        action_widget = QWidget()
-        action_widget.setLayout(action_grid)
-        top.addWidget(action_widget, stretch=2)
+        action_panel = QWidget()
+        action_panel.setFixedHeight(220)
+        action_panel.setLayout(self._build_action_panel())
+        top.addWidget(action_panel, stretch=3)
 
         root.addLayout(top)
 
@@ -138,74 +110,61 @@ class ClientScreen(QWidget):
         self.client_grid_layout.setSpacing(5)
         root.addWidget(self.client_grid_widget)
 
-        # ── Virtual keyboard ──────────────────────────────────────────────────
-        root.addWidget(self._build_keyboard())
+
+    def _build_action_panel(self):
+        grid = QGridLayout()
+        grid.setSpacing(4)
+
+        self.btn_new     = FunctionButton("New\nClient",    "secFunc")
+        self.btn_edit    = FunctionButton("Edit\nClient",   "secFunc")
+        self.btn_delete  = FunctionButton("Delete\nClient", "errorBtn")
+        self.btn_up      = FunctionButton("↑",              "navBtn")
+        self.btn_down    = FunctionButton("↓",              "navBtn")
+        self.btn_refresh = FunctionButton("Refresh",        "secFunc")
+        self.btn_print   = FunctionButton("Print",          "secFunc")
+        self.btn_label   = FunctionButton("Address\nLabel", "secFunc")
+        self.btn_ok      = FunctionButton("OK",             "okBtn")
+        self.btn_cancel  = FunctionButton("Cancel",         "clearBtn")
+
+        layout_map = [
+            (self.btn_new,     0, 0, 1, 1), (self.btn_edit,    0, 1, 1, 1), (self.btn_delete,  0, 2, 1, 1),
+            (self.btn_up,      1, 0, 1, 1), (self.btn_refresh, 1, 1, 1, 1), (self.btn_cancel,  1, 2, 1, 1),
+            (self.btn_down,    2, 0, 1, 1),
+            (self.btn_print,   3, 0, 1, 1), (self.btn_label,   3, 1, 1, 1), (self.btn_ok,      3, 2, 1, 1),
+        ]
+
+        for widget, r, c, rs, cs in layout_map:
+            grid.addWidget(widget, r, c, rs, cs)
+
+        for col in range(3):
+            grid.setColumnStretch(col, 1)
+        for row in range(4):
+            grid.setRowStretch(row, 1)
+
+        self.btn_new.clicked.connect(self._add_client)
+        self.btn_edit.clicked.connect(self._edit_client)
+        self.btn_delete.clicked.connect(self._delete_client)
+        self.btn_up.clicked.connect(self._scroll_up)
+        self.btn_down.clicked.connect(self._scroll_down)
+        self.btn_refresh.clicked.connect(self._refresh)
+        self.btn_print.clicked.connect(self._print_client)
+        self.btn_label.clicked.connect(self._print_label)
+        self.btn_ok.clicked.connect(self._confirm_client)
+        self.btn_cancel.clicked.connect(self._cancel)
+
+        return grid
 
     def _detail_row(self, parent_layout, label: str) -> QLabel:
         row = QHBoxLayout()
         lbl = QLabel(f"{label}:")
         lbl.setObjectName("clientDetailLabel")
-        lbl.setFixedWidth(80)
+        lbl.setFixedWidth(30)
         value = QLabel("—")
         value.setObjectName("clientDetailValue")
         row.addWidget(lbl)
         row.addWidget(value)
         parent_layout.addLayout(row)
         return value
-
-    def _build_keyboard(self) -> QWidget:
-        kb_widget = QWidget()
-        kb_widget.setObjectName("keyboard")
-        kb_layout = QVBoxLayout(kb_widget)
-        kb_layout.setSpacing(5)
-        kb_layout.setContentsMargins(0, 0, 0, 0)
-
-        # (label, value_sent_to_handler, width, style)
-        rows = [
-            [("A", 1, 65, ""), ("Z", 1, 65, ""), ("E", 1, 65, ""), ("R", 1, 65, ""), ("T", 1, 65, ""),
-             ("Y", 1, 65, ""), ("U", 1, 65, ""), ("I", 1, 65, ""), ("O", 1, 65, ""), ("P", 1, 65, ""),
-             ("@", 1, 65, ""), ("⌫", "Del", 80, "keyboardDelBtn"),
-             ("7", 1, 65, "keyboardNumBtn"), ("8", 1, 65, "keyboardNumBtn"), ("9", 1, 65, "keyboardNumBtn")],
-
-            [("Q", 1, 65, ""), ("S", 1, 65, ""), ("D", 1, 65, ""), ("F", 1, 65, ""), ("G", 1, 65, ""),
-             ("H", 1, 65, ""), ("J", 1, 65, ""), ("K", 1, 65, ""), ("L", 1, 65, ""), ("M", 1, 65, ""),
-             ("+", 1, 65, ""), ("", None, 65, ""),
-             ("4", 1, 65, "keyboardNumBtn"), ("5", 1, 65, "keyboardNumBtn"), ("6", 1, 65, "keyboardNumBtn")],
-
-            [("W", 1, 65, ""), ("X", 1, 65, ""), ("C", 1, 65, ""), ("V", 1, 65, ""), ("B", 1, 65, ""),
-             ("N", 1, 65, ""), (",", 1, 65, ""), (".", 1, 65, ""), ("/", 1, 65, ""), ("!", 1, 65, ""),
-             ("*", 1, 65, ""), ("", None, 65, ""),
-             ("1", 1, 65, "keyboardNumBtn"), ("2", 1, 65, "keyboardNumBtn"), ("3", 1, 65, "keyboardNumBtn")],
-
-            [("Space", "Space", 500, "keyboardSpaceBtn"), ("", None, 65, ""), ("", None, 65, ""),
-             ("", None, 65, ""), ("", None, 65, ""), ("", None, 65, ""), ("", None, 65, ""),
-             ("", None, 65, ""), ("", None, 65, ""), ("", None, 65, ""), ("", None, 65, ""),
-             ("", None, 65, ""),
-             ("0", 1, 65, "keyboardNumBtn"), ("", None, 65, ""), ("", None, 65, "")],
-        ]
-
-        for key_row in rows:
-            row_layout = QHBoxLayout()
-            row_layout.setSpacing(5)
-            for label, value, width, style in key_row:
-                if not label:  # empty slot — invisible spacer button
-                    spacer = QWidget()
-                    spacer.setFixedWidth(width)
-                    row_layout.addWidget(spacer)
-                    continue
-                btn = QPushButton(label)
-                btn.setObjectName(style or "keyboardBtn")
-                btn.setFixedHeight(50)
-                btn.setFixedWidth(width)
-                btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-                # value=1 means use the label itself as the value
-                send = label if value == 1 else value
-                btn.clicked.connect(lambda _, k=send: self._keyboard_press(k))
-                row_layout.addWidget(btn)
-            row_layout.addStretch()
-            kb_layout.addLayout(row_layout)
-
-        return kb_widget
 
     def _render_client_grid(self):
         # Clear existing buttons
@@ -325,16 +284,20 @@ class ClientScreen(QWidget):
             print(f"Confirmed: {self.selected_client['name']}")
 
     def _cancel(self):
-        self.selected_client = None
-        self.search_term = ""
-        self.filtered_clients = list(DUMMY_CLIENTS)
-        self.detail_name.setText("—")
-        self.detail_street.setText("—")
-        self.detail_postcode.setText("—")
-        self.detail_city.setText("—")
-        self.detail_phone.setText("—")
-        self.detail_vat.setText("—")
-        self._render_client_grid()
+        if self.selected_client is not None:
+            self.selected_client = None
+            self.search_term = ""
+            self.filtered_clients = list(DUMMY_CLIENTS)
+            self.detail_name.setText("—")
+            self.detail_street.setText("—")
+            self.detail_postcode.setText("—")
+            self.detail_city.setText("—")
+            self.detail_phone.setText("—")
+            self.detail_vat.setText("—")
+            self._render_client_grid()
+            return
+        self.navigate.emit(0)
+
 
     def _refresh(self):
         self.search_term = ""
