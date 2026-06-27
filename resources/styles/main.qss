@@ -50,23 +50,18 @@ QLabel#clockLabel {
     padding: 4px 10px 0 10px;
 }
 
-QLabel#statusLabel {
-    font-size: 12px;
-    color: #0678A0;
-    padding: 0 10px 4px 10px;
-}
 
 /* ── Ticket panel (left) ─────────────────────────────────── */
 QLabel#ticketTitle {
     font-size: 22px;
     font-weight: 700;
-    color: #1c2430;
+    color: #052F6C;
 }
 
 QLabel#ticketDate {
     font-size: 22px;
     font-weight: 700;
-    color: #2c3a52;
+    color: #043486;
 }
 
 QLineEdit#combinedInput {
@@ -82,7 +77,7 @@ QLineEdit#combinedInput {
 }
 
 QLabel#paymentLabel {
-    background-color: #ccc5be;
+    background-color: #10037B;
     color: #5a4a42;
     padding: 8px 10px;
     font-size: 15px;
@@ -530,4 +525,20 @@ QPushButton#pickerBtn[selected="true"] {
     background-color: #4a90d9;
     border-color: #2f74bd;
     color: #ffffff;
+}
+
+QLabel#clientLabel {
+    color: #0000ff;
+    background-color: #fbf3ee;
+    font: bold;
+}
+
+QLabel#clientLabel[frozen="true"] {
+      background-color: #ccc5be;
+      color: #0000ff;
+      font: bold;
+}
+
+QWidget#header {
+    background-color: #fbf3ee
 }

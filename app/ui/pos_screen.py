@@ -106,6 +106,7 @@ class POSScreen(QWidget):
         col.setSpacing(4)
 
         header = QHBoxLayout()
+        header.setObjectName("header")
         self.ticket_title = QLabel(f"V {self._active_tab}")
         self.ticket_title.setObjectName("ticketTitle")
         header.addWidget(self.ticket_title)
@@ -130,7 +131,6 @@ class POSScreen(QWidget):
         self.client_label = QLabel("")
         self.client_label.setObjectName("clientLabel")
         self.client_label.setMinimumHeight(34)
-        self.client_label.setStyleSheet("color: #0000ff; background-color: #fbf3ee; font: bold;")
         self.client_label.setVisible(False)
         col.addWidget(self.client_label)
 
@@ -152,8 +152,8 @@ class POSScreen(QWidget):
         self.payment_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
         self.input_stack = QStackedWidget()
-        self.input_stack.addWidget(self.combined_input)  # 0 — normal
-        self.input_stack.addWidget(self.payment_label)   # 1 — frozen
+        self.input_stack.addWidget(self.combined_input)
+        self.input_stack.addWidget(self.payment_label)
         col.addWidget(self.input_stack)
 
         return col
@@ -430,17 +430,6 @@ class POSScreen(QWidget):
             self._refresh_cart()
         self.combined_input.setFocus()
 
-    def add_product_by_id(self, product_id: int):
-        with get_session() as session:
-            product = ProductService.get_by_id(session, product_id)
-            if product:
-                self.cart.add_product(product)
-                self._refresh_cart(select_last=True)
-                self.combined_input.clear()
-            else:
-                self._show_overlay("Unknown barcode", kind="error")
-        self.combined_input.clear()
-
     def _remove_selected(self):
         if self.sale_finished:
             return
@@ -569,6 +558,9 @@ class POSScreen(QWidget):
         self.cart_table.setProperty("frozen", "true")
         self.cart_table.style().unpolish(self.cart_table)
         self.cart_table.style().polish(self.cart_table)
+        self.client_label.setProperty("frozen", "true")
+        self.client_label.style().unpolish(self.client_label)
+        self.client_label.style().polish(self.client_label)
         self.combined_input.clear()
 
         method_label = {
@@ -589,6 +581,9 @@ class POSScreen(QWidget):
         self.cart_table.setProperty("frozen", "false")
         self.cart_table.style().unpolish(self.cart_table)
         self.cart_table.style().polish(self.cart_table)
+        self.client_label.setProperty("frozen", "false")
+        self.client_label.style().unpolish(self.client_label)
+        self.client_label.style().polish(self.client_label)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
 
