@@ -70,7 +70,7 @@ QLabel#ticketDate {
 }
 
 QLineEdit#combinedInput {
-    background-color: transparent;
+    background-color: #fbf3ee;
     border: none;
     border-top: 2px solid #4a90d9;
     border-radius: 0;
@@ -242,6 +242,10 @@ QPushButton#okBtn {
 
 QPushButton#okBtn:hover {
     background-color: #e3d83e;
+}
+
+QTableWidget::item:selected {
+    background-color: #076293
 }
 
 /* ── Payment row ─────────────────────────────────────────── */

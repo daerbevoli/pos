@@ -1,17 +1,18 @@
 """
 POS Screen
-Grid-button touchscreen layout: sale tabs, ticket list, function grid,
-payment row, and a numpad + category/product grid — modeled on classic
-register touchscreen POS terminals (Lightspeed/Tilroy/Tlecom-style).
+Grid-button touchscreen layout: ticket list, function grid,
+payment row, and a numpad + category/product grid.
+Tab state (cart, frozen, client) is managed per V-tab slot and
+driven externally by MainWindow via set_active_tab().
 """
 import sys
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QFrame, QSizePolicy, QButtonGroup, QStackedWidget
+    QHeaderView, QMessageBox, QFrame, QSizePolicy, QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime, QTime
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime
 from PyQt6.QtGui import QFont, QBrush, QColor
 
 from app.core.database import get_session
@@ -20,33 +21,45 @@ from app.core.sales_service import Cart, SalesService
 from app.core.settings_service import SettingsService
 from app.ui.dialogs.client_search_dialog import ClientSearchDialog
 from app.ui.dialogs.product_search_dialog import ProductSearchDialog
-from app.utils.utils import TicketTab, CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
-
+from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
 
 import logging
 
-ADMIN_CODE = "2060" # Make env var or be able to be set
+ADMIN_CODE = "2060"
+
+
+class _TabState:
+    """Snapshot of one V-tab slot's POS state."""
+    def __init__(self):
+        self.cart         = Cart()
+        self.sale_finished = False
+        self.is_invoice   = False
+        self.client_id    = None
+        self.client_name  = ""
+        self.payment_text = ""
 
 
 class POSScreen(QWidget):
-    MAX_TABS = 5
+    navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
+    salesperson_changed = pyqtSignal(str)  # cashier name update for header
+    tab_updated        = pyqtSignal(int, str)  # (vtab_idx, amount_str) for tab button
+
     isAdmin = False
-    navigate = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
-        self.cart = Cart()
-        self.tabs_data = {1: self.cart}     # ticket-slot -> Cart
-        self.active_tab = 1
+        self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, 6)}
+        self._active_tab = 1
+        self.cart         = self._tab_states[1].cart
+        self.sale_finished = False
+        self.is_invoice   = False
+        self.client_id    = None
 
         self.overlay = TapToDismissOverlay(self)
-        self.sale_finished = False
-        self.is_invoice = False
-
         self._load_settings()
         self._build_ui()
-        self._start_clock()
+        self._start_time_display()
 
     @property
     def cart_active(self) -> bool:
@@ -55,20 +68,15 @@ class POSScreen(QWidget):
     # ── Setup ────────────────────────────────────────────────────────────
 
     def _load_settings(self):
-
         with get_session() as session:
             settings = SettingsService.get_all(session)
-        self.currency = settings.get("currency_symbol", "€")
+        self.currency     = settings.get("currency_symbol", "€")
         self.cashier_name = settings.get("cashier_name", "Cashier")
 
     def _build_ui(self):
-        logging.info("Build UI called")
-
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
         root.setSpacing(6)
-
-        root.addLayout(self._build_tab_row())
 
         body = QHBoxLayout()
         body.setSpacing(6)
@@ -80,55 +88,16 @@ class POSScreen(QWidget):
 
         QTimer.singleShot(100, self.combined_input.setFocus)
 
-    # ── Top: sale-slot tabs + clock ─────────────────────────────────────
+    # ── Time display (ticket header only) ──
 
-    def _build_tab_row(self):
-        row = QHBoxLayout()
-        row.setSpacing(4)
+    def _start_time_display(self):
+        self._tick_time()
+        t = QTimer(self)
+        t.timeout.connect(self._tick_time)
+        t.start(1000)
 
-        self.tab_group = QButtonGroup(self)
-        self.tab_group.setExclusive(True)
-        self.tab_buttons = {}
-
-        for i in range(1, self.MAX_TABS + 1):
-            btn = TicketTab(i)
-            btn.clicked.connect(lambda _, idx=i: self._switch_tab(idx))
-            self.tab_group.addButton(btn)
-            self.tab_buttons[i] = btn
-            row.addWidget(btn, stretch=1)
-
-        self.tab_buttons[1].setChecked(True)
-
-        clock_box = QVBoxLayout()
-        clock_box.setSpacing(0)
-        self.clock_label = QLabel("")
-        self.clock_label.setObjectName("clockLabel")
-        self.clock_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.status_label = QLabel(f"{self.cashier_name}")
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        clock_box.addWidget(self.clock_label)
-        clock_box.addWidget(self.status_label)
-
-        clock_frame = QFrame()
-        clock_frame.setObjectName("clockFrame")
-        clock_frame.setLayout(clock_box)
-        clock_frame.setFixedWidth(220)
-        row.addWidget(clock_frame, stretch=0)
-
-        return row
-
-    def _start_clock(self):
-        self._tick()
-        timer = QTimer(self)
-        timer.timeout.connect(self._tick)
-        timer.start(1000)
-        self._clock_timer = timer
-
-    def _tick(self):
-        now = QDateTime.currentDateTime()
-        self.clock_label.setText(now.toString("dd-MM-yyyy   HH:mm"))
-        self.ticket_date.setText(now.toString("HH:mm"))
+    def _tick_time(self):
+        self.ticket_date.setText(QDateTime.currentDateTime().toString("HH:mm"))
 
     # ── Left: ticket header + cart table ────────────────────────────────
 
@@ -137,7 +106,7 @@ class POSScreen(QWidget):
         col.setSpacing(4)
 
         header = QHBoxLayout()
-        self.ticket_title = QLabel(f"V {self.active_tab}")
+        self.ticket_title = QLabel(f"V {self._active_tab}")
         self.ticket_title.setObjectName("ticketTitle")
         header.addWidget(self.ticket_title)
         header.addStretch()
@@ -158,13 +127,12 @@ class POSScreen(QWidget):
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
-        self.client_label = QLabel("Hello")
+        self.client_label = QLabel("")
         self.client_label.setObjectName("clientLabel")
         self.client_label.setMinimumHeight(34)
         self.client_label.setStyleSheet("color: #0000ff; background-color: #fbf3ee; font: bold;")
         self.client_label.setVisible(False)
         col.addWidget(self.client_label)
-
 
         self.cart_table.backspace_pressed.connect(self._remove_selected)
         self.cart_table.enter_pressed.connect(self._on_barcode_enter)
@@ -184,14 +152,13 @@ class POSScreen(QWidget):
         self.payment_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
         self.input_stack = QStackedWidget()
-        self.input_stack.addWidget(self.combined_input)  # index 0 — normal
-        self.input_stack.addWidget(self.payment_label)   # index 1 — frozen
+        self.input_stack.addWidget(self.combined_input)  # 0 — normal
+        self.input_stack.addWidget(self.payment_label)   # 1 — frozen
         col.addWidget(self.input_stack)
-
 
         return col
 
-    # ── Right: function-key grid (arrows, qty, discount, payment types) ──
+    # ── Right: function-key grid ─────────────────────────────────────────
 
     def _build_control_grid(self):
         col = QVBoxLayout()
@@ -200,33 +167,32 @@ class POSScreen(QWidget):
         grid = QGridLayout()
         grid.setSpacing(4)
 
-        self.btn_left = FunctionButton("←", "navBtn")
-        self.btn_right = FunctionButton("→", "navBtn")
-        self.btn_reopen = FunctionButton("Reopen\nticket", "secFunc")
-        self.btn_print_ticket = FunctionButton("Print\nticket", "secFunc")
+        self.btn_left          = FunctionButton("←", "navBtn")
+        self.btn_right         = FunctionButton("→", "navBtn")
+        self.btn_reopen        = FunctionButton("Reopen\nticket", "secFunc")
+        self.btn_print_ticket  = FunctionButton("Print\nticket", "secFunc")
         self.btn_print_invoice = FunctionButton("Print\ninvoice", "secFunc")
-        self.btn_error = FunctionButton("Error", "errorBtn")
+        self.btn_error         = FunctionButton("Error", "errorBtn")
 
-        self.btn_up = FunctionButton("↑", "navBtn")
-        self.btn_plus = FunctionButton("+", "navBtn")
+        self.btn_up    = FunctionButton("↑", "navBtn")
+        self.btn_plus  = FunctionButton("+", "navBtn")
         self.btn_clear = FunctionButton("Clear", "clearBtn")
 
-        self.btn_down = FunctionButton("↓", "navBtn")
+        self.btn_down  = FunctionButton("↓", "navBtn")
         self.btn_minus = FunctionButton("-", "navBtn")
         self.btn_admin = FunctionButton("Admin", "secFunc")
 
         self.btn_disc_amt = FunctionButton("€\ndiscount", "discountBtn")
         self.btn_disc_pct = FunctionButton("%\ndiscount", "discountBtn")
-        self.btn_drawer = FunctionButton("Drawer", "secFunc")
+        self.btn_drawer   = FunctionButton("Drawer", "secFunc")
 
         self.btn_card = FunctionButton("Card", "cardBtn")
-        self.btn_ok = FunctionButton("OK", "okBtn")
+        self.btn_ok   = FunctionButton("OK", "okBtn")
 
         self.btn_articles = FunctionButton("Articles", "secFunc")
-        self.btn_client = FunctionButton("Client", "customerBtn")
+        self.btn_client   = FunctionButton("Client", "customerBtn")
         self.btn_settings = FunctionButton("Settings", "secFunc")
-        self.btn_reports = FunctionButton("Reports", "reportsBtn")
-
+        self.btn_reports  = FunctionButton("Reports", "reportsBtn")
 
         layout_map = [
             (self.btn_left, 0, 0, 1, 1), (self.btn_right, 0, 1, 1, 1),
@@ -240,7 +206,8 @@ class POSScreen(QWidget):
             (self.btn_settings, 2, 3, 1, 1), (self.btn_admin, 2, 5, 1, 1),
 
             (self.btn_disc_amt, 3, 0, 1, 1), (self.btn_disc_pct, 3, 1, 1, 1),
-            (self.btn_articles, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1), (self.btn_reports, 3, 5, 1, 1),
+            (self.btn_articles, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1),
+            (self.btn_reports, 3, 5, 1, 1),
 
             (self.btn_client, 4, 2, 1, 1), (self.btn_card, 4, 3, 1, 1),
             (self.btn_ok, 4, 5, 1, 1),
@@ -255,14 +222,14 @@ class POSScreen(QWidget):
 
         col.addLayout(grid, stretch=3)
 
-        # Payment-method row: Bancontact / Meal vouchers / Subtotal / Cash
+        # Payment row
         pay_grid = QGridLayout()
         pay_grid.setSpacing(4)
 
-        self.btn_bancontact = FunctionButton("Bancontact", "payAltBtn")
+        self.btn_bancontact   = FunctionButton("Bancontact", "payAltBtn")
         self.btn_meal_voucher = FunctionButton("Meal\nvoucher", "payAltBtn")
-        self.btn_subtotal = FunctionButton("Subtotal", "subtotalBtn")
-        self.btn_cash = FunctionButton("Cash", "cashBtn")
+        self.btn_subtotal     = FunctionButton("Subtotal", "subtotalBtn")
+        self.btn_cash         = FunctionButton("Cash", "cashBtn")
 
         pay_grid.addWidget(self.btn_bancontact, 0, 0)
         pay_grid.addWidget(self.btn_meal_voucher, 1, 0)
@@ -274,7 +241,7 @@ class POSScreen(QWidget):
 
         col.addLayout(pay_grid, stretch=2)
 
-        # Wire up behavior
+        # Wire up
         self.btn_plus.clicked.connect(self._increase_product)
         self.btn_minus.clicked.connect(self._decrease_product)
         self.btn_clear.clicked.connect(self._clear_cart)
@@ -289,14 +256,11 @@ class POSScreen(QWidget):
         self.btn_disc_amt.clicked.connect(self._apply_amount_discount)
         self.btn_up.clicked.connect(lambda: self._move_selection(-1))
         self.btn_down.clicked.connect(lambda: self._move_selection(1))
-
         self.btn_admin.clicked.connect(self._admin)
-
         self.btn_articles.clicked.connect(lambda: self._emit_signal(1))
         self.btn_client.clicked.connect(lambda: self._emit_signal(2))
         self.btn_settings.clicked.connect(lambda: self._emit_signal(3))
         self.btn_reports.clicked.connect(lambda: self._emit_signal(4))
-
 
         return col
 
@@ -306,13 +270,10 @@ class POSScreen(QWidget):
         row = QHBoxLayout()
         row.setSpacing(4)
 
-        # Category / quick-product grid (left, large area)
         self.category_grid = QGridLayout()
         self.category_grid.setSpacing(4)
 
         self.category_buttons = []
-        # Each row: (labels, role). Empty label -> a blank placeholder key
-        # rendered in that row's own tier color.
         labels_rows = [
             (["", "", "", "", "", "", "", ""], "blankBtnLight"),
             (["", "", "", "", "", "", "", ""], "blankBtnLight"),
@@ -339,7 +300,6 @@ class POSScreen(QWidget):
 
         row.addLayout(self.category_grid, stretch=4)
 
-        # Numpad (right)
         numpad = QGridLayout()
         numpad.setSpacing(4)
         keys = [
@@ -350,7 +310,7 @@ class POSScreen(QWidget):
         ]
         for label, r, c in keys:
             btn = QPushButton(label)
-            btn.setObjectName("numKey" if label not in ("⌫",) else "numKeyDel")
+            btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
             btn.setMinimumHeight(36)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.clicked.connect(lambda _, l=label: self._numpad_press(l))
@@ -364,6 +324,53 @@ class POSScreen(QWidget):
         row.addLayout(numpad, stretch=1)
         return row
 
+    # ── V-tab state management ───────────────────────────────────────────
+
+    def set_active_tab(self, idx: int):
+        """Called by MainWindow when the user selects a different V tab."""
+        if idx == self._active_tab:
+            return
+        self._save_tab_state()
+        self._active_tab = idx
+        self._load_tab_state(idx)
+
+    def _save_tab_state(self):
+        s = self._tab_states[self._active_tab]
+        s.cart          = self.cart
+        s.sale_finished = self.sale_finished
+        s.is_invoice    = self.is_invoice
+        s.client_id     = self.client_id
+        s.client_name   = self.client_label.text() if self.client_label.isVisible() else ""
+        s.payment_text  = self.payment_label.text()
+
+    def _load_tab_state(self, idx: int):
+        s = self._tab_states[idx]
+        self.cart          = s.cart
+        self.sale_finished = s.sale_finished
+        self.is_invoice    = s.is_invoice
+        self.client_id     = s.client_id
+
+        if s.client_name:
+            self.client_label.setText(s.client_name)
+            self.client_label.setVisible(True)
+        else:
+            self.client_label.setVisible(False)
+
+        # Restore frozen / unfrozen visuals
+        frozen = "true" if s.sale_finished else "false"
+        self.cart_table.setProperty("frozen", frozen)
+        self.cart_table.style().unpolish(self.cart_table)
+        self.cart_table.style().polish(self.cart_table)
+        if s.sale_finished:
+            self.payment_label.setText(s.payment_text)
+            self.input_stack.setCurrentIndex(1)
+        else:
+            self.input_stack.setCurrentIndex(0)
+
+        self.ticket_title.setText(f"V {idx}")
+        self._refresh_cart()
+        self.combined_input.setFocus()
+
     # ── Numpad / scan input helpers ──────────────────────────────────────
 
     def _numpad_press(self, label: str):
@@ -376,28 +383,9 @@ class POSScreen(QWidget):
             self.combined_input.insert(label)
         self.combined_input.setFocus()
 
-    # ── Tab (sale-slot) switching ────────────────────────────────────────
-
-    def _switch_tab(self, idx: int):
-        self.active_tab = idx
-        if idx not in self.tabs_data:
-            self.tabs_data[idx] = Cart()
-        self.cart = self.tabs_data[idx]
-        self.ticket_title.setText(f"V {idx}")
-        self._refresh_cart()
-        self.combined_input.setFocus()
-
-    def _update_tab_label(self, idx: int):
-        cart = self.tabs_data.get(idx)
-        if cart and cart.items:
-            self.tab_buttons[idx]._set_label(f"V {idx}", f"{cart.total:.2f}".replace(".", ","))
-        else:
-            self.tab_buttons[idx]._set_label(f"V {idx}", "")
-
-    # ── Cart interactions (unchanged backend wiring) ─────────────────────
+    # ── Cart interactions ────────────────────────────────────────────────
 
     def _on_ticket_text(self, text: str):
-        """Forward a character typed while the cart table has focus to the input."""
         if self.sale_finished:
             self._unfreeze_ticket()
         self.combined_input.insert(text)
@@ -431,7 +419,6 @@ class POSScreen(QWidget):
 
     def _clear_cart(self):
         if not self.cart_active:
-            logging.info("Cart is not active")
             return
         if QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
             self.cart.clear()
@@ -442,6 +429,17 @@ class POSScreen(QWidget):
             self.is_invoice = False
             self._refresh_cart()
         self.combined_input.setFocus()
+
+    def add_product_by_id(self, product_id: int):
+        with get_session() as session:
+            product = ProductService.get_by_id(session, product_id)
+            if product:
+                self.cart.add_product(product)
+                self._refresh_cart(select_last=True)
+                self.combined_input.clear()
+            else:
+                self._show_overlay("Unknown barcode", kind="error")
+        self.combined_input.clear()
 
     def _remove_selected(self):
         if self.sale_finished:
@@ -459,7 +457,6 @@ class POSScreen(QWidget):
         if self.cart.item_count == 0:
             self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
             return
-
         value = self._read_amount_input()
         if value is None:
             self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
@@ -468,7 +465,6 @@ class POSScreen(QWidget):
         discount_amount = self.cart.subtotal * (pct / 100.0)
         self.cart.global_discount = discount_amount
         self.combined_input.clear()
-
         self._show_discount(pct, discount_amount, "%")
         self.combined_input.setFocus()
 
@@ -478,50 +474,40 @@ class POSScreen(QWidget):
         if self.cart.item_count == 0:
             self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
             return
-
         value = self._read_amount_input()
         if value is None:
             self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
             return
-        # Clamp: a discount can never exceed the subtotal.
         discount_amount = min(value, self.cart.subtotal)
         self.cart.global_discount = discount_amount
         self.combined_input.clear()
-
         self._show_discount(value, discount_amount, "€")
         self.combined_input.setFocus()
 
-    # Subtotal gets added at every press and removed at item addition
     def _show_subtotal(self):
         if self.cart.item_count == 0:
             self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
             return
         row = self.cart_table.rowCount()
-
         self.cart_table.insertRow(row)
-
         subtotal = [
             QTableWidgetItem(str(self.cart.item_count)),
             QTableWidgetItem("SUBTOTAL"),
             QTableWidgetItem(""),
-            QTableWidgetItem(f"{self.currency}{self.cart.total:.2f}")
+            QTableWidgetItem(f"{self.currency}{self.cart.total:.2f}"),
         ]
-
         font = QFont()
         font.setBold(True)
-
         for col, item in enumerate(subtotal):
             item.setFont(font)
             item.setBackground(QBrush(QColor(255, 230, 120)))
             self.cart_table.setItem(row, col, item)
-
         self.cart_table.setRowHeight(row, 25)
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
     def _refresh_cart(self, select_last=False):
         selected_id = self._get_selected_product_id()
-
         self.cart_table.setRowCount(0)
         for item in self.cart.items.values():
             row = self.cart_table.rowCount()
@@ -538,7 +524,9 @@ class POSScreen(QWidget):
             row = list(self.cart.items.keys()).index(selected_id)
             self.cart_table.selectRow(row)
 
-        self._update_tab_label(self.active_tab)
+        # Notify MainWindow so the tab button label stays current
+        amount = f"{self.cart.total:.2f}".replace(".", ",") if self.cart.items else ""
+        self.tab_updated.emit(self._active_tab, amount)
 
     def _move_selection(self, delta: int):
         row = self.cart_table.currentRow()
@@ -554,34 +542,27 @@ class POSScreen(QWidget):
 
         typed = self._read_amount_input()
         total = self.cart.total
-
-        if typed is None:
-            # No number typed -> exact payment, no change.
-            tendered = total
-        else:
-            tendered = typed
+        tendered = total if typed is None else typed
 
         with get_session() as session:
-            sale = SalesService.finalize_sale(
+            SalesService.finalize_sale(
                 session,
                 cart=self.cart,
                 payment_method=method,
-                amount_tendered=tendered
+                amount_tendered=tendered,
             )
             if self.is_invoice:
-                invoice = SalesService.finalize_invoice(
+                SalesService.finalize_invoice(
                     session,
                     cart=self.cart,
                     payment_method=method,
                     amount_tendered=tendered,
                     notes="",
-                    client_id=self.client_id
+                    client_id=self.client_id,
                 )
 
         change = max(0.0, tendered - total)
-
         self._freeze_ticket(method, tendered, change)
-
 
     def _freeze_ticket(self, method: str, tendered: float, change: float):
         self.sale_finished = True
@@ -592,7 +573,7 @@ class POSScreen(QWidget):
 
         method_label = {
             "cash": "Cash", "card": "Card",
-            "bancontact": "Bancontact", "meal_voucher": "Meal voucher"
+            "bancontact": "Bancontact", "meal_voucher": "Meal voucher",
         }.get(method, method.title())
         parts = [f"PAID BY  {method_label}", f"{self.currency}{tendered:.2f}"]
         if change > 0:
@@ -633,81 +614,70 @@ class POSScreen(QWidget):
             return
         if self.cart.items[product_id].quantity > 1:
             self.cart.items[product_id].quantity -= 1
-        else:
-            return
-        self._refresh_cart()
+            self._refresh_cart()
 
     def _read_amount_input(self) -> float | None:
         text = self.combined_input.text().strip().replace(",", ".")
         if not text:
             return None
         try:
-            value = float(text)
+            return max(0.0, float(text))
         except ValueError:
             return None
-        return max(0.0, value)
 
     def _admin(self):
         if self.isAdmin:
             self.isAdmin = False
-            self.status_label.setText("Cashier")
+            self.salesperson_changed.emit(self.cashier_name)
             return
-
-        dialog = NumpadDialog(title="Enter Quantity", parent=self)
+        dialog = NumpadDialog(title="Enter Code", parent=self)
         if dialog.exec():
-            code = dialog.value
-            if code == ADMIN_CODE:
+            if dialog.value == ADMIN_CODE:
                 self.isAdmin = True
-                self.status_label.setText("Admin")
-            return
+                self.salesperson_changed.emit("Admin")
 
     def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
         self.overlay.show_message(message, title=title, kind=kind)
 
     def _show_discount(self, value: float, amount: float, pct_or_curr: str):
         row = self.cart_table.rowCount()
-
         self.cart_table.insertRow(row)
-
-        discount_str = str(round(amount, 2))
-        print(discount_str, amount)
         discount = [
             QTableWidgetItem(""),
             QTableWidgetItem("DISCOUNT  " + str(value) + pct_or_curr),
             QTableWidgetItem(""),
-            QTableWidgetItem('-' + discount_str),
+            QTableWidgetItem("-" + str(round(amount, 2))),
         ]
-
         font = QFont()
         font.setBold(True)
-
         for col, item in enumerate(discount):
             item.setFont(font)
             item.setBackground(QBrush(QColor(145, 230, 120)))
             self.cart_table.setItem(row, col, item)
-
         self.cart_table.setRowHeight(row, 25)
 
-    def _open_client_search_dialog(self, initial_query=""):
-        dialog = ClientSearchDialog(self)
-        if initial_query:
-            dialog.set_query(initial_query)
-        if dialog.exec() and dialog.selected_client:
+    def set_client(self, client_id: int, client_name: str):
+        if client_id and client_name:
             if self.sale_finished:
                 self._unfreeze_ticket()
-            self.client_label.setText("INVOICE - " + dialog.selected_client.name)
+            self.client_label.setText("INVOICE - " + client_name)
             self.client_label.setVisible(True)
-            self.client_id = dialog.selected_client.id
+            self.client_id = client_id
             self.is_invoice = True
             self._refresh_cart(select_last=True)
         self.combined_input.setFocus()
 
+    def add_product_by_id(self, product_id: int):
+        with get_session() as session:
+            product = ProductService.get_by_id(session, product_id)
+            if product:
+                if self.sale_finished:
+                    self._unfreeze_ticket()
+                self.cart.add_product(product)
+                self._refresh_cart(select_last=True)
+
     def _emit_signal(self, signal: int):
         if signal == 4 and not self.isAdmin:
-            logging.warn("Report access with admin privileges")
             self._show_overlay("Only Admin", title="No Permission", kind="error")
             return
-
         self.navigate.emit(signal)
-
-

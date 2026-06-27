@@ -5,7 +5,8 @@ Layout mirrors a classic POS client selection screen.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QFrame, QSizePolicy
+    QPushButton, QLabel, QFrame, QSizePolicy, QMessageBox, QLineEdit, QComboBox, QTableWidget, QTableWidgetItem,
+    QHeaderView
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -37,283 +38,288 @@ DUMMY_CLIENTS = [
 ]
 
 
-class ClientScreen(QWidget):
+class ClientDetailPanel(QFrame):
+    """
+    "Detail view for a single Client:
+    a field list on the left, a function-key grid on the right.
+    Hidden until a row is selected in the table above it.
+    """
 
-    navigate = pyqtSignal(int)
-
-    def __init__(self):
-        super().__init__()
-        self.selected_client = None
-        self.filtered_clients = list(DUMMY_CLIENTS)
-        self.search_term = ""
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    def __init__(self, parent_screen):
+        super().__init__(parent_screen)
+        self.parent_screen = parent_screen
+        self.current_client_id = None
+        self.setObjectName("articleDetailPanel")
         self._build_ui()
-        self._render_client_grid()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 10)
-        root.setSpacing(8)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
 
-        # ── Top section: client detail + action buttons ───────────────────────
-        top = QHBoxLayout()
-        top.setSpacing(10)
-
-        # Client detail panel
-        detail_frame = QFrame()
-        detail_frame.setObjectName("clientDetailFrame")
-        detail_frame.setFixedHeight(220)
-        detail_layout = QVBoxLayout(detail_frame)
-        detail_layout.setContentsMargins(16, 12, 16, 12)
-        detail_layout.setSpacing(6)
+        # ── Left: field list ────────────────────────────────────────────
+        field_frame = QFrame()
+        field_frame.setObjectName("articleFieldFrame")
+        field_col = QVBoxLayout(field_frame)
+        field_col.setSpacing(10)
 
         title = QLabel("Select Client")
-        title.setObjectName("clientDetailTitle")
-        detail_layout.addWidget(title)
+        title.setObjectName("articleDetailTitle")
+        field_col.addWidget(title)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setObjectName("clientDetailSep")
-        detail_layout.addWidget(sep)
+        self.field_labels = {}
+        field_names = [
+            ("name", "Name:"),
+            ("address", "Address:"),
+            ("vat", "VAT:"),
+            ("phone", "Phone:"),
+            ("email", "Email:")
+        ]
+        for key, caption in field_names:
+            row = QHBoxLayout()
+            cap_label = QLabel(caption)
+            cap_label.setObjectName("articleFieldCaption")
+            cap_label.setFixedWidth(120)
+            value_label = QLabel("—")
+            value_label.setObjectName("articleFieldValue")
+            row.addWidget(cap_label)
+            row.addWidget(value_label, stretch=1)
+            field_col.addLayout(row)
+            self.field_labels[key] = value_label
 
-        self.detail_name     = self._detail_row(detail_layout, "Name")
-        self.detail_street   = self._detail_row(detail_layout, "Street")
-        self.detail_postcode = self._detail_row(detail_layout, "Postcode")
-        self.detail_city     = self._detail_row(detail_layout, "City")
-        self.detail_phone    = self._detail_row(detail_layout, "Phone")
-        self.detail_vat      = self._detail_row(detail_layout, "VAT")
+        field_col.addStretch()
+        outer.addWidget(field_frame, stretch=3)
 
-        top.addWidget(detail_frame, stretch=3)
-
-        # Action buttons panel
-        action_panel = QWidget()
-        action_panel.setFixedHeight(220)
-        action_panel.setLayout(self._build_action_panel())
-        top.addWidget(action_panel, stretch=3)
-
-        root.addLayout(top)
-
-        # ── Search display ────────────────────────────────────────────────────
-        search_bar = QHBoxLayout()
-        search_icon = QLabel("🔍")
-        search_icon.setFixedWidth(30)
-        self.search_display = QLabel("Type to search clients...")
-        self.search_display.setObjectName("clientSearchDisplay")
-        search_bar.addWidget(search_icon)
-        search_bar.addWidget(self.search_display)
-        search_bar.addStretch()
-        root.addLayout(search_bar)
-
-        # ── Client grid ───────────────────────────────────────────────────────
-        self.client_grid_widget = QWidget()
-        self.client_grid_layout = QGridLayout(self.client_grid_widget)
-        self.client_grid_layout.setSpacing(5)
-        root.addWidget(self.client_grid_widget)
-
-
-    def _build_action_panel(self):
+        # ── Right: function-key grid ────────────────────────────────────
         grid = QGridLayout()
         grid.setSpacing(4)
 
-        self.btn_new     = FunctionButton("New\nClient",    "secFunc")
-        self.btn_edit    = FunctionButton("Edit\nClient",   "secFunc")
-        self.btn_delete  = FunctionButton("Delete\nClient", "errorBtn")
-        self.btn_up      = FunctionButton("↑",              "navBtn")
-        self.btn_down    = FunctionButton("↓",              "navBtn")
-        self.btn_refresh = FunctionButton("Refresh",        "secFunc")
-        self.btn_print   = FunctionButton("Print",          "secFunc")
-        self.btn_label   = FunctionButton("Address\nLabel", "secFunc")
-        self.btn_ok      = FunctionButton("OK",             "okBtn")
-        self.btn_cancel  = FunctionButton("Cancel",         "clearBtn")
+        self.btn_new = FunctionButton("New\nClient", "newArticleBtn")
+        self.btn_modify = FunctionButton("Modify\nClient", "secFunc")
+        self.btn_delete = FunctionButton("Delete\nClient", "deleteArticleBtn")
+        self.btn_error = FunctionButton("Error", "errorBtn")
+
+        self.btn_print_label = FunctionButton("Print\nlabel", "secFunc")
+        self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
+
+        self.btn_search_barcode = FunctionButton("Search by\nname", "secFunc")
+        self.btn_search_key = FunctionButton("Search by\nvat", "secFunc")
+        self.btn_ok = FunctionButton("OK", "okBtn")
 
         layout_map = [
-            (self.btn_new,     0, 0, 1, 1), (self.btn_edit,    0, 1, 1, 1), (self.btn_delete,  0, 2, 1, 1),
-            (self.btn_up,      1, 0, 1, 1), (self.btn_refresh, 1, 1, 1, 1), (self.btn_cancel,  1, 2, 1, 1),
-            (self.btn_down,    2, 0, 1, 1),
-            (self.btn_print,   3, 0, 1, 1), (self.btn_label,   3, 1, 1, 1), (self.btn_ok,      3, 2, 1, 1),
+            (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
+            (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
+
+            (self.btn_search_barcode, 1, 1),
+            (self.btn_search_key, 1, 2), (self.btn_ok, 1, 3),
+
+            (self.btn_cancel, 2, 3)
         ]
+        for widget, r, c in layout_map:
+            grid.addWidget(widget, r, c)
 
-        for widget, r, c, rs, cs in layout_map:
-            grid.addWidget(widget, r, c, rs, cs)
+        for c in range(4):
+            grid.setColumnStretch(c, 1)
+        for r in range(5):
+            grid.setRowStretch(r, 1)
 
-        for col in range(3):
-            grid.setColumnStretch(col, 1)
-        for row in range(4):
-            grid.setRowStretch(row, 1)
+        outer.addLayout(grid, stretch=4)
 
-        self.btn_new.clicked.connect(self._add_client)
-        self.btn_edit.clicked.connect(self._edit_client)
-        self.btn_delete.clicked.connect(self._delete_client)
-        self.btn_up.clicked.connect(self._scroll_up)
-        self.btn_down.clicked.connect(self._scroll_down)
-        self.btn_refresh.clicked.connect(self._refresh)
-        self.btn_print.clicked.connect(self._print_client)
-        self.btn_label.clicked.connect(self._print_label)
+        # Wire actions to the parent screen's existing service calls
+        self.btn_new.clicked.connect(self.parent_screen._add_client)
+        self.btn_modify.clicked.connect(self._on_modify)
+        self.btn_delete.clicked.connect(self._on_delete)
+        self.btn_error.clicked.connect(self._clear)
+        self.btn_cancel.clicked.connect(self._clear)
         self.btn_ok.clicked.connect(self._confirm_client)
-        self.btn_cancel.clicked.connect(self._cancel)
+        self.btn_search_barcode.clicked.connect(self._on_search_barcode)
+        self.btn_search_key.clicked.connect(self._on_search_key)
 
-        return grid
+    # ── Display ──────────────────────────────────────────────────────────
 
-    def _detail_row(self, parent_layout, label: str) -> QLabel:
-        row = QHBoxLayout()
-        lbl = QLabel(f"{label}:")
-        lbl.setObjectName("clientDetailLabel")
-        lbl.setFixedWidth(30)
-        value = QLabel("—")
-        value.setObjectName("clientDetailValue")
-        row.addWidget(lbl)
-        row.addWidget(value)
-        parent_layout.addLayout(row)
-        return value
+    def _clear(self):
+        if self.current_client_id is not None:
+            self.current_client_id = None
+            for label in self.field_labels.values():
+                label.setText("—")
 
-    def _render_client_grid(self):
-        # Clear existing buttons
-        for i in reversed(range(self.client_grid_layout.count())):
-            w = self.client_grid_layout.itemAt(i).widget()
-            if w:
-                w.deleteLater()
+    def _confirm_client(self):
+        if self.current_client_id:
+            self.parent_screen.selected_client.emit(self.current_client_id, self.field_labels["name"].text())
+        self.parent_screen.navigate.emit(0)
 
-        cols = 6
-        for idx, client in enumerate(self.filtered_clients):
-            row = idx // cols
-            col = idx % cols
-            name_lines = client["name"]
-            btn = QPushButton(f"{name_lines}")
-            btn.setObjectName("clientGridBtn")
-            btn.setFixedSize(200, 65)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-            if self.selected_client and self.selected_client["id"] == client["id"]:
-                btn.setObjectName("clientGridBtnSelected")
-            btn.clicked.connect(lambda _, c=client: self._select_client(c))
-            self.client_grid_layout.addWidget(btn, row, col)
+    def show_client(self, client):
+        self.current_client_id = client.id
+        self.field_labels["name"].setText(client.name or "—")
+        self.field_labels["address"].setText(client.address or "-")
+        self.field_labels["vat"].setText(client.vatNumber or "—")
+        self.field_labels["phone"].setText(client.phone or "-")
+        self.field_labels["email"].setText(client.email or "-")
+        self.show()
 
-    def _select_client(self, client: dict):
-        self.selected_client = client
-        self.detail_name.setText(client["name"])
-        self.detail_street.setText(client["street"])
-        self.detail_postcode.setText(client["postcode"])
-        self.detail_city.setText(client["city"])
-        self.detail_phone.setText(client["phone"])
-        self.detail_vat.setText(client["vat"] or "—")
-        self._render_client_grid()  # re-render to show selection highlight
+    # ── Actions ──────────────────────────────────────────────────────────
 
-    def _keyboard_press(self, key: str):
-        if key == "Del":
-            self.search_term = self.search_term[:-1]
-        elif key == "Space":
-            self.search_term += " "
-        else:
-            self.search_term += key
+    def _on_modify(self):
+        if self.current_client_id is None:
+            return
+        self.parent_screen._edit_client(self.current_client_id)
 
-        # Update the search display
-        if self.search_term:
-            self.search_display.setText(self.search_term + "▌")
-        else:
-            self.search_display.setText("Type to search clients...")
+    def _on_delete(self):
+        if self.current_client_id is None:
+            return
+        self.parent_screen._delete_client(self.current_client_id)
+        self.hide()
 
-        # Filter clients by name
-        term = self.search_term.upper()
-        self.filtered_clients = [
-            c for c in DUMMY_CLIENTS
-            if term in c["name"].upper()
-        ]
-        self._render_client_grid()
+    def _on_search_barcode(self):
+        self.parent_screen.search_input.setFocus()
+        self.parent_screen.search_input.setPlaceholderText("Scan or type barcode…")
 
-    def keyPressEvent(self, event):
-        key = event.key()
-        text = event.text()
-        print(key, text)
+    def _on_search_key(self):
+        self.parent_screen.search_input.setFocus()
+        self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
 
-        if key == Qt.Key.Key_Backspace:
-            self._keyboard_press("Del")  # reuse same logic
+    def _stub_action(self, label: str):
+        QMessageBox.information(self, label, f"{label} — coming soon.")
 
-        elif key == Qt.Key.Key_Space:
-            self._keyboard_press("Space")  # reuse same logic
 
-        elif key == Qt.Key.Key_Escape:
-            self._cancel()
+class ClientScreen(QWidget):
 
-        elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-            self._confirm_client()
+    navigate = pyqtSignal(int)
+    selected_client = pyqtSignal(int, str)
 
-        elif text and text.isprintable():
-            self._keyboard_press(text)
+    def __init__(self):
+        super().__init__()
+        self._build_ui()
+        self.refresh()
 
-        else:
-            super().keyPressEvent(event)
 
-    # ── Action handlers ───────────────────────────────────────────────────────
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # ── Article detail panel (always visible) ─────────────────────────────
+        self.detail_panel = ClientDetailPanel(self)
+        layout.addWidget(self.detail_panel)
+
+        # ── Search / filter bar ───────────────────────────────────────────────
+        toolbar = QHBoxLayout()
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by name or VAT…")
+        self.search_input.setFixedHeight(44)
+        self.search_input.textChanged.connect(self.refresh)
+        toolbar.addWidget(self.search_input, stretch=2)
+        layout.addLayout(toolbar)
+
+        # ── client table ─────────────────────────────────────────────────────
+        self.table = QTableWidget(0, 4)
+        self.table.setObjectName("inventoryTable")
+        self.table.setHorizontalHeaderLabels([
+            "Name", "Address", "Vat", "Phone", "Email"
+        ])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_row_selected)
+        layout.addWidget(self.table, stretch=1)
+
+        self._client_cache = {}
+
+    def refresh(self):
+        with get_session() as session:
+
+            # Get clients
+            query = self.search_input.text().strip()
+            if query:
+                clients = ClientService.search(session, query)
+            else:
+                clients = ClientService.get_all(session)
+
+            self._populate_table(clients, session)
+        self.search_input.setFocus()
+
+
+    def _populate_table(self, clients, session):
+        self.table.setRowCount(0)
+        self._client_cache = {}
+        for c in clients:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self._client_cache[row] = c.id
+
+            self.table.setItem(row, 0, QTableWidgetItem(c.name or ""))
+            self.table.setItem(row, 1, QTableWidgetItem(c.address or ""))
+            self.table.setItem(row, 2, QTableWidgetItem(f"{c.vatNumber}"))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{c.phone}"))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{c.email}"))
+
+            # Action buttons
+            actions = QWidget()
+            actions_layout = QHBoxLayout(actions)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+            actions_layout.setSpacing(4)
+
+            edit_btn = QPushButton("✏️")
+            edit_btn.setFixedSize(36, 36)
+            edit_btn.clicked.connect(lambda _, cid=c.id: self._edit_client(cid))
+            actions_layout.addWidget(edit_btn)
+
+            del_btn = QPushButton("🗑️")
+            del_btn.setFixedSize(36, 36)
+            del_btn.clicked.connect(lambda _, cid=c.id: self._delete_client(cid))
+            actions_layout.addWidget(del_btn)
+
+            self.table.setCellWidget(row, 7, actions)
+            self.table.setRowHeight(row, 50)
+
+    # ── Detail panel wiring ─────────────────────────────────────────────────
+
+    def _on_row_selected(self):
+        row = self.table.currentRow()
+        if row < 0 or row not in self._client_cache:
+            self.detail_panel._clear()
+            return
+        client_id = self._client_cache[row]
+        with get_session() as session:
+            client = ClientService.get_by_id(session, client_id)
+            if client:
+                self.detail_panel.show_client(client)
+            else:
+                self.detail_panel._clear()
+
     def _add_client(self):
         dialog = ClientDialog(self)
         if dialog.exec():
             with get_session() as session:
                 ClientService.create(session, **dialog.get_data())
-            self.filtered_clients.append(dialog.get_data())
-        self._refresh()
+            self.refresh()
 
     def _edit_client(self, client_id: int):
         with get_session() as session:
-            client = ClientService.get_by_id(session, client_id=client_id)
+            client = ClientService.get_by_id(session, client_id)
             if not client:
                 return
             dialog = ClientDialog(self, client)
             if dialog.exec():
                 ClientService.update(session, client_id, **dialog.get_data())
-        self._refresh()
+        self.refresh()
 
-    def _delete_client(self):
-        if self.selected_client:
-            print(f"Delete: {self.selected_client['name']}")
+    def _delete_client(self, client_id: int):
+        reply = QMessageBox.question(
+            self, "Deactivate client",
+            "This will hide the client from the POS. Sales history is preserved.\nContinue?"
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            with get_session() as session:
+                ClientService.deactivate(session, client_id)
+            self.refresh()
 
-    def _scroll_up(self):
-        print("Scroll up")
-
-    def _scroll_down(self):
-        print("Scroll down")
-
-    def _print_client(self):
-        print("Print client fiche")
-
-    def _print_label(self):
-        print("Print address label")
-
-    def _confirm_client(self):
-        if self.selected_client:
-            print(f"Confirmed: {self.selected_client['name']}")
-
-    def _cancel(self):
-        if self.selected_client is not None:
-            self.selected_client = None
-            self.search_term = ""
-            self.filtered_clients = list(DUMMY_CLIENTS)
-            self.detail_name.setText("—")
-            self.detail_street.setText("—")
-            self.detail_postcode.setText("—")
-            self.detail_city.setText("—")
-            self.detail_phone.setText("—")
-            self.detail_vat.setText("—")
-            self._render_client_grid()
-            return
+    def _clear(self):
         self.navigate.emit(0)
-
-
-    def _refresh(self):
-        self.search_term = ""
-        self.search_display.setText("Type to search clients...")
-        self.filtered_clients = list(DUMMY_CLIENTS)
-        self._render_client_grid()
-
-
-if __name__ == "__main__":
-    import sys
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    # with open("resources/styles/main.qss", "r") as f:
-    #     app.setStyleSheet(f.read())
-    window = ClientScreen()
-    window.setWindowTitle("Client Screen - Dev")
-    window.resize(1280, 800)
-    window.show()
-    sys.exit(app.exec())

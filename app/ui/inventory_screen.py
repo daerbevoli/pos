@@ -5,6 +5,8 @@ selecteren"-style detail panel below, with a field list on the left and a
 function-key grid on the right (New/Modify/Delete article, Price label,
 Shelf label, Pre-pack, Print shelf, Search by barcode/key, OK/Cancel).
 """
+import logging
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
@@ -14,6 +16,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
+from app.models.models import Product
 from app.ui.dialogs.product_dialog import ProductDialog
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 
@@ -33,6 +36,9 @@ class ArticleDetailPanel(QFrame):
     a field list on the left, a function-key grid on the right.
     Hidden until a row is selected in the table above it.
     """
+    navigate = pyqtSignal(int)
+    selected_product = pyqtSignal(int)
+
     def __init__(self, parent_screen):
         super().__init__(parent_screen)
         self.parent_screen = parent_screen
@@ -121,7 +127,7 @@ class ArticleDetailPanel(QFrame):
         self.btn_delete.clicked.connect(self._on_delete)
         self.btn_error.clicked.connect(self._clear)
         self.btn_cancel.clicked.connect(self._clear)
-        self.btn_ok.clicked.connect(self._clear)
+        self.btn_ok.clicked.connect(self._confirm_product)
         self.btn_search_barcode.clicked.connect(self._on_search_barcode)
         self.btn_search_key.clicked.connect(self._on_search_key)
 
@@ -132,6 +138,11 @@ class ArticleDetailPanel(QFrame):
             self.current_product_id = None
             for label in self.field_labels.values():
                 label.setText("—")
+
+    def _confirm_product(self):
+        if self.current_product_id:
+            self.parent_screen.selected_product.emit(self.current_product_id)
+        self.parent_screen.navigate.emit(0)
 
 
     def show_product(self, product):
@@ -173,12 +184,15 @@ class ArticleDetailPanel(QFrame):
 
 
 class InventoryScreen(QWidget):
+
     navigate = pyqtSignal(int)
+    selected_product = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
         self._build_ui()
         self.refresh()
+
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -272,6 +286,7 @@ class InventoryScreen(QWidget):
                 f"{len(products)} product(s) shown"
                 + (f" — {sum(1 for p in products if p.is_low_stock)} low stock" if products else "")
             )
+        self.search_input.setFocus()
 
 
     def _populate_table(self, products, session):
