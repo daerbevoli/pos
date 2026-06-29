@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
         self.pos_screen.tab_updated.connect(self._on_tab_updated)
         self.client_screen.navigate.connect(self._navigate)
         self.inventory_screen.navigate.connect(self._navigate)
+        self.reports_screen.navigate.connect(self._navigate)
 
         self.client_screen.selected_client.connect(self.pos_screen.set_client)
         self.inventory_screen.selected_product.connect(self.pos_screen.add_product_by_id)

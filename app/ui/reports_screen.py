@@ -7,15 +7,20 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QDateEdit, QGroupBox, QGridLayout, QComboBox
 )
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from datetime import date, timedelta
 
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
+from app.utils.utils import FunctionButton
 
 
 class ReportsScreen(QWidget):
+
+
+    navigate = pyqtSignal(int)
+
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -54,6 +59,11 @@ class ReportsScreen(QWidget):
         load_btn.clicked.connect(self._load_report)
         controls.addWidget(load_btn)
 
+        self.btn_ok = FunctionButton("OK", "okBtn")
+        self.btn_ok.setFixedHeight(40)
+        self.btn_ok.clicked.connect(self._confirm)
+        controls.addWidget(self.btn_ok)
+
         controls.addStretch()
         layout.addLayout(controls)
 
@@ -85,6 +95,7 @@ class ReportsScreen(QWidget):
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(self.sales_table)
+
 
     def _make_card(self, title: str, value: str) -> QGroupBox:
         card = QGroupBox(title)
@@ -138,3 +149,6 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 3, QTableWidgetItem(sale.payment_method.upper()))
                 self.sales_table.setItem(row, 4, QTableWidgetItem(f"{currency}{sale.final_amount:.2f}"))
                 self.sales_table.setRowHeight(row, 44)
+
+    def _confirm(self):
+        self.navigate.emit(0)

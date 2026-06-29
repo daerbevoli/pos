@@ -5,21 +5,19 @@ payment row, and a numpad + category/product grid.
 Tab state (cart, frozen, client) is managed per V-tab slot and
 driven externally by MainWindow via set_active_tab().
 """
-import sys
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QFrame, QSizePolicy, QStackedWidget
+    QHeaderView, QMessageBox, QSizePolicy, QStackedWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime
 from PyQt6.QtGui import QFont, QBrush, QColor
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, SalesService
+from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, SalesService
 from app.core.settings_service import SettingsService
-from app.ui.dialogs.client_search_dialog import ClientSearchDialog
 from app.ui.dialogs.product_search_dialog import ProductSearchDialog
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
@@ -32,12 +30,12 @@ ADMIN_CODE = "2060"
 class _TabState:
     """Snapshot of one V-tab slot's POS state."""
     def __init__(self):
-        self.cart         = Cart()
+        self.cart          = Cart()
         self.sale_finished = False
-        self.is_invoice   = False
-        self.client_id    = None
-        self.client_name  = ""
-        self.payment_text = ""
+        self.is_invoice    = False
+        self.client_id     = None
+        self.client_name   = ""
+        self.payment_text  = ""
 
 
 class POSScreen(QWidget):
@@ -51,10 +49,10 @@ class POSScreen(QWidget):
         super().__init__()
         self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, 6)}
         self._active_tab = 1
-        self.cart         = self._tab_states[1].cart
+        self.cart          = self._tab_states[1].cart
         self.sale_finished = False
-        self.is_invoice   = False
-        self.client_id    = None
+        self.is_invoice        = False
+        self.client_id         = None
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -63,7 +61,7 @@ class POSScreen(QWidget):
 
     @property
     def cart_active(self) -> bool:
-        return bool(self.cart.items) or self.is_invoice
+        return bool(self.cart.entries) or self.is_invoice
 
     # ── Setup ────────────────────────────────────────────────────────────
 
@@ -313,6 +311,7 @@ class POSScreen(QWidget):
             btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
             btn.setMinimumHeight(36)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.clicked.connect(lambda _, l=label: self._numpad_press(l))
             numpad.addWidget(btn, r, c)
 
@@ -406,23 +405,12 @@ class POSScreen(QWidget):
                 self._show_overlay("Unknown barcode", kind="error")
         self.combined_input.clear()
 
-    def _open_search_dialog(self, initial_query=""):
-        dialog = ProductSearchDialog(self)
-        if initial_query:
-            dialog.set_query(initial_query)
-        if dialog.exec() and dialog.selected_product:
-            if self.sale_finished:
-                self._unfreeze_ticket()
-            self.cart.add_product(dialog.selected_product)
-            self._refresh_cart(select_last=True)
-        self.combined_input.setFocus()
 
     def _clear_cart(self):
         if not self.cart_active:
             return
         if QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
             self.cart.clear()
-            self.cart.global_discount = 0.0
             self.combined_input.clear()
             self.client_label.setVisible(False)
             self.client_id = None
@@ -433,88 +421,177 @@ class POSScreen(QWidget):
     def _remove_selected(self):
         if self.sale_finished:
             return
-        product_id = self._get_selected_product_id()
-        if product_id is None:
+        idx = self._get_selected_entry_index()
+        if idx is None:
             return
-        self.cart.remove_item(product_id)
+        self.cart.entries.pop(idx)
         self._refresh_cart()
         self.combined_input.setFocus()
 
     def _apply_percent_discount(self):
         if self.sale_finished:
             return
-        if self.cart.item_count == 0:
-            self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
-            return
         value = self._read_amount_input()
         if value is None:
             self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
             return
+        base = self._get_discount_base()
+        if base is None or base <= 0:
+            self._show_overlay("Nothing to discount.", title="Empty Ticket", kind="error")
+            return
         pct = min(value, 100.0)
-        discount_amount = self.cart.subtotal * (pct / 100.0)
-        self.cart.global_discount = discount_amount
+        amount = round(base * pct / 100.0, 2)
+        self.cart.entries.append(DiscountEntry(amount=amount, label=f"{pct:g}%"))
         self.combined_input.clear()
-        self._show_discount(pct, discount_amount, "%")
+        self._refresh_cart()
         self.combined_input.setFocus()
 
     def _apply_amount_discount(self):
         if self.sale_finished:
             return
-        if self.cart.item_count == 0:
-            self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
-            return
         value = self._read_amount_input()
         if value is None:
             self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
             return
-        discount_amount = min(value, self.cart.subtotal)
-        self.cart.global_discount = discount_amount
+        base = self._get_discount_base()
+        if base is None or base <= 0:
+            self._show_overlay("Nothing to discount.", title="Empty Ticket", kind="error")
+            return
+        amount = round(min(value, base), 2)
+        self.cart.entries.append(DiscountEntry(amount=amount, label=f"{self.currency}{amount:.2f}"))
         self.combined_input.clear()
-        self._show_discount(value, discount_amount, "€")
+        self._refresh_cart()
         self.combined_input.setFocus()
 
+    def _get_discount_base(self) -> float | None:
+        """
+        Returns the amount the next discount applies to:
+        - last CartItem's line_total  → item discount
+        - last section's net total    → section discount (entry above is SubtotalMarker)
+        Existing DiscountEntry rows are skipped when looking back.
+        """
+        for entry in reversed(self.cart.entries):
+            if isinstance(entry, DiscountEntry):
+                continue
+            if isinstance(entry, CartItem):
+                return entry.line_total
+            if isinstance(entry, SubtotalMarker):
+                return self._last_section_total()
+            break
+        return None
+
+    def _last_section_total(self) -> float:
+        """Net total of items+discounts in the section that ends at the last SubtotalMarker."""
+        total = 0.0
+        past_last_marker = False
+        for entry in reversed(self.cart.entries):
+            if isinstance(entry, SubtotalMarker):
+                if not past_last_marker:
+                    past_last_marker = True
+                    continue
+                break
+            if past_last_marker:
+                if isinstance(entry, CartItem):
+                    total += entry.line_total
+                elif isinstance(entry, DiscountEntry):
+                    total -= entry.amount
+        return total
+
     def _show_subtotal(self):
-        if self.cart.item_count == 0:
-            self._show_overlay("No items in cart.", title="Empty Ticket", kind="error")
+        if not self.cart.entries:
+            self._show_overlay(message="Cart empty")
+        # Allow subtotal if the current section has at least a CartItem or DiscountEntry
+        section_has_content = False
+        for entry in reversed(self.cart.entries):
+            if isinstance(entry, SubtotalMarker):
+                break
+            if isinstance(entry, (CartItem, DiscountEntry)):
+                section_has_content = True
+                break
+        if not section_has_content:
             return
-        row = self.cart_table.rowCount()
-        self.cart_table.insertRow(row)
-        subtotal = [
-            QTableWidgetItem(str(self.cart.item_count)),
-            QTableWidgetItem("SUBTOTAL"),
-            QTableWidgetItem(""),
-            QTableWidgetItem(f"{self.currency}{self.cart.total:.2f}"),
-        ]
-        font = QFont()
-        font.setBold(True)
-        for col, item in enumerate(subtotal):
-            item.setFont(font)
-            item.setBackground(QBrush(QColor(255, 230, 120)))
-            self.cart_table.setItem(row, col, item)
-        self.cart_table.setRowHeight(row, 25)
+        self.cart.add_subtotal()
+        self._refresh_cart(select_last=True)
+        self.combined_input.setFocus()
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
+    def _insert_subtotal_row(self, total: float, count: int):
+        row = self.cart_table.rowCount()
+        self.cart_table.insertRow(row)
+        cells = [
+            QTableWidgetItem(str(count)),
+            QTableWidgetItem("SUBTOTAL"),
+            QTableWidgetItem(""),
+            QTableWidgetItem(f"{self.currency}{total:.2f}"),
+        ]
+        font = QFont()
+        font.setBold(True)
+        for col, cell in enumerate(cells):
+            cell.setFont(font)
+            cell.setBackground(QBrush(QColor(255, 230, 120)))
+            self.cart_table.setItem(row, col, cell)
+        self.cart_table.setRowHeight(row, 25)
+
     def _refresh_cart(self, select_last=False):
-        selected_id = self._get_selected_product_id()
+        prev_idx = self._get_selected_entry_index()
         self.cart_table.setRowCount(0)
-        for item in self.cart.items.values():
-            row = self.cart_table.rowCount()
-            self.cart_table.insertRow(row)
-            self.cart_table.setItem(row, 0, QTableWidgetItem(str(item.quantity)))
-            self.cart_table.setItem(row, 1, QTableWidgetItem(item.product_name))
-            self.cart_table.setItem(row, 2, QTableWidgetItem(f"{self.currency}{item.unit_price:.2f}"))
-            self.cart_table.setItem(row, 3, QTableWidgetItem(f"{self.currency}{item.line_total:.2f}"))
-            self.cart_table.setRowHeight(row, 25)
 
-        if select_last or not self.cart.items:
+        section_total = 0.0
+        section_count = 0
+        section_has_items = False
+        prev_subtotal = 0.0
+        font_bold = QFont(); font_bold.setBold(True)
+        for entry in self.cart.entries:
+            if isinstance(entry, CartItem):
+                r = self.cart_table.rowCount()
+                self.cart_table.insertRow(r)
+                self.cart_table.setItem(r, 0, QTableWidgetItem(str(entry.quantity)))
+                self.cart_table.setItem(r, 1, QTableWidgetItem(entry.product_name))
+                self.cart_table.setItem(r, 2, QTableWidgetItem(f"{self.currency}{entry.unit_price:.2f}"))
+                self.cart_table.setItem(r, 3, QTableWidgetItem(f"{self.currency}{entry.line_total:.2f}"))
+                self.cart_table.setRowHeight(r, 25)
+                section_total += entry.line_total
+                section_count += entry.quantity
+                section_has_items = True
+            elif isinstance(entry, DiscountEntry):
+                r = self.cart_table.rowCount()
+                self.cart_table.insertRow(r)
+                cells = [
+                    QTableWidgetItem(""),
+                    QTableWidgetItem(f"DISCOUNT  {entry.label}"),
+                    QTableWidgetItem(""),
+                    QTableWidgetItem(f"-{self.currency}{entry.amount:.2f}"),
+                ]
+                for c, cell in enumerate(cells):
+                    cell.setFont(font_bold)
+                    cell.setBackground(QBrush(QColor(145, 230, 120)))
+                    self.cart_table.setItem(r, c, cell)
+                self.cart_table.setRowHeight(r, 25)
+                section_total += entry.line_total   # negative
+            elif isinstance(entry, SubtotalMarker):
+                # Discount-only section: show net against the previous subtotal
+                display_total = section_total if section_has_items else prev_subtotal + section_total
+                self._insert_subtotal_row(display_total, section_count)
+                prev_subtotal = display_total
+                section_total = 0.0
+                section_count = 0
+                section_has_items = False
+
+        # ── Row selection ────────────────────────────────────────────────
+        if select_last or not self.cart.entries:
             self.cart_table.selectRow(self.cart_table.rowCount() - 1)
-        elif selected_id is not None and selected_id in self.cart.items:
-            row = list(self.cart.items.keys()).index(selected_id)
-            self.cart_table.selectRow(row)
+        elif prev_idx is not None:
+            table_row = 0
+            for i, entry in enumerate(self.cart.entries):
+                if i == prev_idx:
+                    self.cart_table.selectRow(table_row)
+                    break
+                table_row += 1
 
-        # Notify MainWindow so the tab button label stays current
-        amount = f"{self.cart.total:.2f}".replace(".", ",") if self.cart.items else ""
+        # ── Tab button label ─────────────────────────────────────────────
+        total = self.cart.total
+        amount = f"{total:.2f}".replace(".", ",") if self.cart.entries else ""
         self.tab_updated.emit(self._active_tab, amount)
 
     def _move_selection(self, delta: int):
@@ -525,12 +602,12 @@ class POSScreen(QWidget):
     # ── Payment ───────────────────────────────────────────────────────────
 
     def _open_payment(self, method: str):
-        if not self.cart.items:
+        if not any(isinstance(e, CartItem) for e in self.cart.entries):
             self._show_overlay("Add items before payment.", title="Empty Ticket", kind="error")
             return
 
-        typed = self._read_amount_input()
-        total = self.cart.total
+        typed    = self._read_amount_input()
+        total    = self.cart.total
         tendered = total if typed is None else typed
 
         with get_session() as session:
@@ -577,7 +654,6 @@ class POSScreen(QWidget):
     def _unfreeze_ticket(self):
         self.sale_finished = False
         self.cart.clear()
-        self.cart.global_discount = 0.0
         self.cart_table.setProperty("frozen", "false")
         self.cart_table.style().unpolish(self.cart_table)
         self.cart_table.style().polish(self.cart_table)
@@ -587,28 +663,41 @@ class POSScreen(QWidget):
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
 
-    def _get_selected_product_id(self):
+    def _get_selected_entry_index(self) -> int | None:
+        """Index into cart.entries for the selected row; None for SubtotalMarker rows."""
         row = self.cart_table.currentRow()
         if row < 0:
             return None
-        keys = list(self.cart.items.keys())
-        if row >= len(keys):
+        table_row = 0
+        for i, entry in enumerate(self.cart.entries):
+            if table_row == row and isinstance(entry, (CartItem, DiscountEntry, SubtotalMarker)):
+                return i
+            table_row += 1
+        return None
+
+    def _get_selected_product_id(self):
+        idx = self._get_selected_entry_index()
+        if idx is None:
             return None
-        return keys[row]
+        entry = self.cart.entries[idx]
+        return entry.product_id if isinstance(entry, CartItem) else None
 
     def _increase_product(self):
-        product_id = self._get_selected_product_id()
-        if product_id is None:
+        idx = self._get_selected_entry_index()
+        if idx is None:
             return
-        self.cart.items[product_id].quantity += 1
-        self._refresh_cart()
+        entry = self.cart.entries[idx]
+        if isinstance(entry, CartItem):
+            entry.quantity += 1
+            self._refresh_cart()
 
     def _decrease_product(self):
-        product_id = self._get_selected_product_id()
-        if product_id is None:
+        idx = self._get_selected_entry_index()
+        if idx is None:
             return
-        if self.cart.items[product_id].quantity > 1:
-            self.cart.items[product_id].quantity -= 1
+        entry = self.cart.entries[idx]
+        if isinstance(entry, CartItem) and entry.quantity > 1:
+            entry.quantity -= 1
             self._refresh_cart()
 
     def _read_amount_input(self) -> float | None:
@@ -633,23 +722,6 @@ class POSScreen(QWidget):
 
     def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
         self.overlay.show_message(message, title=title, kind=kind)
-
-    def _show_discount(self, value: float, amount: float, pct_or_curr: str):
-        row = self.cart_table.rowCount()
-        self.cart_table.insertRow(row)
-        discount = [
-            QTableWidgetItem(""),
-            QTableWidgetItem("DISCOUNT  " + str(value) + pct_or_curr),
-            QTableWidgetItem(""),
-            QTableWidgetItem("-" + str(round(amount, 2))),
-        ]
-        font = QFont()
-        font.setBold(True)
-        for col, item in enumerate(discount):
-            item.setFont(font)
-            item.setBackground(QBrush(QColor(145, 230, 120)))
-            self.cart_table.setItem(row, col, item)
-        self.cart_table.setRowHeight(row, 25)
 
     def set_client(self, client_id: int, client_name: str):
         if client_id and client_name:

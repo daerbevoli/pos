@@ -46,6 +46,8 @@ class FunctionButton(QPushButton):
         self.setObjectName(role)
         self.setMinimumHeight(36)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
 
 
 class CategoryButton(QPushButton):
@@ -55,6 +57,8 @@ class CategoryButton(QPushButton):
         self.setObjectName(role)
         self.setMinimumHeight(36)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
 
 
 class TapToDismissOverlay(QWidget):

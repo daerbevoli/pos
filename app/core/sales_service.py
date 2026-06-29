@@ -9,68 +9,108 @@ from sqlalchemy import func
 from app.models.models import Sale, SaleItem, Product, Invoice
 from app.core.product_service import ProductService
 
+@dataclass
+class ReceiptEntry:
+    pass
+
 
 @dataclass
-class CartItem:
-    """Represents a single item in the active shopping cart."""
+class CartItem(ReceiptEntry):
     product_id: int
     product_name: str
     product_barcode: str
     unit_price: float
-    quantity: float
+    quantity: int
     unit: str = "pcs"
     discount: float = 0.0
 
     @property
-    def line_total(self) -> float:
+    def line_total(self):
         return round((self.unit_price * self.quantity) - self.discount, 2)
 
 
+
+
 @dataclass
-class Cart:
-    items: dict[int, CartItem] = field(default_factory=dict)  # key = product_id
-    global_discount: float = 0.0
+class SubtotalMarker(ReceiptEntry):
+    pass
+
+
+@dataclass
+class DiscountEntry(ReceiptEntry):
+    amount: float   # always positive; the actual currency value deducted
+    label: str      # display string, e.g. "10%" or "€5.00"
 
     @property
-    def subtotal(self) -> float:
-        return round(sum(i.line_total for i in self.items.values()), 2)
+    def line_total(self) -> float:
+        return -round(self.amount, 2)
+
+@dataclass
+class Cart:
+    entries: list[ReceiptEntry] = field(default_factory=list)
+
+    @property
+    def subtotal(self):
+        return round(
+            sum(
+                entry.line_total
+                for entry in self.entries
+                if isinstance(entry, (CartItem, DiscountEntry))
+            ),
+            2,
+        )
 
     @property
     def total(self) -> float:
-        return round(self.subtotal - self.global_discount, 2)
+        return round(self.subtotal, 2)
 
     @property
     def item_count(self) -> int:
-        return sum(int(i.quantity) for i in self.items.values())
+        return sum(entry.quantity for entry in self.entries if isinstance(entry, CartItem))
 
-    def add_product(self, product: Product, quantity: float = 1.0):
-        """Add a product or increase quantity if already in cart."""
-        if product.id in self.items:
-            self.items[product.id].quantity += quantity
-        else:
-            self.items[product.id] = (CartItem(
+    def add_product(self, product, quantity=1):
+        # Walk backwards until we hit a subtotal marker.
+        for entry in reversed(self.entries):
+            if isinstance(entry, SubtotalMarker):
+                break
+
+            if (
+                    isinstance(entry, CartItem)
+                    and entry.product_id == product.id
+            ):
+                entry.quantity += quantity
+                return
+
+        # No matching item in the current section.
+        self.entries.append(
+            CartItem(
                 product_id=product.id,
                 product_name=product.name,
                 product_barcode=product.barcode or "",
                 unit_price=product.price,
                 quantity=quantity,
-                unit=product.unit
-            ))
+                unit=product.unit,
+            )
+        )
+
+
+    def add_subtotal(self):
+        self.entries.append(SubtotalMarker())
+
+    def clear_subtotals(self):
+        self.entries = [
+            e for e in self.entries
+            if not isinstance(e, SubtotalMarker)
+        ]
 
     def remove_item(self, product_id):
-        self.items.pop(product_id, None)
-
-    def update_quantity(self, product_id, quantity):
-        if product_id in self.items:
-            self.items[product_id].quantity = quantity
-
-    def increase_quantity(self, product_id: int):
-        if product_id in self.items:
-            self.items[product_id].quantity += 1
+        for i, entry in enumerate(self.entries):
+            if isinstance(entry, CartItem) and entry.product_id == product_id:
+                self.entries.pop(i)
+                return
 
     def clear(self):
-        self.items.clear()
-        self.global_discount = 0.0
+        self.entries.clear()
 
 
 class SalesService:
@@ -96,8 +136,8 @@ class SalesService:
         Convert cart to a completed Sale. Deducts stock automatically.
         Returns the saved Sale object.
         """
-        if not cart.items:
-            raise ValueError("Cannot finalize an empty cart.")
+        if not cart.entries:
+            raise ValueError("Empty cart.")
 
         sale_number = SalesService._generate_sale_number(session)
         change = None
@@ -107,7 +147,6 @@ class SalesService:
         sale = Sale(
             sale_number=sale_number,
             total_amount=cart.subtotal,
-            discount_amount=cart.global_discount,
             final_amount=cart.total,
             payment_method=payment_method,
             amount_tendered=amount_tendered,
@@ -118,25 +157,28 @@ class SalesService:
         session.add(sale)
         session.flush()  # Get sale.id without committing
 
-        for cart_item in cart.items.values():
+        for entry in cart.entries:
+
+            if not isinstance(entry, CartItem):
+                continue
             # Add sale line item
             sale_item = SaleItem(
                 sale_id=sale.id,
-                product_id=cart_item.product_id,
-                product_name=cart_item.product_name,
-                product_barcode=cart_item.product_barcode,
-                quantity=cart_item.quantity,
-                unit_price=cart_item.unit_price,
-                discount=cart_item.discount,
-                line_total=cart_item.line_total
+                product_id=entry.product_id,
+                product_name=entry.product_name,
+                product_barcode=entry.product_barcode,
+                quantity=entry.quantity,
+                unit_price=entry.unit_price,
+                discount=entry.discount,
+                line_total=entry.line_total
             )
             session.add(sale_item)
 
             # Deduct stock
             ProductService.adjust_stock(
                 session,
-                product_id=cart_item.product_id,
-                quantity_change=-cart_item.quantity,
+                product_id=entry.product_id,
+                quantity_change=-entry.quantity,
                 movement_type="sale",
                 reference=sale_number
             )
@@ -177,7 +219,7 @@ class SalesService:
         notes: str = None,
         client_id: int = None
     ) -> Invoice:
-        if not cart.items:
+        if not cart.entries:
             raise ValueError("Cannot finalize an empty cart.")
 
         sale_number = SalesService._generate_sale_number(session)
@@ -188,7 +230,6 @@ class SalesService:
         sale = Sale(
             sale_number=sale_number,
             total_amount=cart.subtotal,
-            discount_amount=cart.global_discount,
             final_amount=cart.total,
             payment_method=payment_method,
             amount_tendered=amount_tendered,
@@ -199,21 +240,27 @@ class SalesService:
         session.add(sale)
         session.flush()
 
-        for cart_item in cart.items.values():
-            session.add(SaleItem(
+        for entry in cart.entries:
+
+            if not isinstance(entry, CartItem):
+                continue
+            # Add sale line item
+            sale_item = SaleItem(
                 sale_id=sale.id,
-                product_id=cart_item.product_id,
-                product_name=cart_item.product_name,
-                product_barcode=cart_item.product_barcode,
-                quantity=cart_item.quantity,
-                unit_price=cart_item.unit_price,
-                discount=cart_item.discount,
-                line_total=cart_item.line_total
-            ))
+                product_id=entry.product_id,
+                product_name=entry.product_name,
+                product_barcode=entry.product_barcode,
+                quantity=entry.quantity,
+                unit_price=entry.unit_price,
+                discount=entry.discount,
+                line_total=entry.line_total
+            )
+
+            session.add(sale_item)
             ProductService.adjust_stock(
                 session,
-                product_id=cart_item.product_id,
-                quantity_change=-cart_item.quantity,
+                product_id=entry.product_id,
+                quantity_change=-entry.quantity,
                 movement_type="sale",
                 reference=sale_number
             )

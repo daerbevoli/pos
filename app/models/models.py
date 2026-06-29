@@ -63,7 +63,6 @@ class Sale(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     sale_number = Column(String(20), unique=True, nullable=False)  # e.g. "S-20241201-0042"
     total_amount = Column(Float, nullable=False)
-    discount_amount = Column(Float, default=0.0)
     tax_amount = Column(Float, default=0.0)
     final_amount = Column(Float, nullable=False)
     payment_method = Column(Enum("cash", "card", "bancontact", "meal_voucher", "mixed", name="payment_method"), default="cash")
