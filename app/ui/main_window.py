@@ -6,7 +6,7 @@ Persistent V-tab bar — each tab independently tracks its own screen.
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QStackedWidget, QFrame, QButtonGroup, QSizePolicy
+    QLabel, QStackedWidget, QFrame, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
@@ -104,11 +104,11 @@ class MainWindow(QMainWindow):
 
         # ── Stacked content area ──────────────────────────────────────────────
         self.stack = QStackedWidget()
-        self.pos_screen       = POSScreen()          # index 0
-        self.inventory_screen = InventoryScreen()     # index 1
-        self.client_screen    = ClientScreen()        # index 2
-        self.settings_screen  = SettingsScreen()      # index 3
-        self.reports_screen   = ReportsScreen()       # index 4
+        self.pos_screen       = POSScreen()             # index 0
+        self.inventory_screen = InventoryScreen()       # index 1
+        self.client_screen    = ClientScreen()          # index 2
+        self.settings_screen  = SettingsScreen()        # index 3
+        self.reports_screen   = ReportsScreen()         # index 4
 
         self.stack.addWidget(self.pos_screen)
         self.stack.addWidget(self.inventory_screen)
@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self.stack, stretch=1)
 
-        # Initialise to POS screen, tab 1
+        # Initialize to POS screen, tab 1
         self.stack.setCurrentIndex(0)
         self._refresh_salesperson()
 

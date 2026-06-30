@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QDateEdit, QGroupBox, QGridLayout, QComboBox
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
-from datetime import date, timedelta
 
 from app.core.database import get_session
 from app.core.sales_service import SalesService

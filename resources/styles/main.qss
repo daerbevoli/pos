@@ -77,7 +77,7 @@ QLineEdit#combinedInput {
 }
 
 QLabel#paymentLabel {
-    background-color: #10037B;
+    background-color: #ccc5be;
     color: #5a4a42;
     padding: 8px 10px;
     font-size: 15px;
@@ -528,17 +528,33 @@ QPushButton#pickerBtn[selected="true"] {
 }
 
 QLabel#clientLabel {
-    color: #0000ff;
     background-color: #fbf3ee;
-    font: bold;
-}
+    font-size: 20px;
+    font-weight: 700;
+    color: #052F6C;
+    }
 
 QLabel#clientLabel[frozen="true"] {
       background-color: #ccc5be;
-      color: #0000ff;
+      color: #052F6C;
       font: bold;
 }
 
 QWidget#header {
-    background-color: #fbf3ee
+    background-color: #fbf3ee;
+
+}
+
+QWidget#header[frozen="true"] {
+    background-color: #ccc5be;
+
+}
+
+QLabel#ticketTitle[frozen="true"] {
+    background-color: #ccc5be;
+}
+
+QLabel#ticketDate[frozen="true"] {
+    background-color: #ccc5be;
+
 }

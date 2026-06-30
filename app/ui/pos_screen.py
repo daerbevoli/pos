@@ -18,7 +18,6 @@ from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, SalesService
 from app.core.settings_service import SettingsService
-from app.ui.dialogs.product_search_dialog import ProductSearchDialog
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
 
@@ -95,24 +94,31 @@ class POSScreen(QWidget):
         t.start(1000)
 
     def _tick_time(self):
-        self.ticket_date.setText(QDateTime.currentDateTime().toString("HH:mm"))
-
+        self.ticket_date.setText(
+            QDateTime.currentDateTime().toString("dd-MM-yyyy HH:mm")
+        )
     # ── Left: ticket header + cart table ────────────────────────────────
 
     def _build_ticket_panel(self):
         col = QVBoxLayout()
         col.setSpacing(4)
 
-        header = QHBoxLayout()
-        header.setObjectName("header")
+        self.header_widget = QWidget()
+        self.header_widget.setObjectName("header")
+
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(8, 4, 8, 4)
+
         self.ticket_title = QLabel(f"V {self._active_tab}")
         self.ticket_title.setObjectName("ticketTitle")
-        header.addWidget(self.ticket_title)
-        header.addStretch()
         self.ticket_date = QLabel("")
         self.ticket_date.setObjectName("ticketDate")
-        header.addWidget(self.ticket_date)
-        col.addLayout(header)
+
+        header_layout.addWidget(self.ticket_title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.ticket_date)
+
+        col.addWidget(self.header_widget)
 
         self.cart_table = TicketTable(0, 4)
         self.cart_table.setObjectName("cartTable")
@@ -356,10 +362,7 @@ class POSScreen(QWidget):
             self.client_label.setVisible(False)
 
         # Restore frozen / unfrozen visuals
-        frozen = "true" if s.sale_finished else "false"
-        self.cart_table.setProperty("frozen", frozen)
-        self.cart_table.style().unpolish(self.cart_table)
-        self.cart_table.style().polish(self.cart_table)
+        self._set_frozen_style(s.sale_finished)
         if s.sale_finished:
             self.payment_label.setText(s.payment_text)
             self.input_stack.setCurrentIndex(1)
@@ -412,6 +415,7 @@ class POSScreen(QWidget):
         if QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
             self.cart.clear()
             self.combined_input.clear()
+            self.payment_label.clear()
             self.client_label.setVisible(False)
             self.client_id = None
             self.is_invoice = False
@@ -542,14 +546,20 @@ class POSScreen(QWidget):
         section_has_items = False
         prev_subtotal = 0.0
         font_bold = QFont(); font_bold.setBold(True)
+        font_item = QFont(); font_item.setPixelSize(15); font_item.setBold(False)
         for entry in self.cart.entries:
             if isinstance(entry, CartItem):
                 r = self.cart_table.rowCount()
                 self.cart_table.insertRow(r)
-                self.cart_table.setItem(r, 0, QTableWidgetItem(str(entry.quantity)))
-                self.cart_table.setItem(r, 1, QTableWidgetItem(entry.product_name))
-                self.cart_table.setItem(r, 2, QTableWidgetItem(f"{self.currency}{entry.unit_price:.2f}"))
-                self.cart_table.setItem(r, 3, QTableWidgetItem(f"{self.currency}{entry.line_total:.2f}"))
+                for col, text in enumerate([
+                    str(entry.quantity),
+                    entry.product_name,
+                    f"{self.currency}{entry.unit_price:.2f}",
+                    f"{self.currency}{entry.line_total:.2f}",
+                ]):
+                    cell = QTableWidgetItem(text)
+                    cell.setFont(font_item)
+                    self.cart_table.setItem(r, col, cell)
                 self.cart_table.setRowHeight(r, 25)
                 section_total += entry.line_total
                 section_count += entry.quantity
@@ -611,33 +621,36 @@ class POSScreen(QWidget):
         tendered = total if typed is None else typed
 
         with get_session() as session:
-            SalesService.finalize_sale(
-                session,
-                cart=self.cart,
-                payment_method=method,
-                amount_tendered=tendered,
-            )
+            print("Sale finalized", self.is_invoice)
             if self.is_invoice:
                 SalesService.finalize_invoice(
                     session,
                     cart=self.cart,
                     payment_method=method,
                     amount_tendered=tendered,
-                    notes="",
+                    notes="Invoice",
                     client_id=self.client_id,
+            )
+            else:
+                SalesService.finalize_sale(
+                    session,
+                    cart=self.cart,
+                    payment_method=method,
+                    amount_tendered=tendered,
                 )
 
         change = max(0.0, tendered - total)
         self._freeze_ticket(method, tendered, change)
 
+    def _set_frozen_style(self, frozen: bool):
+        for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date):
+            widget.setProperty("frozen", frozen)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+
     def _freeze_ticket(self, method: str, tendered: float, change: float):
         self.sale_finished = True
-        self.cart_table.setProperty("frozen", "true")
-        self.cart_table.style().unpolish(self.cart_table)
-        self.cart_table.style().polish(self.cart_table)
-        self.client_label.setProperty("frozen", "true")
-        self.client_label.style().unpolish(self.client_label)
-        self.client_label.style().polish(self.client_label)
+        self._set_frozen_style(True)
         self.combined_input.clear()
 
         method_label = {
@@ -654,12 +667,7 @@ class POSScreen(QWidget):
     def _unfreeze_ticket(self):
         self.sale_finished = False
         self.cart.clear()
-        self.cart_table.setProperty("frozen", "false")
-        self.cart_table.style().unpolish(self.cart_table)
-        self.cart_table.style().polish(self.cart_table)
-        self.client_label.setProperty("frozen", "false")
-        self.client_label.style().unpolish(self.client_label)
-        self.client_label.style().polish(self.client_label)
+        self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
 
