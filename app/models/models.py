@@ -7,7 +7,7 @@ from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
     DateTime, ForeignKey, Text, Enum
 )
-from sqlalchemy.orm import relationship, DeclarativeBase
+from sqlalchemy.orm import relationship, backref, DeclarativeBase
 
 
 class Base(DeclarativeBase):
@@ -153,3 +153,5 @@ class Invoice(Base):
     sale_id = Column(Integer, ForeignKey("sales.id"), unique=True)
     client_id = Column(Integer, ForeignKey("clients.id"))
     invoice_number = Column(String, unique=True)
+    sale   = relationship("Sale", backref=backref("invoice", uselist=False))
+    client = relationship("Client", backref=backref("invoices", uselist=True))

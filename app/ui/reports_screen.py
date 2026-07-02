@@ -90,7 +90,9 @@ class ReportsScreen(QWidget):
         self.sales_table.setHorizontalHeaderLabels([
             "Sale #", "Date & Time", "Items", "Payment", "Total"
         ])
+        self.sales_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(self.sales_table)
@@ -140,7 +142,8 @@ class ReportsScreen(QWidget):
             for sale in sales:
                 row = self.sales_table.rowCount()
                 self.sales_table.insertRow(row)
-                self.sales_table.setItem(row, 0, QTableWidgetItem(sale.sale_number))
+                display_number = sale.invoice.invoice_number if sale.invoice else sale.sale_number
+                self.sales_table.setItem(row, 0, QTableWidgetItem(display_number))
                 self.sales_table.setItem(row, 1, QTableWidgetItem(
                     sale.created_at.strftime("%d/%m/%Y %H:%M")
                 ))

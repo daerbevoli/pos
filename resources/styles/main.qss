@@ -61,7 +61,7 @@ QLabel#ticketTitle {
 QLabel#ticketDate {
     font-size: 22px;
     font-weight: 700;
-    color: #043486;
+    color: #052F6C;
 }
 
 QLineEdit#combinedInput {
@@ -557,4 +557,24 @@ QLabel#ticketTitle[frozen="true"] {
 QLabel#ticketDate[frozen="true"] {
     background-color: #ccc5be;
 
+}
+
+QWidget#paymentFooter {
+    background-color: #ccc5be;
+
+}
+
+QLabel#footerTotalLabel {
+    background-color: #ccc5be;
+    font-size: 22px;
+    font-weight: 700;
+    color: #052F6C;
+
+}
+
+QLabel#footerChangeLabel {
+    background-color: #ccc5be;
+    font-size: 22px;
+    font-weight: 700;
+    color: #052F6C;
 }

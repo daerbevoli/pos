@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QSizePolicy, QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime
-from PyQt6.QtGui import QFont, QBrush, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime, QRegularExpression
+from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
@@ -29,12 +29,16 @@ ADMIN_CODE = "2060"
 class _TabState:
     """Snapshot of one V-tab slot's POS state."""
     def __init__(self):
-        self.cart          = Cart()
-        self.sale_finished = False
-        self.is_invoice    = False
-        self.client_id     = None
-        self.client_name   = ""
-        self.payment_text  = ""
+        self.cart             = Cart()
+        self.sale_finished    = False
+        self.is_invoice       = False
+        self.client_id        = None
+        self.client_name      = ""
+        self.ticket_date_text = ""
+        self.frozen_method    = ""
+        self.frozen_tendered  = 0.0
+        self.frozen_change    = 0.0
+        self.frozen_total     = 0.0
 
 
 class POSScreen(QWidget):
@@ -48,10 +52,14 @@ class POSScreen(QWidget):
         super().__init__()
         self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, 6)}
         self._active_tab = 1
-        self.cart          = self._tab_states[1].cart
-        self.sale_finished = False
-        self.is_invoice        = False
-        self.client_id         = None
+        self.cart             = self._tab_states[1].cart
+        self.sale_finished    = False
+        self.is_invoice       = False
+        self.client_id        = None
+        self._frozen_method   = ""
+        self._frozen_tendered = 0.0
+        self._frozen_change   = 0.0
+        self._frozen_total    = 0.0
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -94,6 +102,8 @@ class POSScreen(QWidget):
         t.start(1000)
 
     def _tick_time(self):
+        if self.sale_finished:
+            return
         self.ticket_date.setText(
             QDateTime.currentDateTime().toString("dd-MM-yyyy HH:mm")
         )
@@ -148,16 +158,32 @@ class POSScreen(QWidget):
         self.combined_input.setObjectName("combinedInput")
         self.combined_input.setPlaceholderText("")
         self.combined_input.setMinimumHeight(34)
+        self.combined_input.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r'[0-9.,]*'))
+        )
         self.combined_input.returnPressed.connect(self._on_barcode_enter)
 
-        self.payment_label = QLabel()
-        self.payment_label.setObjectName("paymentLabel")
-        self.payment_label.setMinimumHeight(34)
-        self.payment_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.payment_footer = QWidget()
+        self.payment_footer.setObjectName("paymentFooter")
+        self.payment_footer.setMinimumHeight(40)
+        _fl = QHBoxLayout(self.payment_footer)
+        _fl.setContentsMargins(10, 4, 10, 4)
+        self.footer_total_lbl  = QLabel()
+        self.footer_change_lbl = QLabel()
+        _footer_font = QFont()
+        _footer_font.setBold(True)
+        _footer_font.setPixelSize(25)
+        self.footer_total_lbl.setFont(_footer_font)
+        self.footer_change_lbl.setFont(_footer_font)
+        self.footer_total_lbl.setObjectName("footerTotalLabel")
+        self.footer_change_lbl.setObjectName("footerChangeLabel")
+        _fl.addWidget(self.footer_total_lbl)
+        _fl.addStretch()
+        _fl.addWidget(self.footer_change_lbl)
 
         self.input_stack = QStackedWidget()
         self.input_stack.addWidget(self.combined_input)
-        self.input_stack.addWidget(self.payment_label)
+        self.input_stack.addWidget(self.payment_footer)
         col.addWidget(self.input_stack)
 
         return col
@@ -190,7 +216,6 @@ class POSScreen(QWidget):
         self.btn_disc_pct = FunctionButton("%\ndiscount", "discountBtn")
         self.btn_drawer   = FunctionButton("Drawer", "secFunc")
 
-        self.btn_card = FunctionButton("Card", "cardBtn")
         self.btn_ok   = FunctionButton("OK", "okBtn")
 
         self.btn_articles = FunctionButton("Articles", "secFunc")
@@ -213,7 +238,7 @@ class POSScreen(QWidget):
             (self.btn_articles, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1),
             (self.btn_reports, 3, 5, 1, 1),
 
-            (self.btn_client, 4, 2, 1, 1), (self.btn_card, 4, 3, 1, 1),
+            (self.btn_client, 4, 2, 1, 1),
             (self.btn_ok, 4, 5, 1, 1),
         ]
         for widget, r, c, rs, cs in layout_map:
@@ -230,12 +255,12 @@ class POSScreen(QWidget):
         pay_grid = QGridLayout()
         pay_grid.setSpacing(4)
 
-        self.btn_bancontact   = FunctionButton("Bancontact", "payAltBtn")
+        self.btn_card   = FunctionButton("card", "payAltBtn")
         self.btn_meal_voucher = FunctionButton("Meal\nvoucher", "payAltBtn")
         self.btn_subtotal     = FunctionButton("Subtotal", "subtotalBtn")
         self.btn_cash         = FunctionButton("Cash", "cashBtn")
 
-        pay_grid.addWidget(self.btn_bancontact, 0, 0)
+        pay_grid.addWidget(self.btn_card, 0, 0)
         pay_grid.addWidget(self.btn_meal_voucher, 1, 0)
         pay_grid.addWidget(self.btn_subtotal, 0, 1, 2, 1)
         pay_grid.addWidget(self.btn_cash, 0, 2, 2, 1)
@@ -246,6 +271,7 @@ class POSScreen(QWidget):
         col.addLayout(pay_grid, stretch=2)
 
         # Wire up
+        self.btn_reopen.clicked.connect(self._unfreeze_ticket)
         self.btn_plus.clicked.connect(self._increase_product)
         self.btn_minus.clicked.connect(self._decrease_product)
         self.btn_clear.clicked.connect(self._clear_cart)
@@ -253,7 +279,6 @@ class POSScreen(QWidget):
         self.btn_subtotal.clicked.connect(self._show_subtotal)
         self.btn_cash.clicked.connect(lambda: self._open_payment("cash"))
         self.btn_card.clicked.connect(lambda: self._open_payment("card"))
-        self.btn_bancontact.clicked.connect(lambda: self._open_payment("bancontact"))
         self.btn_meal_voucher.clicked.connect(lambda: self._open_payment("meal_voucher"))
         self.btn_ok.clicked.connect(self._on_barcode_enter)
         self.btn_disc_pct.clicked.connect(self._apply_percent_discount)
@@ -341,12 +366,16 @@ class POSScreen(QWidget):
 
     def _save_tab_state(self):
         s = self._tab_states[self._active_tab]
-        s.cart          = self.cart
-        s.sale_finished = self.sale_finished
-        s.is_invoice    = self.is_invoice
-        s.client_id     = self.client_id
-        s.client_name   = self.client_label.text() if self.client_label.isVisible() else ""
-        s.payment_text  = self.payment_label.text()
+        s.cart             = self.cart
+        s.sale_finished    = self.sale_finished
+        s.is_invoice       = self.is_invoice
+        s.client_id        = self.client_id
+        s.client_name      = self.client_label.text() if self.client_label.isVisible() else ""
+        s.ticket_date_text = self.ticket_date.text() if self.sale_finished else ""
+        s.frozen_method    = self._frozen_method
+        s.frozen_tendered  = self._frozen_tendered
+        s.frozen_change    = self._frozen_change
+        s.frozen_total     = self._frozen_total
 
     def _load_tab_state(self, idx: int):
         s = self._tab_states[idx]
@@ -362,10 +391,16 @@ class POSScreen(QWidget):
             self.client_label.setVisible(False)
 
         # Restore frozen / unfrozen visuals
+        self._frozen_method   = s.frozen_method
+        self._frozen_tendered = s.frozen_tendered
+        self._frozen_change   = s.frozen_change
+        self._frozen_total    = s.frozen_total
         self._set_frozen_style(s.sale_finished)
         if s.sale_finished:
-            self.payment_label.setText(s.payment_text)
+            self._update_payment_footer()
             self.input_stack.setCurrentIndex(1)
+            if s.ticket_date_text:
+                self.ticket_date.setText(s.ticket_date_text)
         else:
             self.input_stack.setCurrentIndex(0)
 
@@ -415,10 +450,17 @@ class POSScreen(QWidget):
         if QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
             self.cart.clear()
             self.combined_input.clear()
-            self.payment_label.clear()
             self.client_label.setVisible(False)
             self.client_id = None
             self.is_invoice = False
+            if self.sale_finished:
+                self.sale_finished    = False
+                self._frozen_method   = ""
+                self._frozen_tendered = 0.0
+                self._frozen_change   = 0.0
+                self._frozen_total    = 0.0
+                self._set_frozen_style(False)
+                self.input_stack.setCurrentIndex(0)
             self._refresh_cart()
         self.combined_input.setFocus()
 
@@ -502,6 +544,9 @@ class POSScreen(QWidget):
         return total
 
     def _show_subtotal(self):
+        if self.sale_finished:
+            self._show_overlay("Sale finished")
+            return
         if not self.cart.entries:
             self._show_overlay(message="Cart empty")
         # Allow subtotal if the current section has at least a CartItem or DiscountEntry
@@ -588,8 +633,31 @@ class POSScreen(QWidget):
                 section_count = 0
                 section_has_items = False
 
+        # ── Payment rows (frozen state) ──────────────────────────────────
+        if self.sale_finished and self._frozen_method:
+            font_pay = QFont(); font_pay.setBold(True); font_pay.setPixelSize(15)
+            r = self.cart_table.rowCount()
+            self.cart_table.insertRow(r)
+            tendered_str = f"{self._frozen_tendered:.2f}".replace(".", ",")
+            for ci, text in enumerate(["", self._frozen_method, "", tendered_str]):
+                cell = QTableWidgetItem(text)
+                cell.setFont(font_pay)
+                cell.setBackground(QBrush(QColor(176, 216, 230)))
+                self.cart_table.setItem(r, ci, cell)
+            self.cart_table.setRowHeight(r, 30)
+            if self._frozen_change > 0:
+                r = self.cart_table.rowCount()
+                self.cart_table.insertRow(r)
+                change_str = f"-{self._frozen_change:.2f}".replace(".", ",")
+                for ci, text in enumerate(["", "Change", "", change_str]):
+                    cell = QTableWidgetItem(text)
+                    cell.setFont(font_pay)
+                    cell.setBackground(QBrush(QColor(135, 185, 215)))
+                    self.cart_table.setItem(r, ci, cell)
+                self.cart_table.setRowHeight(r, 30)
+
         # ── Row selection ────────────────────────────────────────────────
-        if select_last or not self.cart.entries:
+        if select_last or not self.cart.entries or self.sale_finished:
             self.cart_table.selectRow(self.cart_table.rowCount() - 1)
         elif prev_idx is not None:
             table_row = 0
@@ -605,6 +673,8 @@ class POSScreen(QWidget):
         self.tab_updated.emit(self._active_tab, amount)
 
     def _move_selection(self, delta: int):
+        if self.sale_finished:
+            return
         row = self.cart_table.currentRow()
         new_row = max(0, min(self.cart_table.rowCount() - 1, row + delta))
         self.cart_table.selectRow(new_row)
@@ -612,6 +682,9 @@ class POSScreen(QWidget):
     # ── Payment ───────────────────────────────────────────────────────────
 
     def _open_payment(self, method: str):
+        if self.sale_finished:
+            self._show_overlay("Sale finished")
+            return
         if not any(isinstance(e, CartItem) for e in self.cart.entries):
             self._show_overlay("Add items before payment.", title="Empty Ticket", kind="error")
             return
@@ -649,30 +722,45 @@ class POSScreen(QWidget):
             widget.style().polish(widget)
 
     def _freeze_ticket(self, method: str, tendered: float, change: float):
-        self.sale_finished = True
+        self.sale_finished    = True
+        self._frozen_method   = {
+            "cash": "Cash", "Card": "Card", "meal_voucher": "Meal voucher",
+        }.get(method, method.title())
+        self._frozen_tendered = tendered
+        self._frozen_change   = change
+        self._frozen_total    = self.cart.total
         self._set_frozen_style(True)
         self.combined_input.clear()
-
-        method_label = {
-            "cash": "Cash", "card": "Card",
-            "bancontact": "Bancontact", "meal_voucher": "Meal voucher",
-        }.get(method, method.title())
-        parts = [f"PAID BY  {method_label}", f"{self.currency}{tendered:.2f}"]
-        if change > 0:
-            parts.append(f"Change: {self.currency}{change:.2f}")
-        self.payment_label.setText("    |    ".join(parts))
+        self._update_payment_footer()
         self.input_stack.setCurrentIndex(1)
+        self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 
+    def _update_payment_footer(self):
+        total_str = f"{self._frozen_total:.2f}".replace(".", ",")
+        self.footer_total_lbl.setText(f"Total  {total_str}")
+        if self._frozen_change > 0:
+            change_str = f"{self._frozen_change:.2f}".replace(".", ",")
+            self.footer_change_lbl.setText(f"Change  -{change_str}")
+        else:
+            self.footer_change_lbl.setText("")
+
     def _unfreeze_ticket(self):
-        self.sale_finished = False
+        self.sale_finished    = False
+        self._frozen_method   = ""
+        self._frozen_tendered = 0.0
+        self._frozen_change   = 0.0
+        self._frozen_total    = 0.0
         self.cart.clear()
         self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
+        self.combined_input.setFocus()
 
     def _get_selected_entry_index(self) -> int | None:
         """Index into cart.entries for the selected row; None for SubtotalMarker rows."""
+        if self.sale_finished:
+            return None
         row = self.cart_table.currentRow()
         if row < 0:
             return None

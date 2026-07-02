@@ -15,7 +15,7 @@ class TicketTable(QTableWidget):
             self.backspace_pressed.emit()
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.enter_pressed.emit()
-        elif (text and text.isprintable()
+        elif (text and text.isdigit()
               and not mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
             self.text_entered.emit(text)
         else:
