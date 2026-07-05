@@ -114,6 +114,7 @@ class TapToDismissOverlay(QWidget):
         self.setGeometry(self.parentWidget().rect())
         self.raise_()
         self.show()
+        self.grabKeyboard()
 
     def resizeEvent(self, event):
         # Keep covering the parent if the window is resized while visible
@@ -124,3 +125,9 @@ class TapToDismissOverlay(QWidget):
     def mousePressEvent(self, event):
         # Tap anywhere — including the card — dismisses it
         self.hide()
+
+    def hideEvent(self, event):
+        # Release regardless of how the overlay was hidden, so a stray hide()
+        # call elsewhere can never leave the keyboard grabbed permanently.
+        self.releaseKeyboard()
+        super().hideEvent(event)
