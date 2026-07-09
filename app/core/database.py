@@ -40,7 +40,17 @@ SessionFactory = sessionmaker(bind=ENGINE, autoflush=True, autocommit=False)
 def init_db():
     """Create all tables and seed default data if first run."""
     Base.metadata.create_all(ENGINE)
+    _run_migrations()
     _seed_defaults()
+
+
+def _run_migrations():
+    """Add columns that create_all() won't add to an already-existing table."""
+    with ENGINE.connect() as conn:
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)")}
+        if "cart_snapshot" not in existing:
+            conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN cart_snapshot TEXT")
+            conn.commit()
 
 
 def get_session() -> Session:

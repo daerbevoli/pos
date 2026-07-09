@@ -2,6 +2,7 @@
 Sales Service
 Handles checkout, sale creation, and sales history.
 """
+import json
 from datetime import date
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
@@ -112,6 +113,49 @@ class Cart:
     def clear(self):
         self.entries.clear()
 
+    def to_snapshot(self) -> str:
+        """Serialize entries in order, exactly as displayed, for later replay."""
+        data = []
+        for entry in self.entries:
+            if isinstance(entry, CartItem):
+                data.append({
+                    "type": "item",
+                    "product_id": entry.product_id,
+                    "product_name": entry.product_name,
+                    "product_barcode": entry.product_barcode,
+                    "unit_price": entry.unit_price,
+                    "quantity": entry.quantity,
+                    "unit": entry.unit,
+                    "discount": entry.discount,
+                })
+            elif isinstance(entry, DiscountEntry):
+                data.append({"type": "discount", "amount": entry.amount, "label": entry.label})
+            elif isinstance(entry, SubtotalMarker):
+                data.append({"type": "subtotal"})
+        return json.dumps(data)
+
+    @classmethod
+    def from_snapshot(cls, snapshot: str) -> "Cart":
+        """Rebuild a cart from a string produced by to_snapshot()."""
+        entries: list[ReceiptEntry] = []
+        for raw in json.loads(snapshot) if snapshot else []:
+            kind = raw.get("type")
+            if kind == "item":
+                entries.append(CartItem(
+                    product_id=raw["product_id"],
+                    product_name=raw["product_name"],
+                    product_barcode=raw["product_barcode"],
+                    unit_price=raw["unit_price"],
+                    quantity=raw["quantity"],
+                    unit=raw.get("unit", "pcs"),
+                    discount=raw.get("discount", 0.0),
+                ))
+            elif kind == "discount":
+                entries.append(DiscountEntry(amount=raw["amount"], label=raw["label"]))
+            elif kind == "subtotal":
+                entries.append(SubtotalMarker())
+        return cls(entries=entries)
+
 
 class SalesService:
 
@@ -152,7 +196,8 @@ class SalesService:
             amount_tendered=amount_tendered,
             change_given=change,
             notes=notes,
-            status="completed"
+            status="completed",
+            cart_snapshot=cart.to_snapshot(),
         )
         session.add(sale)
         session.flush()  # Get sale.id without committing
@@ -181,6 +226,82 @@ class SalesService:
                 quantity_change=-entry.quantity,
                 movement_type="sale",
                 reference=sale_number
+            )
+
+        session.commit()
+        session.refresh(sale)
+        return sale
+
+    @staticmethod
+    def update_sale(
+        session: Session,
+        sale_id: int,
+        cart: Cart,
+        payment_method: str = "cash",
+        amount_tendered: float = None,
+        notes: str = None
+    ) -> Sale:
+        """
+        Overwrite an existing completed sale with an edited cart, in place.
+        Keeps the same id / sale_number / created_at. Stock is reconciled:
+        old line quantities are restored, then the new cart's quantities
+        are deducted.
+        """
+        if not cart.entries:
+            raise ValueError("Empty cart.")
+
+        sale = session.query(Sale).filter_by(id=sale_id).first()
+        if not sale:
+            raise ValueError(f"Sale {sale_id} not found.")
+
+        # Restore stock from the old line items before replacing them.
+        for old_item in sale.items:
+            ProductService.adjust_stock(
+                session,
+                product_id=old_item.product_id,
+                quantity_change=old_item.quantity,
+                movement_type="return",
+                reference=sale.sale_number,
+                notes="Ticket reopened/edited",
+            )
+
+        sale.items = []  # cascade="all, delete-orphan" removes the old SaleItem rows
+        session.flush()
+
+        change = None
+        if payment_method == "cash" and amount_tendered is not None:
+            change = round(amount_tendered - cart.total, 2)
+
+        sale.total_amount = cart.subtotal
+        sale.final_amount = cart.total
+        sale.payment_method = payment_method
+        sale.amount_tendered = amount_tendered
+        sale.change_given = change
+        sale.cart_snapshot = cart.to_snapshot()
+        if notes:
+            sale.notes = notes
+
+        for entry in cart.entries:
+            if not isinstance(entry, CartItem):
+                continue
+            sale_item = SaleItem(
+                sale_id=sale.id,
+                product_id=entry.product_id,
+                product_name=entry.product_name,
+                product_barcode=entry.product_barcode,
+                quantity=entry.quantity,
+                unit_price=entry.unit_price,
+                discount=entry.discount,
+                line_total=entry.line_total
+            )
+            session.add(sale_item)
+
+            ProductService.adjust_stock(
+                session,
+                product_id=entry.product_id,
+                quantity_change=-entry.quantity,
+                movement_type="sale",
+                reference=sale.sale_number,
             )
 
         session.commit()
@@ -235,7 +356,8 @@ class SalesService:
             amount_tendered=amount_tendered,
             change_given=change,
             notes=notes,
-            status="completed"
+            status="completed",
+            cart_snapshot=cart.to_snapshot(),
         )
         session.add(sale)
         session.flush()

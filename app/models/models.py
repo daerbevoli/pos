@@ -71,6 +71,7 @@ class Sale(Base):
     notes = Column(Text, nullable=True)
     status = Column(Enum("completed", "refunded", "voided", name="sale_status"), default="completed")
     created_at = Column(DateTime, default=datetime.now)
+    cart_snapshot = Column(Text, nullable=True)  # JSON: ordered cart entries as they were at payment time
 
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
 

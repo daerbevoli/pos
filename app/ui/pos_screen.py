@@ -17,6 +17,7 @@ from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, SalesService
+from app.models.models import Sale
 from app.core.settings_service import SettingsService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
@@ -39,6 +40,7 @@ class _TabState:
         self.frozen_tendered  = 0.0
         self.frozen_change    = 0.0
         self.frozen_total     = 0.0
+        self.sale_id          = None   # DB Sale.id this frozen ticket was saved as, if any
 
 
 class POSScreen(QWidget):
@@ -60,6 +62,7 @@ class POSScreen(QWidget):
         self._frozen_tendered = 0.0
         self._frozen_change   = 0.0
         self._frozen_total    = 0.0
+        self._current_sale_id = None   # DB Sale.id this tab's frozen ticket was saved as, if any
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -271,7 +274,7 @@ class POSScreen(QWidget):
         col.addLayout(pay_grid, stretch=2)
 
         # Wire up
-        self.btn_reopen.clicked.connect(self._unfreeze_ticket)
+        self.btn_reopen.clicked.connect(self._reopen_ticket)
         self.btn_plus.clicked.connect(self._increase_product)
         self.btn_minus.clicked.connect(self._decrease_product)
         self.btn_clear.clicked.connect(self._clear_cart)
@@ -376,6 +379,7 @@ class POSScreen(QWidget):
         s.frozen_tendered  = self._frozen_tendered
         s.frozen_change    = self._frozen_change
         s.frozen_total     = self._frozen_total
+        s.sale_id          = self._current_sale_id
 
     def _load_tab_state(self, idx: int):
         s = self._tab_states[idx]
@@ -383,6 +387,7 @@ class POSScreen(QWidget):
         self.sale_finished = s.sale_finished
         self.is_invoice    = s.is_invoice
         self.client_id     = s.client_id
+        self._current_sale_id = s.sale_id
 
         if s.client_name:
             self.client_label.setText(s.client_name)
@@ -453,6 +458,7 @@ class POSScreen(QWidget):
             self.client_label.setVisible(False)
             self.client_id = None
             self.is_invoice = False
+            self._current_sale_id = None
             if self.sale_finished:
                 self.sale_finished    = False
                 self._frozen_method   = ""
@@ -694,23 +700,34 @@ class POSScreen(QWidget):
         tendered = total if typed is None else typed
 
         with get_session() as session:
-            print("Sale finalized", self.is_invoice)
-            if self.is_invoice:
-                SalesService.finalize_invoice(
+            if self._current_sale_id is not None:
+                # Re-paying a reopened ticket: overwrite the existing sale in place.
+                sale = SalesService.update_sale(
+                    session,
+                    sale_id=self._current_sale_id,
+                    cart=self.cart,
+                    payment_method=method,
+                    amount_tendered=tendered,
+                )
+                self._current_sale_id = sale.id
+            elif self.is_invoice:
+                invoice = SalesService.finalize_invoice(
                     session,
                     cart=self.cart,
                     payment_method=method,
                     amount_tendered=tendered,
                     notes="Invoice",
                     client_id=self.client_id,
-            )
+                )
+                self._current_sale_id = invoice.sale_id
             else:
-                SalesService.finalize_sale(
+                sale = SalesService.finalize_sale(
                     session,
                     cart=self.cart,
                     payment_method=method,
                     amount_tendered=tendered,
                 )
+                self._current_sale_id = sale.id
 
         change = max(0.0, tendered - total)
         self._freeze_ticket(method, tendered, change)
@@ -751,7 +768,31 @@ class POSScreen(QWidget):
         self._frozen_tendered = 0.0
         self._frozen_change   = 0.0
         self._frozen_total    = 0.0
+        self._current_sale_id = None
         self.cart.clear()
+        self._set_frozen_style(False)
+        self.input_stack.setCurrentIndex(0)
+        self._refresh_cart()
+        self.combined_input.setFocus()
+
+    def _reopen_ticket(self):
+        """Make the tab's just-frozen sale editable again, reloaded from its DB snapshot."""
+        if not self.sale_finished or self._current_sale_id is None:
+            return
+
+        with get_session() as session:
+            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            if not sale:
+                self._show_overlay("Sale not found", kind="error")
+                return
+            self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
+
+        self.sale_finished    = False
+        self._frozen_method   = ""
+        self._frozen_tendered = 0.0
+        self._frozen_change   = 0.0
+        self._frozen_total    = 0.0
+        # self._current_sale_id stays set: next payment overwrites this sale in place.
         self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
