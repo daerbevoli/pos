@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime, QRegularExpression
 from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
+from win32ctypes.pywin32.pywintypes import datetime
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
@@ -21,6 +22,7 @@ from app.models.models import Sale
 from app.core.settings_service import SettingsService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
+from datetime import date
 
 import logging
 
@@ -41,6 +43,8 @@ class _TabState:
         self.frozen_change    = 0.0
         self.frozen_total     = 0.0
         self.sale_id          = None   # DB Sale.id this frozen ticket was saved as, if any
+        self.sale_ids         = []
+        self.sales            = -1
 
 
 class POSScreen(QWidget):
@@ -63,6 +67,8 @@ class POSScreen(QWidget):
         self._frozen_change   = 0.0
         self._frozen_total    = 0.0
         self._current_sale_id = None   # DB Sale.id this tab's frozen ticket was saved as, if any
+        self.sale_ids         = []
+        self.sales            = -1
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -259,12 +265,10 @@ class POSScreen(QWidget):
         pay_grid.setSpacing(4)
 
         self.btn_card   = FunctionButton("card", "payAltBtn")
-        self.btn_meal_voucher = FunctionButton("Meal\nvoucher", "payAltBtn")
         self.btn_subtotal     = FunctionButton("Subtotal", "subtotalBtn")
         self.btn_cash         = FunctionButton("Cash", "cashBtn")
 
-        pay_grid.addWidget(self.btn_card, 0, 0)
-        pay_grid.addWidget(self.btn_meal_voucher, 1, 0)
+        pay_grid.addWidget(self.btn_card, 0, 0, 2, 1)
         pay_grid.addWidget(self.btn_subtotal, 0, 1, 2, 1)
         pay_grid.addWidget(self.btn_cash, 0, 2, 2, 1)
         pay_grid.setColumnStretch(0, 1)
@@ -282,7 +286,6 @@ class POSScreen(QWidget):
         self.btn_subtotal.clicked.connect(self._show_subtotal)
         self.btn_cash.clicked.connect(lambda: self._open_payment("cash"))
         self.btn_card.clicked.connect(lambda: self._open_payment("card"))
-        self.btn_meal_voucher.clicked.connect(lambda: self._open_payment("meal_voucher"))
         self.btn_ok.clicked.connect(self._on_barcode_enter)
         self.btn_disc_pct.clicked.connect(self._apply_percent_discount)
         self.btn_disc_amt.clicked.connect(self._apply_amount_discount)
@@ -294,7 +297,12 @@ class POSScreen(QWidget):
         self.btn_settings.clicked.connect(lambda: self._emit_signal(3))
         self.btn_reports.clicked.connect(lambda: self._emit_signal(4))
 
+        self.btn_left.clicked.connect(self._previous_sale)
+        self.btn_right.clicked.connect(self._next_sale)
+
         return col
+
+
 
     # ── Bottom: numpad + category/product grid ───────────────────────────
 
@@ -419,8 +427,8 @@ class POSScreen(QWidget):
         if label == "⌫":
             self.combined_input.setText(self.combined_input.text()[:-1])
         elif label == ",":
-            if "." not in self.combined_input.text():
-                self.combined_input.insert(".")
+            if "," not in self.combined_input.text():
+                self.combined_input.insert(",")
         else:
             self.combined_input.insert(label)
         self.combined_input.setFocus()
@@ -720,6 +728,8 @@ class POSScreen(QWidget):
                     client_id=self.client_id,
                 )
                 self._current_sale_id = invoice.sale_id
+                self.sale_ids.append(invoice.sale_id)
+                self.sales += 1
             else:
                 sale = SalesService.finalize_sale(
                     session,
@@ -728,7 +738,8 @@ class POSScreen(QWidget):
                     amount_tendered=tendered,
                 )
                 self._current_sale_id = sale.id
-
+                self.sale_ids.append(sale.id)
+                self.sales += 1
         change = max(0.0, tendered - total)
         self._freeze_ticket(method, tendered, change)
 
@@ -741,7 +752,7 @@ class POSScreen(QWidget):
     def _freeze_ticket(self, method: str, tendered: float, change: float):
         self.sale_finished    = True
         self._frozen_method   = {
-            "cash": "Cash", "Card": "Card", "meal_voucher": "Meal voucher",
+            "cash": "Cash", "Card": "Card"
         }.get(method, method.title())
         self._frozen_tendered = tendered
         self._frozen_change   = change
@@ -797,6 +808,60 @@ class POSScreen(QWidget):
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
         self.combined_input.setFocus()
+
+    def _previous_sale(self):
+
+        self.sales -= 1
+        self._current_sale_id = self.sale_ids[self.sales]
+
+        if not self.sale_finished or self._current_sale_id is None:
+            return
+
+        with get_session() as session:
+            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            if not sale:
+                self._show_overlay("Sale not found", kind="error")
+                return
+            self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
+
+        self.sale_finished    = True
+        self._frozen_method   = "Cash"
+        self._frozen_tendered = sale.amount_tendered
+        self._frozen_change   = sale.change_given
+        self._frozen_total    = sale.total_amount
+        # self._current_sale_id stays set: next payment overwrites this sale in place.
+        self._set_frozen_style(True)
+        self.input_stack.setCurrentIndex(1)
+        self._refresh_cart()
+        self.combined_input.setFocus()
+
+
+    def _next_sale(self):
+
+        self.sales += 1
+        self._current_sale_id = self.sale_ids[self.sales]
+
+        if not self.sale_finished or self._current_sale_id is None:
+            return
+
+        with get_session() as session:
+            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            if not sale:
+                self._show_overlay("Sale not found", kind="error")
+                return
+            self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
+
+        self.sale_finished    = True
+        self._frozen_method   = "Cash"
+        self._frozen_tendered = sale.amount_tendered
+        self._frozen_change   = sale.change_given
+        self._frozen_total    = sale.total_amount
+        # self._current_sale_id stays set: next payment overwrites this sale in place.
+        self._set_frozen_style(True)
+        self.input_stack.setCurrentIndex(1)
+        self._refresh_cart()
+        self.combined_input.setFocus()
+
 
     def _get_selected_entry_index(self) -> int | None:
         """Index into cart.entries for the selected row; None for SubtotalMarker rows."""

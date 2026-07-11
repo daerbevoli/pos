@@ -410,6 +410,8 @@ class SalesService:
             .all()
         )
 
+
+
     @staticmethod
     def get_daily_summary(session: Session, target_date: date) -> dict:
         sales = SalesService.get_sales_for_date(session, target_date)
