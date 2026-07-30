@@ -87,7 +87,7 @@ class ArticleDetailPanel(QFrame):
 
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("")
-        self.barcode.setMaxLength(13)
+        self.barcode.setMaxLength(14)
         self.barcode.setMinimumHeight(30)
 
         self.name = QLineEdit()
