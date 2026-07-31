@@ -185,7 +185,7 @@ class SalesService:
 
         sale_number = SalesService._generate_sale_number(session)
         change = None
-        if payment_method == "cash" and amount_tendered is not None:
+        if payment_method == "cash" or payment_method == "card" and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
 
         sale = Sale(
@@ -269,7 +269,7 @@ class SalesService:
         session.flush()
 
         change = None
-        if payment_method == "cash" and amount_tendered is not None:
+        if payment_method == "cash" or payment_method == "card" and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
 
         sale.total_amount = cart.subtotal
@@ -345,7 +345,7 @@ class SalesService:
 
         sale_number = SalesService._generate_sale_number(session)
         change = None
-        if payment_method == "cash" and amount_tendered is not None:
+        if payment_method == "cash" or payment_method == "card" and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
 
         sale = Sale(

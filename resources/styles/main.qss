@@ -76,6 +76,11 @@ QLineEdit#combinedInput {
     selection-background-color: #4a90d9;
 }
 
+QLineEdit#combinedInput[frozen="true"] {
+    background-color: #ccc5be;
+    color: #665C57;
+}
+
 QLabel#ticketTotalLbl {
     background-color: #fbf3ee;
     border: none;
@@ -86,6 +91,11 @@ QLabel#ticketTotalLbl {
     font-weight: 600;
     color: #1c2430;
     selection-background-color: #4a90d9;
+}
+
+QLabel#ticketTotalLbl[frozen=True] {
+    background-color: #ccc5be;
+    color: #665C57;
 }
 
 

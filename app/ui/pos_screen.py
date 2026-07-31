@@ -5,6 +5,7 @@ payment row, and a numpad + category/product grid.
 Tab state (cart, frozen, client) is managed per V-tab slot and
 driven externally by MainWindow via set_active_tab().
 """
+import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
@@ -118,7 +119,7 @@ class POSScreen(QWidget):
         if self.sale_finished:
             return
         self.ticket_date.setText(
-            QDateTime.currentDateTime().toString("dd-MM-yyyy HH:mm")
+            datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
         )
     # ── Left: ticket header + cart table ────────────────────────────────
 
@@ -417,10 +418,10 @@ class POSScreen(QWidget):
 
         # Restore frozen / unfrozen visuals
         self._frozen_method   = s.frozen_method
-        self._frozen_tendered = s.frozen_tendered
-        self._frozen_change   = s.frozen_change
+        self._frozen_tendered = s.frozen_tendered or 0.0
+        self._frozen_change   = s.frozen_change or 0.0
         self._frozen_total    = s.frozen_total
-        self._set_frozen_style(s.sale_finished)
+        self._set_frozen_style(s.sale_finished or not self.cart_active)
         if s.sale_finished:
             self._update_payment_footer()
             self.input_stack.setCurrentIndex(1)
@@ -431,7 +432,7 @@ class POSScreen(QWidget):
 
         self.ticket_title.setText(f"V {idx}")
         self._refresh_cart()
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     # ── Numpad / scan input helpers ──────────────────────────────────────
 
@@ -443,7 +444,7 @@ class POSScreen(QWidget):
                 self.combined_input.insert(",")
         else:
             self.combined_input.insert(label)
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     # ── Cart interactions ────────────────────────────────────────────────
 
@@ -481,6 +482,14 @@ class POSScreen(QWidget):
         if not override and not self.cart_active:
             return
         if override or QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
+            if self.sale_finished:
+                self.sale_finished    = False
+                self._frozen_method   = ""
+                self._frozen_tendered = 0.0
+                self._frozen_change   = 0.0
+                self._frozen_total    = 0.0
+                self.input_stack.setCurrentIndex(0)
+                self.ticket_total_lbl.setVisible(False)
             self.cart.clear()
             self.combined_input.clear()
             self.client_label.setVisible(False)
@@ -489,7 +498,7 @@ class POSScreen(QWidget):
             self._current_sale_id = None
             self._set_frozen_style(True)
             self._refresh_cart()
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _remove_selected(self):
         if self.sale_finished:
@@ -499,7 +508,7 @@ class POSScreen(QWidget):
             return
         self.cart.entries.pop(idx)
         self._refresh_cart()
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _apply_percent_discount(self):
         if self.sale_finished:
@@ -517,7 +526,7 @@ class POSScreen(QWidget):
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"{pct:g}%"))
         self.combined_input.clear()
         self._refresh_cart()
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _apply_amount_discount(self):
         if self.sale_finished:
@@ -534,7 +543,7 @@ class POSScreen(QWidget):
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"{self.currency}{amount:.2f}"))
         self.combined_input.clear()
         self._refresh_cart()
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _get_discount_base(self) -> float | None:
         """
@@ -587,7 +596,7 @@ class POSScreen(QWidget):
             return
         self.cart.add_subtotal()
         self._refresh_cart(select_last=True)
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
@@ -700,7 +709,10 @@ class POSScreen(QWidget):
         self.tab_updated.emit(self._active_tab, amount)
 
         # ── Running total (always visible, independent of frozen state) ──
-        self.ticket_total_lbl.setText(f"Total  {self.currency}{total:.2f}")
+        if not self.cart_active:
+            self.ticket_total_lbl.setText("")
+        else:
+            self.ticket_total_lbl.setText(f"Total  {self.currency}{total:.2f}")
 
     def _move_selection(self, delta: int):
         if self.sale_finished:
@@ -760,7 +772,7 @@ class POSScreen(QWidget):
         self._freeze_ticket(method, tendered, change)
 
     def _set_frozen_style(self, frozen: bool):
-        for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date):
+        for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date, self.combined_input, self.ticket_total_lbl):
             widget.setProperty("frozen", frozen)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
@@ -779,7 +791,7 @@ class POSScreen(QWidget):
         self.input_stack.setCurrentIndex(1)
         self._refresh_cart(select_last=True)
         self.ticket_total_lbl.setVisible(False)
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _update_payment_footer(self):
         total_str = f"{self._frozen_total:.2f}".replace(".", ",")
@@ -802,16 +814,12 @@ class POSScreen(QWidget):
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
         self.ticket_total_lbl.setVisible(True)
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _reopen_ticket(self):
         """Make the tab's just-frozen sale editable again, reloaded from its DB snapshot."""
         if not self.sale_finished or self._current_sale_id is None:
             return
-        if self.cart_active:
-            self._show_overlay("Sale active")
-            return
-
         with get_session() as session:
             sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
             if not sale:
@@ -828,23 +836,38 @@ class POSScreen(QWidget):
         self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def _previous_sale(self):
+        if self.cart_active and not self.sale_finished:
+            self._show_overlay("Sale active", kind="info")
+            return
+        if not self.sale_ids:
+            self._show_overlay("No earlier sales", kind="info")
+            return
         if not self.sale_finished:
+            # Browsing from a cleared cart: jump to the most recent sale.
+            self._show_sale_at(len(self.sale_ids) - 1)
+            self.cart_table.setFocus()
             return
         if self.sales <= 0:
             self._show_overlay("No earlier sales", kind="info")
             return
         self._show_sale_at(self.sales - 1)
+        self.cart_table.setFocus()
 
     def _next_sale(self):
+        if self.cart_active and not self.sale_finished:
+            self._show_overlay("Sale active", kind="info")
+            return
         if not self.sale_finished:
+            self._show_overlay("No later sales", kind="info")
             return
         if self.sales >= len(self.sale_ids) - 1:
             self._show_overlay("No later sales", kind="info")
             return
         self._show_sale_at(self.sales + 1)
+        self.cart_table.setFocus()
 
     def _show_sale_at(self, index: int):
         self.sales = index
@@ -859,13 +882,14 @@ class POSScreen(QWidget):
 
         self.sale_finished    = True
         self._frozen_method   = {"cash": "Cash", "Card": "Card"}.get(sale.payment_method, sale.payment_method.title())
-        self._frozen_tendered = sale.amount_tendered
-        self._frozen_change   = sale.change_given
+        self._frozen_tendered = sale.amount_tendered or 0.0
+        self._frozen_change   = sale.change_given or 0.0
         self._frozen_total    = sale.total_amount
         self._set_frozen_style(True)
+        self._update_payment_footer()
         self.input_stack.setCurrentIndex(1)
+        self.ticket_date.setText(sale.created_at.strftime("%d-%m-%Y %H:%M"))
         self._refresh_cart()
-        self.combined_input.setFocus()
 
 
     def _get_selected_entry_index(self) -> int | None:
@@ -939,13 +963,15 @@ class POSScreen(QWidget):
             self.client_id = client_id
             self.is_invoice = True
             self._refresh_cart(select_last=True)
-        self.combined_input.setFocus()
+        self.cart_table.setFocus()
 
     def add_product_by_id(self, product_id: int):
         query = self.combined_input.text().strip()
         if not query:
-            return
-        quantity = int(round(float(query)))
+            quantity = 1
+        else:
+            quantity = int(round(float(query)))
+
         with get_session() as session:
             product = ProductService.get_by_id(session, product_id)
             if product:
