@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QSizePolicy, QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QDateTime, QRegularExpression
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRegularExpression
 from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
 from app.core.database import get_session
@@ -34,7 +34,7 @@ class _TabState:
     """Snapshot of one V-tab slot's POS state."""
     def __init__(self):
         self.cart             = Cart()
-        self.sale_finished    = False
+        self.sale_finished    = True
         self.is_invoice       = False
         self.client_id        = None
         self.client_name      = ""
@@ -115,8 +115,9 @@ class POSScreen(QWidget):
         t.timeout.connect(self._tick_time)
         t.start(1000)
 
-    def _tick_time(self):
-        if self.sale_finished:
+    def _tick_time(self, override: bool = False):
+        # No time ticking at finished (frozen) sale
+        if self.sale_finished and not override:
             return
         self.ticket_date.setText(
             datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
@@ -451,13 +452,11 @@ class POSScreen(QWidget):
     def _on_ticket_text(self, text: str):
         if self.sale_finished:
             self._unfreeze_ticket()
-        self._set_frozen_style(False)
         self.combined_input.insert(text)
 
     def _on_barcode_enter(self):
         if self.sale_finished:
             self._unfreeze_ticket()
-        self._set_frozen_style(False)
         query = self.combined_input.text().strip()
         if not query:
             return
@@ -481,15 +480,13 @@ class POSScreen(QWidget):
     def _clear_cart(self, override: bool = False):
         if not override and not self.cart_active:
             return
-        if override or QMessageBox.question(self, "Clear Cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
-            if self.sale_finished:
-                self.sale_finished    = False
-                self._frozen_method   = ""
-                self._frozen_tendered = 0.0
-                self._frozen_change   = 0.0
-                self._frozen_total    = 0.0
-                self.input_stack.setCurrentIndex(0)
-                self.ticket_total_lbl.setVisible(False)
+        if override or QMessageBox.question(self, "et", "Clear cart?") == QMessageBox.StandardButton.Yes:
+            self._frozen_method   = ""
+            self._frozen_tendered = 0.0
+            self._frozen_change   = 0.0
+            self._frozen_total    = 0.0
+            self.input_stack.setCurrentIndex(0)
+            self.ticket_total_lbl.setVisible(False)
             self.cart.clear()
             self.combined_input.clear()
             self.client_label.setVisible(False)
@@ -498,10 +495,19 @@ class POSScreen(QWidget):
             self._current_sale_id = None
             self._set_frozen_style(True)
             self._refresh_cart()
+            self._tick_time(override=True)
+            self.sale_finished = True
+            self.sales = len(self.sale_ids)
         self.cart_table.setFocus()
 
     def _remove_selected(self):
+        if self.combined_input.text():
+            self.combined_input.setText(self.combined_input.text()[:-1])
+            return
         if self.sale_finished:
+            return
+        if not self.cart.entries:
+            self._clear_cart(override=True)
             return
         idx = self._get_selected_entry_index()
         if idx is None:
@@ -702,14 +708,18 @@ class POSScreen(QWidget):
                     self.cart_table.selectRow(table_row)
                     break
                 table_row += 1
+            else:
+                self.cart_table.selectRow(self.cart_table.rowCount() - 1)
+        else:
+            self.cart_table.selectRow(self.cart_table.rowCount() - 1)
 
         # ── Tab button label ─────────────────────────────────────────────
         total = self.cart.total
-        amount = f"{total:.2f}".replace(".", ",") if self.cart.entries else ""
+        amount = f"{total:.2f}".replace(".", ",") if self.cart.entries and not self.sale_finished else ""
         self.tab_updated.emit(self._active_tab, amount)
 
         # ── Running total (always visible, independent of frozen state) ──
-        if not self.cart_active:
+        if self.sale_finished:
             self.ticket_total_lbl.setText("")
         else:
             self.ticket_total_lbl.setText(f"Total  {self.currency}{total:.2f}")
@@ -844,11 +854,6 @@ class POSScreen(QWidget):
             return
         if not self.sale_ids:
             self._show_overlay("No earlier sales", kind="info")
-            return
-        if not self.sale_finished:
-            # Browsing from a cleared cart: jump to the most recent sale.
-            self._show_sale_at(len(self.sale_ids) - 1)
-            self.cart_table.setFocus()
             return
         if self.sales <= 0:
             self._show_overlay("No earlier sales", kind="info")

@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
+from app.models.models import Invoice, Client
 from app.utils.utils import FunctionButton
 
 
@@ -85,13 +86,19 @@ class ReportsScreen(QWidget):
         layout.addWidget(cards_group)
 
         # ── Sales table ───────────────────────────────────────────────────────
-        self.sales_table = QTableWidget(0, 5)
+        self.sales_table = QTableWidget(0, 7)
         self.sales_table.setObjectName("reportTable")
         self.sales_table.setHorizontalHeaderLabels([
-            "Sale #", "Date & Time", "Items", "Payment", "Total"
+            "Sale #", "Date & Time", "Client name", "VAT number", "Items", "Payment", "Total"
         ])
         self.sales_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.sales_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.sales_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.sales_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.sales_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.sales_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+
 
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -147,9 +154,13 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 1, QTableWidgetItem(
                     sale.created_at.strftime("%d/%m/%Y %H:%M")
                 ))
-                self.sales_table.setItem(row, 2, QTableWidgetItem(str(len(sale.items))))
-                self.sales_table.setItem(row, 3, QTableWidgetItem(sale.payment_method.upper()))
-                self.sales_table.setItem(row, 4, QTableWidgetItem(f"{currency}{sale.final_amount:.2f}"))
+                client_name = sale.invoice.client.name if sale.invoice else "/"
+                self.sales_table.setItem(row, 2, QTableWidgetItem(client_name))
+                vat_num = sale.invoice.client.vatNumber if sale.invoice else "/"
+                self.sales_table.setItem(row, 3, QTableWidgetItem(vat_num))
+                self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
+                self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
+                self.sales_table.setItem(row, 6, QTableWidgetItem(f"{currency}{sale.final_amount:.2f}"))
                 self.sales_table.setRowHeight(row, 44)
 
     def _confirm(self):

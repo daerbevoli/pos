@@ -36,9 +36,6 @@ class TicketTab(QPushButton):
         text = f"{title}\n{amount}" if amount else title
         self.setText(text)
 
-
-
-
 class FunctionButton(QPushButton):
     """A square-ish function key in the right-hand control grid."""
     def __init__(self, label: str, role: str = "func"):

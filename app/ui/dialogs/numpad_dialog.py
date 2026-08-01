@@ -2,11 +2,13 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLineEdit, QPushButton, QLabel, QSizePolicy
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class NumpadDialog(QDialog):
     """Popup numpad for entering a numeric value."""
+
+    enter_pressed = pyqtSignal(bool)
 
     def __init__(self, title="Enter value", initial="", parent=None):
         super().__init__(parent)
@@ -14,6 +16,14 @@ class NumpadDialog(QDialog):
         self.setMinimumWidth(300)
         self.value = None
         self._build_ui(initial)
+        self.enter_pressed.connect(self._confirm)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.enter_pressed.emit(True)
+        else:
+            super().keyPressEvent(event)
 
     def _build_ui(self, initial: str):
         layout = QVBoxLayout(self)
