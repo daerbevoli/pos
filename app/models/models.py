@@ -87,7 +87,7 @@ class SaleItem(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     product_name = Column(String(200), nullable=False)  # Snapshot at time of sale
     product_barcode = Column(String(50), nullable=True)
-    quantity = Column(Integer, nullable=False)
+    quantity = Column(Float, nullable=False)
     unit_price = Column(Float, nullable=False)           # Snapshot at time of sale
     discount = Column(Float, default=0.0)
     line_total = Column(Float, nullable=False)

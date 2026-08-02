@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QComboBox, QLineEdit,
     QPushButton, QHBoxLayout
 )
+from PyQt6.QtCore import QLocale
 from app.models.models import Product
 
 
@@ -30,6 +31,7 @@ class StockAdjustmentDialog(QDialog):
         form.addRow("Reason:", self.movement_type)
 
         self.quantity = QDoubleSpinBox()
+        self.quantity.setLocale(QLocale.c())
         self.quantity.setMaximum(999999)
         self.quantity.setDecimals(2)
         self.quantity.setValue(1)

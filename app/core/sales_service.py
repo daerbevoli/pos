@@ -21,12 +21,14 @@ class CartItem(ReceiptEntry):
     product_name: str
     product_barcode: str
     unit_price: float
-    quantity: int
+    quantity: float | None  # None = amount not entered yet (weight/volume units)
     unit: str = "pcs"
     discount: float = 0.0
 
     @property
     def line_total(self):
+        if self.quantity is None:
+            return 0.0
         return round((self.unit_price * self.quantity) - self.discount, 2)
 
 
@@ -67,20 +69,27 @@ class Cart:
 
     @property
     def item_count(self) -> int:
-        return sum(entry.quantity for entry in self.entries if isinstance(entry, CartItem))
+        return sum(
+            entry.quantity for entry in self.entries
+            if isinstance(entry, CartItem) and entry.quantity is not None
+        )
 
-    def add_product(self, product, quantity=1):
-        # Walk backwards until we hit a subtotal marker.
-        for entry in reversed(self.entries):
-            if isinstance(entry, SubtotalMarker):
-                break
+    def add_product(self, product, quantity: float | None = 1):
+        # Pending (amount not yet entered) items always get their own row —
+        # merging would leave a stale value once the amount is filled in.
+        if quantity is not None:
+            # Walk backwards until we hit a subtotal marker.
+            for entry in reversed(self.entries):
+                if isinstance(entry, SubtotalMarker):
+                    break
 
-            if (
-                    isinstance(entry, CartItem)
-                    and entry.product_id == product.id
-            ):
-                entry.quantity += quantity
-                return
+                if (
+                        isinstance(entry, CartItem)
+                        and entry.product_id == product.id
+                        and entry.quantity is not None
+                ):
+                    entry.quantity += quantity
+                    return
 
         # No matching item in the current section.
         self.entries.append(

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QMessageBox, QComboBox, QFrame, QSizePolicy,
     QDoubleSpinBox, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QEvent, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QLocale, pyqtSignal
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
@@ -94,6 +94,7 @@ class ArticleDetailPanel(QFrame):
         self.name.setMinimumHeight(30)
 
         self.price = QDoubleSpinBox()
+        self.price.setLocale(QLocale.c())
         self.price.setPrefix("€ ")
         self.price.setMaximum(99999.99)
         self.price.setDecimals(2)
@@ -102,11 +103,13 @@ class ArticleDetailPanel(QFrame):
         self.tax_display = PickerDisplay(f"{self._tax_val} %")
 
         self.stock = QDoubleSpinBox()
+        self.stock.setLocale(QLocale.c())
         self.stock.setMaximum(999999)
         self.stock.setDecimals(2)
         self.stock.setMinimumHeight(30)
 
         self.min_stock = QDoubleSpinBox()
+        self.min_stock.setLocale(QLocale.c())
         self.min_stock.setMaximum(999999)
         self.min_stock.setDecimals(2)
         self.min_stock.setValue(5)
@@ -309,6 +312,8 @@ class ArticleDetailPanel(QFrame):
         for widget in self._fields:
             if isinstance(widget, PickerDisplay):
                 widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus if enabled else Qt.FocusPolicy.NoFocus)
+                if not enabled:
+                    widget.clearFocus()
             else:
                 widget.setEnabled(enabled)
         self.btn_new.setEnabled(not enabled)
@@ -316,12 +321,16 @@ class ArticleDetailPanel(QFrame):
         self.btn_delete.setEnabled(not enabled and self.current_product_id is not None)
         self.parent_screen.table.setEnabled(not enabled)
         if not enabled:
+            if self._active_row:
+                self._active_row.set_active(False)
+                self._active_row = None
             self.parent_screen._show_table_page()
 
     def _reset_fields_to_placeholder(self):
         self.barcode.clear()
         self.name.clear()
-        self.price.setValue(0)
+        self.price.setSpecialValueText(" ")
+        self.price.setValue(self.price.minimum())
         self.stock.setValue(0)
         self.min_stock.setValue(5)
         self._tax_val = "0"
