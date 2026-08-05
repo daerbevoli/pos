@@ -9,13 +9,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QEvent
 
 from app.models.models import Client
+from app.constants import DIALOG_WIDTH_XL
 
 class ClientDialog(QDialog):
     def __init__(self, parent=None, client: Client = None):
         super().__init__(parent)
         self.client = client
         self.setWindowTitle("Edit Client" if client else "Add Client")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(DIALOG_WIDTH_XL)
         self._build_ui()
         if client:
             self._populate(client)

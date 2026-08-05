@@ -22,6 +22,21 @@ from app.models.models import Sale
 from app.core.settings_service import SettingsService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
+from app.constants import (
+    BUTTON_HEIGHT,
+    BUTTON_HEIGHT_COMPACT,
+    CART_LABEL_HEIGHT,
+    COLOR_ROW_DISCOUNT,
+    COLOR_ROW_PAYMENT,
+    COLOR_ROW_PAYMENT_DARK,
+    COLOR_ROW_PENDING,
+    FONT_SIZE_CART_ITEM,
+    FONT_SIZE_CART_ROW,
+    FONT_SIZE_FOOTER_TOTAL,
+    ROW_HEIGHT_COMPACT,
+    SPACING_SM,
+    SPACING_XS,
+)
 
 
 from datetime import date
@@ -96,10 +111,10 @@ class POSScreen(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        root.setSpacing(SPACING_SM)
 
         body = QHBoxLayout()
-        body.setSpacing(6)
+        body.setSpacing(SPACING_SM)
         body.addLayout(self._build_ticket_panel(), stretch=5)
         body.addLayout(self._build_control_grid(), stretch=4)
         root.addLayout(body, stretch=5)
@@ -127,7 +142,7 @@ class POSScreen(QWidget):
 
     def _build_ticket_panel(self):
         col = QVBoxLayout()
-        col.setSpacing(4)
+        col.setSpacing(SPACING_XS)
 
         self.header_widget = QWidget()
         self.header_widget.setObjectName("header")
@@ -160,7 +175,7 @@ class POSScreen(QWidget):
 
         self.client_label = QLabel("")
         self.client_label.setObjectName("clientLabel")
-        self.client_label.setMinimumHeight(34)
+        self.client_label.setMinimumHeight(CART_LABEL_HEIGHT)
         self.client_label.setVisible(False)
         col.addWidget(self.client_label)
 
@@ -172,12 +187,12 @@ class POSScreen(QWidget):
 
         self.ticket_total_lbl = QLabel("")
         self.ticket_total_lbl.setObjectName("ticketTotalLbl")
-        self.ticket_total_lbl.setMinimumHeight(34)
+        self.ticket_total_lbl.setMinimumHeight(CART_LABEL_HEIGHT)
         self.ticket_total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.combined_input = QLineEdit()
         self.combined_input.setObjectName("combinedInput")
-        self.combined_input.setMinimumHeight(34)
+        self.combined_input.setMinimumHeight(CART_LABEL_HEIGHT)
         self.combined_input.setValidator(
             QRegularExpressionValidator(QRegularExpression(r'-?[0-9]*[.,]?[0-9]*'))
         )
@@ -185,14 +200,14 @@ class POSScreen(QWidget):
 
         self.payment_footer = QWidget()
         self.payment_footer.setObjectName("paymentFooter")
-        self.payment_footer.setMinimumHeight(40)
+        self.payment_footer.setMinimumHeight(CART_LABEL_HEIGHT)
         _fl = QHBoxLayout(self.payment_footer)
         _fl.setContentsMargins(10, 4, 10, 4)
         self.footer_total_lbl  = QLabel()
         self.footer_change_lbl = QLabel()
         _footer_font = QFont()
         _footer_font.setBold(True)
-        _footer_font.setPixelSize(25)
+        _footer_font.setPixelSize(FONT_SIZE_FOOTER_TOTAL)
         self.footer_total_lbl.setFont(_footer_font)
         self.footer_change_lbl.setFont(_footer_font)
         self.footer_total_lbl.setObjectName("footerTotalLabel")
@@ -216,10 +231,10 @@ class POSScreen(QWidget):
 
     def _build_control_grid(self):
         col = QVBoxLayout()
-        col.setSpacing(4)
+        col.setSpacing(SPACING_XS)
 
         grid = QGridLayout()
-        grid.setSpacing(4)
+        grid.setSpacing(SPACING_XS)
 
         self.btn_left          = FunctionButton("←", "navBtn")
         self.btn_right         = FunctionButton("→", "navBtn")
@@ -277,7 +292,7 @@ class POSScreen(QWidget):
 
         # Payment row
         pay_grid = QGridLayout()
-        pay_grid.setSpacing(4)
+        pay_grid.setSpacing(SPACING_XS)
 
         self.btn_card   = FunctionButton("card", "payAltBtn")
         self.btn_subtotal     = FunctionButton("Subtotal", "subtotalBtn")
@@ -323,10 +338,10 @@ class POSScreen(QWidget):
 
     def _build_bottom_grid(self):
         row = QHBoxLayout()
-        row.setSpacing(4)
+        row.setSpacing(SPACING_XS)
 
         self.category_grid = QGridLayout()
-        self.category_grid.setSpacing(4)
+        self.category_grid.setSpacing(SPACING_XS)
 
         self.category_buttons = []
         labels_rows = [
@@ -356,7 +371,7 @@ class POSScreen(QWidget):
         row.addLayout(self.category_grid, stretch=4)
 
         numpad = QGridLayout()
-        numpad.setSpacing(4)
+        numpad.setSpacing(SPACING_XS)
         keys = [
             ("7", 0, 0), ("8", 0, 1), ("9", 0, 2),
             ("4", 1, 0), ("5", 1, 1), ("6", 1, 2),
@@ -366,7 +381,7 @@ class POSScreen(QWidget):
         for label, r, c in keys:
             btn = QPushButton(label)
             btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
-            btn.setMinimumHeight(36)
+            btn.setMinimumHeight(BUTTON_HEIGHT_COMPACT)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.clicked.connect(lambda _, l=label: self._numpad_press(l))
@@ -677,12 +692,12 @@ class POSScreen(QWidget):
         ]
         font = QFont()
         font.setBold(True)
-        font.setPointSize(15)
+        font.setPointSize(FONT_SIZE_CART_ROW)
         for col, cell in enumerate(cells):
             cell.setFont(font)
-            cell.setBackground(QBrush(QColor(255, 230, 120)))
+            cell.setBackground(QBrush(QColor(*COLOR_ROW_PENDING)))
             self.cart_table.setItem(row, col, cell)
-        self.cart_table.setRowHeight(row, 30)
+        self.cart_table.setRowHeight(row, ROW_HEIGHT_COMPACT)
 
     def _refresh_cart(self, select_last=False):
         prev_idx = self._get_selected_entry_index()
@@ -692,25 +707,35 @@ class POSScreen(QWidget):
         section_count = 0
         section_has_items = False
         prev_subtotal = 0.0
-        font_bold = QFont(); font_bold.setPixelSize(15); font_bold.setBold(True)
-        font_item = QFont(); font_item.setPixelSize(20); font_item.setBold(False)
+        font_bold = QFont(); font_bold.setPixelSize(FONT_SIZE_CART_ROW); font_bold.setBold(True)
+        font_item = QFont(); font_item.setPixelSize(FONT_SIZE_CART_ITEM); font_item.setBold(False)
         for entry in self.cart.entries:
             if isinstance(entry, CartItem):
                 r = self.cart_table.rowCount()
                 self.cart_table.insertRow(r)
                 pending = entry.quantity is None
+                is_weight = entry.unit in WEIGHT_UNITS
+                if is_weight:
+                    qty_text = "1"
+                    weight_text = "?" if pending else f"{entry.quantity:g}{entry.unit}"
+                    name_text = f"{entry.product_name} - {weight_text}"
+                    price_text = f"{self.currency}{entry.unit_price:.2f}/{entry.unit}"
+                else:
+                    qty_text = "?" if pending else f"{entry.quantity:g}"
+                    name_text = entry.product_name
+                    price_text = f"{self.currency}{entry.unit_price:.2f}"
                 for col, text in enumerate([
-                    "?" if pending else f"{entry.quantity:g}",
-                    entry.product_name,
-                    f"{self.currency}{entry.unit_price:.2f}",
+                    qty_text,
+                    name_text,
+                    price_text,
                     "?" if pending else f"{self.currency}{entry.line_total:.2f}",
                 ]):
                     cell = QTableWidgetItem(text)
                     cell.setFont(font_item)
                     if pending:
-                        cell.setBackground(QBrush(QColor(255, 230, 120)))
+                        cell.setBackground(QBrush(QColor(*COLOR_ROW_PENDING)))
                     self.cart_table.setItem(r, col, cell)
-                self.cart_table.setRowHeight(r, 30)
+                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
                 section_total += entry.line_total
                 section_count += entry.quantity or 0
                 section_has_items = True
@@ -726,9 +751,9 @@ class POSScreen(QWidget):
                 ]
                 for c, cell in enumerate(cells):
                     cell.setFont(font_bold)
-                    cell.setBackground(QBrush(QColor(145, 230, 120)))
+                    cell.setBackground(QBrush(QColor(*COLOR_ROW_DISCOUNT)))
                     self.cart_table.setItem(r, c, cell)
-                self.cart_table.setRowHeight(r, 30)
+                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
                 section_total += entry.line_total   # negative
             elif isinstance(entry, SubtotalMarker):
                 # Discount-only section: show net against the previous subtotal
@@ -741,16 +766,16 @@ class POSScreen(QWidget):
 
         # ── Payment rows (frozen state) ──────────────────────────────────
         if self.sale_finished and self._frozen_method:
-            font_pay = QFont(); font_pay.setBold(True); font_pay.setPixelSize(15)
+            font_pay = QFont(); font_pay.setBold(True); font_pay.setPixelSize(FONT_SIZE_CART_ROW)
             r = self.cart_table.rowCount()
             self.cart_table.insertRow(r)
             tendered_str = f"{self._frozen_tendered:.2f}"
             for ci, text in enumerate(["", self._frozen_method, "", tendered_str]):
                 cell = QTableWidgetItem(text)
                 cell.setFont(font_pay)
-                cell.setBackground(QBrush(QColor(176, 216, 230)))
+                cell.setBackground(QBrush(QColor(*COLOR_ROW_PAYMENT)))
                 self.cart_table.setItem(r, ci, cell)
-            self.cart_table.setRowHeight(r, 30)
+            self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
             if self._frozen_change > 0:
                 r = self.cart_table.rowCount()
                 self.cart_table.insertRow(r)
@@ -758,9 +783,9 @@ class POSScreen(QWidget):
                 for ci, text in enumerate(["", "Change", "", change_str]):
                     cell = QTableWidgetItem(text)
                     cell.setFont(font_pay)
-                    cell.setBackground(QBrush(QColor(135, 185, 215)))
+                    cell.setBackground(QBrush(QColor(*COLOR_ROW_PAYMENT_DARK)))
                     self.cart_table.setItem(r, ci, cell)
-                self.cart_table.setRowHeight(r, 30)
+                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
 
         # ── Row selection ────────────────────────────────────────────────
         if select_last or not self.cart.entries or self.sale_finished:
@@ -991,6 +1016,8 @@ class POSScreen(QWidget):
             return
         entry = self.cart.entries[idx]
         if isinstance(entry, CartItem) and entry.quantity is not None:
+            if entry.unit in WEIGHT_UNITS:
+                return
             entry.quantity += 1
             self._refresh_cart()
 
@@ -1000,6 +1027,8 @@ class POSScreen(QWidget):
             return
         entry = self.cart.entries[idx]
         if isinstance(entry, CartItem) and entry.quantity is not None and entry.quantity > 1:
+            if entry.unit in WEIGHT_UNITS:
+                return
             entry.quantity -= 1
             self._refresh_cart()
 

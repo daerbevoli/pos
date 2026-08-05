@@ -20,6 +20,15 @@ from app.ui.settings_screen import SettingsScreen
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.utils.utils import TicketTab
+from app.constants import (
+    HEADER_MAX_HEIGHT,
+    HEADER_MIN_HEIGHT,
+    MAIN_WINDOW_MIN_HEIGHT,
+    MAIN_WINDOW_MIN_WIDTH,
+    SPACING_XS,
+    TAB_BAR_MAX_HEIGHT,
+    TAB_BAR_MIN_HEIGHT,
+)
 
 MAX_VTABS = 5
 
@@ -28,7 +37,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SKBC")
-        self.setMinimumSize(1024, 768)
+        self.setMinimumSize(MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT)
 
         self._active_vtab = 1
         # Per V-tab: which QStackedWidget index (screen) was last active
@@ -48,8 +57,8 @@ class MainWindow(QMainWindow):
         # ── Header: logo + clock / salesperson ───────────────────────────────
         header = QWidget()
         header.setObjectName("header")
-        header.setMinimumHeight(50)
-        header.setMaximumHeight(70)
+        header.setMinimumHeight(HEADER_MIN_HEIGHT)
+        header.setMaximumHeight(HEADER_MAX_HEIGHT)
         hl = QHBoxLayout(header)
         hl.setContentsMargins(20, 0, 20, 0)
         hl.setSpacing(12)
@@ -77,11 +86,11 @@ class MainWindow(QMainWindow):
         # ── Persistent V-tab bar ─────────────────────────────────────────────
         tab_bar = QWidget()
         tab_bar.setObjectName("vtabBar")
-        tab_bar.setMinimumHeight(44)
-        tab_bar.setMaximumHeight(56)
+        tab_bar.setMinimumHeight(TAB_BAR_MIN_HEIGHT)
+        tab_bar.setMaximumHeight(TAB_BAR_MAX_HEIGHT)
         tbl = QHBoxLayout(tab_bar)
         tbl.setContentsMargins(8, 4, 8, 4)
-        tbl.setSpacing(4)
+        tbl.setSpacing(SPACING_XS)
 
         self._vtab_group = QButtonGroup(self)
         self._vtab_group.setExclusive(True)

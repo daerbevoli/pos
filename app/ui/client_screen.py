@@ -14,6 +14,15 @@ from app.core.client_service import ClientService
 from app.ui.dialogs.client_dialog import ClientDialog
 from app.core.database import get_session
 from app.utils.utils import FunctionButton
+from app.constants import (
+    BUTTON_HEIGHT_SM,
+    FIELD_WIDTH_MD,
+    ICON_BUTTON_SIZE,
+    MARGIN_COMPACT,
+    ROW_HEIGHT_LARGE,
+    SPACING_MD,
+    SPACING_XS,
+)
 
 # ── Dummy client data (replace with DB later) ─────────────────────────────────
 DUMMY_CLIENTS = [
@@ -55,7 +64,7 @@ class ClientDetailPanel(QFrame):
     def _build_ui(self):
         outer = QHBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(8)
+        outer.setSpacing(SPACING_MD)
 
         # ── Left: field list ────────────────────────────────────────────
         field_frame = QFrame()
@@ -79,7 +88,7 @@ class ClientDetailPanel(QFrame):
             row = QHBoxLayout()
             cap_label = QLabel(caption)
             cap_label.setObjectName("articleFieldCaption")
-            cap_label.setFixedWidth(120)
+            cap_label.setFixedWidth(FIELD_WIDTH_MD)
             value_label = QLabel("—")
             value_label.setObjectName("articleFieldValue")
             row.addWidget(cap_label)
@@ -92,7 +101,7 @@ class ClientDetailPanel(QFrame):
 
         # ── Right: function-key grid ────────────────────────────────────
         grid = QGridLayout()
-        grid.setSpacing(4)
+        grid.setSpacing(SPACING_XS)
 
         self.btn_new = FunctionButton("New\nClient", "newArticleBtn")
         self.btn_modify = FunctionButton("Modify\nClient", "secFunc")
@@ -197,7 +206,7 @@ class ClientScreen(QWidget):
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setSpacing(SPACING_MD)
 
         # ── Article detail panel (always visible) ─────────────────────────────
         self.detail_panel = ClientDetailPanel(self)
@@ -208,7 +217,7 @@ class ClientScreen(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by name or VAT…")
-        self.search_input.setFixedHeight(44)
+        self.search_input.setFixedHeight(BUTTON_HEIGHT_SM)
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=2)
         layout.addLayout(toolbar)
@@ -263,21 +272,21 @@ class ClientScreen(QWidget):
             # Action buttons
             actions = QWidget()
             actions_layout = QHBoxLayout(actions)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
-            actions_layout.setSpacing(4)
+            actions_layout.setContentsMargins(*MARGIN_COMPACT)
+            actions_layout.setSpacing(SPACING_XS)
 
             edit_btn = QPushButton("✏️")
-            edit_btn.setFixedSize(36, 36)
+            edit_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
             edit_btn.clicked.connect(lambda _, cid=c.id: self._edit_client(cid))
             actions_layout.addWidget(edit_btn)
 
             del_btn = QPushButton("🗑️")
-            del_btn.setFixedSize(36, 36)
+            del_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
             del_btn.clicked.connect(lambda _, cid=c.id: self._delete_client(cid))
             actions_layout.addWidget(del_btn)
 
             self.table.setCellWidget(row, 7, actions)
-            self.table.setRowHeight(row, 50)
+            self.table.setRowHeight(row, ROW_HEIGHT_LARGE)
 
     # ── Detail panel wiring ─────────────────────────────────────────────────
 

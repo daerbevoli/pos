@@ -10,6 +10,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 from app.core.database import get_session
 from app.core.settings_service import SettingsService
+from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
 
 
 class SettingsScreen(QWidget):
@@ -40,9 +41,9 @@ class SettingsScreen(QWidget):
         self.browse_logo.clicked.connect(self._load_logo)
 
         self.logo_preview = QLabel()
-        self.logo_preview.setFixedSize(120, 60)
+        self.logo_preview.setFixedSize(*LOGO_PREVIEW_SIZE)
         self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logo_preview.setStyleSheet("border: 1px solid #ccc;")
+        self.logo_preview.setStyleSheet(f"border: 1px solid {COLOR_BORDER_LIGHT};")
 
         logo_row = QHBoxLayout()
         logo_row.addWidget(self.browse_logo)
@@ -77,7 +78,7 @@ class SettingsScreen(QWidget):
         # ── Save ──────────────────────────────────────────────────────────────
         save_btn = QPushButton("💾  Save Settings")
         save_btn.setObjectName("primaryBtn")
-        save_btn.setFixedHeight(50)
+        save_btn.setFixedHeight(BUTTON_HEIGHT_LG)
         save_btn.clicked.connect(self._save)
         layout.addWidget(save_btn)
         layout.addStretch()

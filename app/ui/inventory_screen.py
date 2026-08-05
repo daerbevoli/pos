@@ -24,6 +24,14 @@ from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
+from app.constants import (
+    ICON_BUTTON_SIZE,
+    INPUT_HEIGHT,
+    MARGIN_COMPACT,
+    ROW_HEIGHT_LARGE,
+    SPACING_MD,
+    SPACING_XS,
+)
 
 
 class ArticleDetailPanel(QFrame):
@@ -67,7 +75,7 @@ class ArticleDetailPanel(QFrame):
     def _build_ui(self):
         outer = QHBoxLayout(self)
         outer.setContentsMargins(3, 3, 3, 3)
-        outer.setSpacing(4)
+        outer.setSpacing(SPACING_XS)
 
         # ── Left: field list ────────────────────────────────────────────
         field_frame = QFrame()
@@ -88,17 +96,17 @@ class ArticleDetailPanel(QFrame):
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("")
         self.barcode.setMaxLength(14)
-        self.barcode.setMinimumHeight(30)
+        self.barcode.setMinimumHeight(INPUT_HEIGHT)
 
         self.name = QLineEdit()
-        self.name.setMinimumHeight(30)
+        self.name.setMinimumHeight(INPUT_HEIGHT)
 
         self.price = QDoubleSpinBox()
         self.price.setLocale(QLocale.c())
         self.price.setPrefix("€ ")
         self.price.setMaximum(99999.99)
         self.price.setDecimals(2)
-        self.price.setMinimumHeight(30)
+        self.price.setMinimumHeight(INPUT_HEIGHT)
 
         self.tax_display = PickerDisplay(f"{self._tax_val} %")
 
@@ -106,14 +114,14 @@ class ArticleDetailPanel(QFrame):
         self.stock.setLocale(QLocale.c())
         self.stock.setMaximum(999999)
         self.stock.setDecimals(2)
-        self.stock.setMinimumHeight(30)
+        self.stock.setMinimumHeight(INPUT_HEIGHT)
 
         self.min_stock = QDoubleSpinBox()
         self.min_stock.setLocale(QLocale.c())
         self.min_stock.setMaximum(999999)
         self.min_stock.setDecimals(2)
         self.min_stock.setValue(5)
-        self.min_stock.setMinimumHeight(30)
+        self.min_stock.setMinimumHeight(INPUT_HEIGHT)
 
         self.unit_display = PickerDisplay(self._unit_val)
         self.category_display = PickerDisplay(self._category_name)
@@ -502,7 +510,7 @@ class InventoryScreen(QWidget):
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(8)
+        layout.setSpacing(SPACING_MD)
 
         # ── Product table (constructed early: ArticleDetailPanel references it) ─
         self.table = QTableWidget(0, 8)
@@ -525,26 +533,26 @@ class InventoryScreen(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("")
-        self.search_input.setFixedHeight(30)
+        self.search_input.setFixedHeight(INPUT_HEIGHT)
         self.search_input.returnPressed.connect(self._on_barcode_scan)
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=1)
 
         self.category_filter = QComboBox()
-        self.category_filter.setFixedHeight(30)
+        self.category_filter.setFixedHeight(INPUT_HEIGHT)
         self.category_filter.addItem("All Categories", None)
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 
         self.low_stock_btn = QPushButton("Low Stock")
         self.low_stock_btn.setCheckable(True)
-        self.low_stock_btn.setFixedHeight(30)
+        self.low_stock_btn.setFixedHeight(INPUT_HEIGHT)
         self.low_stock_btn.toggled.connect(self.refresh)
         toolbar.addWidget(self.low_stock_btn)
 
         add_btn = QPushButton("＋ Add Product")
         add_btn.setObjectName("primaryBtn")
-        add_btn.setFixedHeight(30)
+        add_btn.setFixedHeight(INPUT_HEIGHT)
         add_btn.clicked.connect(self._add_product)
         toolbar.addWidget(add_btn)
 
@@ -631,27 +639,27 @@ class InventoryScreen(QWidget):
             # Action buttons
             actions = QWidget()
             actions_layout = QHBoxLayout(actions)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
-            actions_layout.setSpacing(4)
+            actions_layout.setContentsMargins(*MARGIN_COMPACT)
+            actions_layout.setSpacing(SPACING_XS)
 
             edit_btn = QPushButton("✏️")
-            edit_btn.setFixedSize(36, 36)
+            edit_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
             edit_btn.clicked.connect(lambda _, pid=p.id: self._edit_product(pid))
             actions_layout.addWidget(edit_btn)
 
             stock_btn = QPushButton("📦")
-            stock_btn.setFixedSize(36, 36)
+            stock_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
             stock_btn.setToolTip("Adjust stock")
             stock_btn.clicked.connect(lambda _, pid=p.id: self._adjust_stock(pid))
             actions_layout.addWidget(stock_btn)
 
             del_btn = QPushButton("🗑️")
-            del_btn.setFixedSize(36, 36)
+            del_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
             del_btn.clicked.connect(lambda _, pid=p.id: self._delete_product(pid))
             actions_layout.addWidget(del_btn)
 
             self.table.setCellWidget(row, 7, actions)
-            self.table.setRowHeight(row, 50)
+            self.table.setRowHeight(row, ROW_HEIGHT_LARGE)
 
     # ── Detail panel wiring ─────────────────────────────────────────────────
 

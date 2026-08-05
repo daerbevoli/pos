@@ -4,6 +4,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from app.constants import (
+    BUTTON_HEIGHT_SM,
+    DIALOG_WIDTH_SM,
+    NUMPAD_KEY_HEIGHT,
+    SPACING_MD,
+    SPACING_SM,
+)
+
 
 class NumpadDialog(QDialog):
     """Popup numpad for entering a numeric value."""
@@ -13,7 +21,7 @@ class NumpadDialog(QDialog):
     def __init__(self, title="Enter value", initial="", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(DIALOG_WIDTH_SM)
         self.value = None
         self._build_ui(initial)
         self.enter_pressed.connect(self._confirm)
@@ -27,16 +35,16 @@ class NumpadDialog(QDialog):
 
     def _build_ui(self, initial: str):
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        layout.setSpacing(SPACING_MD)
 
         self.display = QLineEdit(initial)
         self.display.setObjectName("amountInput")
         self.display.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.display.setMinimumHeight(48)
+        self.display.setMinimumHeight(NUMPAD_KEY_HEIGHT)
         layout.addWidget(self.display)
 
         grid = QGridLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(SPACING_SM)
 
         keys = [
             ("7", 0, 0), ("8", 0, 1), ("9", 0, 2),
@@ -47,7 +55,7 @@ class NumpadDialog(QDialog):
         for label, r, c in keys:
             btn = QPushButton(label)
             btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
-            btn.setMinimumHeight(48)
+            btn.setMinimumHeight(NUMPAD_KEY_HEIGHT)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.clicked.connect(lambda _, l=label: self._press(l))
             grid.addWidget(btn, r, c)
@@ -66,7 +74,7 @@ class NumpadDialog(QDialog):
 
         ok = QPushButton("OK")
         ok.setObjectName("okBtn")
-        ok.setMinimumHeight(44)
+        ok.setMinimumHeight(BUTTON_HEIGHT_SM)
         ok.clicked.connect(self._confirm)
         btn_row.addWidget(ok)
 

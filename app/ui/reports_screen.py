@@ -14,6 +14,7 @@ from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
 from app.models.models import Invoice, Client
 from app.utils.utils import FunctionButton
+from app.constants import BUTTON_HEIGHT, ROW_HEIGHT
 
 
 class ReportsScreen(QWidget):
@@ -37,30 +38,30 @@ class ReportsScreen(QWidget):
         controls.addWidget(QLabel("From:"))
         self.date_from = QDateEdit(QDate.currentDate())
         self.date_from.setCalendarPopup(True)
-        self.date_from.setFixedHeight(40)
+        self.date_from.setFixedHeight(BUTTON_HEIGHT)
         controls.addWidget(self.date_from)
 
         controls.addWidget(QLabel("To:"))
         self.date_to = QDateEdit(QDate.currentDate())
         self.date_to.setCalendarPopup(True)
-        self.date_to.setFixedHeight(40)
+        self.date_to.setFixedHeight(BUTTON_HEIGHT)
         controls.addWidget(self.date_to)
 
         # Quick range presets
         for label, days in [("Today", 0), ("Last 7 days", 7), ("Last 30 days", 30)]:
             btn = QPushButton(label)
-            btn.setFixedHeight(40)
+            btn.setFixedHeight(BUTTON_HEIGHT)
             btn.clicked.connect(lambda _, d=days: self._set_range(d))
             controls.addWidget(btn)
 
         load_btn = QPushButton("Load Report")
         load_btn.setObjectName("primaryBtn")
-        load_btn.setFixedHeight(40)
+        load_btn.setFixedHeight(BUTTON_HEIGHT)
         load_btn.clicked.connect(self._load_report)
         controls.addWidget(load_btn)
 
         self.btn_ok = FunctionButton("OK", "okBtn")
-        self.btn_ok.setFixedHeight(40)
+        self.btn_ok.setFixedHeight(BUTTON_HEIGHT)
         self.btn_ok.clicked.connect(self._confirm)
         controls.addWidget(self.btn_ok)
 
@@ -161,7 +162,7 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
                 self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
                 self.sales_table.setItem(row, 6, QTableWidgetItem(f"{currency}{sale.final_amount:.2f}"))
-                self.sales_table.setRowHeight(row, 44)
+                self.sales_table.setRowHeight(row, ROW_HEIGHT)
 
     def _confirm(self):
         self.navigate.emit(0)

@@ -1,6 +1,15 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget
 
+from app.constants import (
+    BUTTON_HEIGHT,
+    BUTTON_HEIGHT_COMPACT,
+    LIST_PANEL_MAX_WIDTH,
+    LIST_PANEL_MIN_WIDTH,
+    MARGIN_NONE,
+    SPACING_MD,
+)
+
 
 class TicketTable(QTableWidget):
     backspace_pressed = pyqtSignal()
@@ -28,7 +37,7 @@ class TicketTab(QPushButton):
         self.index = index
         self.setObjectName("ticketTab")
         self.setCheckable(True)
-        self.setMinimumHeight(40)
+        self.setMinimumHeight(BUTTON_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._set_label(f"V {index}", "")
 
@@ -41,7 +50,7 @@ class FunctionButton(QPushButton):
     def __init__(self, label: str, role: str = "func"):
         super().__init__(label)
         self.setObjectName(role)
-        self.setMinimumHeight(36)
+        self.setMinimumHeight(BUTTON_HEIGHT_COMPACT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -52,7 +61,7 @@ class CategoryButton(QPushButton):
     def __init__(self, label: str, role: str):
         super().__init__(label)
         self.setObjectName(role)
-        self.setMinimumHeight(36)
+        self.setMinimumHeight(BUTTON_HEIGHT_COMPACT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -72,17 +81,17 @@ class TapToDismissOverlay(QWidget):
         self.hide()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(*MARGIN_NONE)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.card = QFrame(self)
         self.card.setObjectName("tapDismissCard")
-        self.card.setMinimumWidth(360)
-        self.card.setMaximumWidth(520)
+        self.card.setMinimumWidth(LIST_PANEL_MIN_WIDTH)
+        self.card.setMaximumWidth(LIST_PANEL_MAX_WIDTH)
 
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(28, 24, 28, 24)
-        card_layout.setSpacing(8)
+        card_layout.setSpacing(SPACING_MD)
 
         self.title_label = QLabel("")
         self.title_label.setObjectName("tapDismissTitle")
