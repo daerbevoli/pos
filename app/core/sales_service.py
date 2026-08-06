@@ -24,6 +24,9 @@ class CartItem(ReceiptEntry):
     quantity: float | None  # None = amount not entered yet (weight/volume units)
     unit: str = "pcs"
     discount: float = 0.0
+    is_reversal: bool = False  # True for a line that reverses an earlier line on a reopened sale
+    has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
+    reversal_of: "CartItem | None" = None  # the original line this reverses; live-session only, not persisted
 
     @property
     def line_total(self):
@@ -136,6 +139,8 @@ class Cart:
                     "quantity": entry.quantity,
                     "unit": entry.unit,
                     "discount": entry.discount,
+                    "is_reversal": entry.is_reversal,
+                    "has_reversal": entry.has_reversal,
                 })
             elif isinstance(entry, DiscountEntry):
                 data.append({"type": "discount", "amount": entry.amount, "label": entry.label})
@@ -158,6 +163,8 @@ class Cart:
                     quantity=raw["quantity"],
                     unit=raw.get("unit", "pcs"),
                     discount=raw.get("discount", 0.0),
+                    is_reversal=raw.get("is_reversal", False),
+                    has_reversal=raw.get("has_reversal", False),
                 ))
             elif kind == "discount":
                 entries.append(DiscountEntry(amount=raw["amount"], label=raw["label"]))

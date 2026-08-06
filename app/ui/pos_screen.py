@@ -43,7 +43,7 @@ from datetime import date
 import logging
 
 ADMIN_CODE = "2060"
-WEIGHT_UNITS = {"kg", "g", "ml", "liter"}
+WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
 
 class _TabState:
@@ -587,8 +587,40 @@ class POSScreen(QWidget):
         idx = self._get_selected_entry_index()
         if idx is None:
             return
-        self.cart.entries.pop(idx)
-        self._refresh_cart()
+        entry = self.cart.entries[idx]
+        needs_reversal = (
+            self._current_sale_id is not None
+            and isinstance(entry, CartItem)
+            and entry.quantity is not None
+            and not entry.is_reversal
+        )
+        if needs_reversal and entry.has_reversal:
+            # Already reversed once — capped at one reversal per line.
+            self.cart_table.setFocus()
+            return
+        if needs_reversal:
+            # This ticket was already saved as a completed sale, so the
+            # record can't just lose the line — the original row stays put,
+            # and a reversal is appended as the newest row instead.
+            entry.has_reversal = True
+            self.cart.entries.append(CartItem(
+                product_id=entry.product_id,
+                product_name=entry.product_name,
+                product_barcode=entry.product_barcode,
+                unit_price=entry.unit_price,
+                quantity=-entry.quantity,
+                unit=entry.unit,
+                discount=-entry.discount,
+                is_reversal=True,
+                reversal_of=entry,
+            ))
+        else:
+            if isinstance(entry, CartItem) and entry.is_reversal and entry.reversal_of is not None:
+                # Removing the reversal itself un-caps the original line
+                # so it can be reversed again.
+                entry.reversal_of.has_reversal = False
+            self.cart.entries.pop(idx)
+        self._refresh_cart(select_last=needs_reversal)
         self.cart_table.setFocus()
 
     def _apply_percent_discount(self):
@@ -606,7 +638,7 @@ class POSScreen(QWidget):
         amount = round(base * pct / 100.0, 2)
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"{pct:g}%"))
         self.combined_input.clear()
-        self._refresh_cart()
+        self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 
     def _apply_amount_discount(self):
@@ -623,7 +655,7 @@ class POSScreen(QWidget):
         amount = round(min(value, base), 2)
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"{self.currency}{amount:.2f}"))
         self.combined_input.clear()
-        self._refresh_cart()
+        self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 
     def _get_discount_base(self) -> float | None:
@@ -716,14 +748,17 @@ class POSScreen(QWidget):
                 pending = entry.quantity is None
                 is_weight = entry.unit in WEIGHT_UNITS
                 if is_weight:
-                    qty_text = "1"
-                    weight_text = "?" if pending else f"{entry.quantity:g}{entry.unit}"
+                    qty_text = "?" if pending else ("-1" if entry.quantity < 0 else "1")
+                    weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
                     name_text = f"{entry.product_name} - {weight_text}"
                     price_text = f"{self.currency}{entry.unit_price:.2f}/{entry.unit}"
+                    # A weight article is one line item, not `quantity` kg of them.
+                    count_contribution = 0 if pending else (-1 if entry.quantity < 0 else 1)
                 else:
                     qty_text = "?" if pending else f"{entry.quantity:g}"
                     name_text = entry.product_name
                     price_text = f"{self.currency}{entry.unit_price:.2f}"
+                    count_contribution = entry.quantity or 0
                 for col, text in enumerate([
                     qty_text,
                     name_text,
@@ -737,7 +772,7 @@ class POSScreen(QWidget):
                     self.cart_table.setItem(r, col, cell)
                 self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
                 section_total += entry.line_total
-                section_count += entry.quantity or 0
+                section_count += count_contribution
                 section_has_items = True
 
             elif isinstance(entry, DiscountEntry):
