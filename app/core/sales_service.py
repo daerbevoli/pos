@@ -23,6 +23,7 @@ class CartItem(ReceiptEntry):
     unit_price: float
     quantity: float | None  # None = amount not entered yet (weight/volume units)
     unit: str = "pcs"
+    tax_rate: int = 0
     discount: float = 0.0
     is_reversal: bool = False  # True for a line that reverses an earlier line on a reopened sale
     has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
@@ -103,6 +104,7 @@ class Cart:
                 unit_price=product.price,
                 quantity=quantity,
                 unit=product.unit,
+                tax_rate=product.tax,
             )
         )
 
@@ -138,6 +140,7 @@ class Cart:
                     "unit_price": entry.unit_price,
                     "quantity": entry.quantity,
                     "unit": entry.unit,
+                    "tax_rate": entry.tax_rate,
                     "discount": entry.discount,
                     "is_reversal": entry.is_reversal,
                     "has_reversal": entry.has_reversal,
@@ -162,6 +165,7 @@ class Cart:
                     unit_price=raw["unit_price"],
                     quantity=raw["quantity"],
                     unit=raw.get("unit", "pcs"),
+                    tax_rate=raw.get("tax_rate", 0),
                     discount=raw.get("discount", 0.0),
                     is_reversal=raw.get("is_reversal", False),
                     has_reversal=raw.get("has_reversal", False),
@@ -171,6 +175,13 @@ class Cart:
             elif kind == "subtotal":
                 entries.append(SubtotalMarker())
         return cls(entries=entries)
+
+
+def _calc_tax(line_total: float, tax_rate: int) -> float:
+    """Return the VAT portion of a tax-inclusive line total."""
+    if tax_rate == 0:
+        return 0.0
+    return round(line_total - line_total / (1 + tax_rate / 100), 2)
 
 
 class SalesService:
@@ -218,11 +229,13 @@ class SalesService:
         session.add(sale)
         session.flush()  # Get sale.id without committing
 
+        total_tax = 0.0
         for entry in cart.entries:
 
             if not isinstance(entry, CartItem):
                 continue
-            # Add sale line item
+            tax_amount = _calc_tax(entry.line_total, entry.tax_rate)
+            total_tax += tax_amount
             sale_item = SaleItem(
                 sale_id=sale.id,
                 product_id=entry.product_id,
@@ -230,6 +243,8 @@ class SalesService:
                 product_barcode=entry.product_barcode,
                 quantity=entry.quantity,
                 unit_price=entry.unit_price,
+                tax_rate=entry.tax_rate,
+                tax_amount=tax_amount,
                 discount=entry.discount,
                 line_total=entry.line_total
             )
@@ -244,6 +259,7 @@ class SalesService:
                 reference=sale_number
             )
 
+        sale.tax_amount = round(total_tax, 2)
         session.commit()
         session.refresh(sale)
         return sale
@@ -297,9 +313,12 @@ class SalesService:
         if notes:
             sale.notes = notes
 
+        total_tax = 0.0
         for entry in cart.entries:
             if not isinstance(entry, CartItem):
                 continue
+            tax_amount = _calc_tax(entry.line_total, entry.tax_rate)
+            total_tax += tax_amount
             sale_item = SaleItem(
                 sale_id=sale.id,
                 product_id=entry.product_id,
@@ -307,6 +326,8 @@ class SalesService:
                 product_barcode=entry.product_barcode,
                 quantity=entry.quantity,
                 unit_price=entry.unit_price,
+                tax_rate=entry.tax_rate,
+                tax_amount=tax_amount,
                 discount=entry.discount,
                 line_total=entry.line_total
             )
@@ -320,6 +341,7 @@ class SalesService:
                 reference=sale.sale_number,
             )
 
+        sale.tax_amount = round(total_tax, 2)
         session.commit()
         session.refresh(sale)
         return sale
@@ -378,11 +400,13 @@ class SalesService:
         session.add(sale)
         session.flush()
 
+        total_tax = 0.0
         for entry in cart.entries:
 
             if not isinstance(entry, CartItem):
                 continue
-            # Add sale line item
+            tax_amount = _calc_tax(entry.line_total, entry.tax_rate)
+            total_tax += tax_amount
             sale_item = SaleItem(
                 sale_id=sale.id,
                 product_id=entry.product_id,
@@ -390,6 +414,8 @@ class SalesService:
                 product_barcode=entry.product_barcode,
                 quantity=entry.quantity,
                 unit_price=entry.unit_price,
+                tax_rate=entry.tax_rate,
+                tax_amount=tax_amount,
                 discount=entry.discount,
                 line_total=entry.line_total
             )
@@ -402,6 +428,8 @@ class SalesService:
                 movement_type="sale",
                 reference=sale_number
             )
+
+        sale.tax_amount = round(total_tax, 2)
 
         invoice = Invoice(
             sale_id=sale.id,

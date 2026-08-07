@@ -39,7 +39,7 @@ class Product(Base):
     stock_quantity = Column(Integer, default=0)           # Float to support weight-based items
     min_stock_level = Column(Integer, default=5)          # Alert threshold
     unit = Column(String(20), default="pcs")            # pcs, kg, liter, etc.
-    tax = Column(Integer, nullable=False, default=0)    # 0, 6, 21 %
+    tax = Column(Integer, nullable=False, default=21)    # 0, 6, 21 %
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -89,6 +89,8 @@ class SaleItem(Base):
     product_barcode = Column(String(50), nullable=True)
     quantity = Column(Float, nullable=False)
     unit_price = Column(Float, nullable=False)           # Snapshot at time of sale
+    tax_rate = Column(Integer, default=0)               # Snapshot of product.tax at sale time (0, 6, 21)
+    tax_amount = Column(Float, default=0.0)             # Tax portion of line_total (incl. tax price)
     discount = Column(Float, default=0.0)
     line_total = Column(Float, nullable=False)
 

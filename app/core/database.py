@@ -47,9 +47,17 @@ def init_db():
 def _run_migrations():
     """Add columns that create_all() won't add to an already-existing table."""
     with ENGINE.connect() as conn:
-        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)")}
-        if "cart_snapshot" not in existing:
+        sales_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)")}
+        if "cart_snapshot" not in sales_cols:
             conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN cart_snapshot TEXT")
+            conn.commit()
+
+        sale_item_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sale_items)")}
+        if "tax_rate" not in sale_item_cols:
+            conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_rate INTEGER DEFAULT 0")
+            conn.commit()
+        if "tax_amount" not in sale_item_cols:
+            conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_amount REAL DEFAULT 0.0")
             conn.commit()
 
 

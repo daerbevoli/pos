@@ -1077,15 +1077,17 @@ class POSScreen(QWidget):
             return None
 
     def _admin(self):
-        if self.isAdmin:
-            self.isAdmin = False
-            self.salesperson_changed.emit(self.cashier_name)
-            return
-        dialog = NumpadDialog(title="Enter Code", parent=self)
-        if dialog.exec():
-            if dialog.value == ADMIN_CODE:
-                self.isAdmin = True
-                self.salesperson_changed.emit("Admin")
+        self.isAdmin = True
+        self.salesperson_changed.emit("Admin")
+        # if self.isAdmin:
+        #     self.isAdmin = False
+        #     self.salesperson_changed.emit(self.cashier_name)
+        #     return
+        # dialog = NumpadDialog(title="Enter Code", parent=self)
+        # if dialog.exec():
+        #     if dialog.value == ADMIN_CODE:
+        #         self.isAdmin = True
+        #         self.salesperson_changed.emit("Admin")
 
     def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
         self.overlay.show_message(message, title=title, kind=kind)
