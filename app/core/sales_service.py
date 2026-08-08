@@ -52,6 +52,14 @@ class DiscountEntry(ReceiptEntry):
     def line_total(self) -> float:
         return -round(self.amount, 2)
 
+
+@dataclass
+class PaymentEntry(ReceiptEntry):
+    """A partial tender applied toward the cart total before it's fully paid.
+    Not part of subtotal/total — tracked separately via Cart.paid_total."""
+    method: str
+    amount: float
+
 @dataclass
 class Cart:
     entries: list[ReceiptEntry] = field(default_factory=list)
@@ -70,6 +78,14 @@ class Cart:
     @property
     def total(self) -> float:
         return round(self.subtotal, 2)
+
+    @property
+    def paid_total(self) -> float:
+        return round(sum(e.amount for e in self.entries if isinstance(e, PaymentEntry)), 2)
+
+    @property
+    def remaining_due(self) -> float:
+        return round(self.total - self.paid_total, 2)
 
     @property
     def item_count(self) -> int:
@@ -201,7 +217,8 @@ class SalesService:
         cart: Cart,
         payment_method: str = "cash",
         amount_tendered: float = None,
-        notes: str = None
+        notes: str = None,
+        payment_breakdown: list[dict] = None,
     ) -> Sale:
         """
         Convert cart to a completed Sale. Deducts stock automatically.
@@ -225,6 +242,7 @@ class SalesService:
             notes=notes,
             status="completed",
             cart_snapshot=cart.to_snapshot(),
+            payment_breakdown=json.dumps(payment_breakdown) if payment_breakdown else None,
         )
         session.add(sale)
         session.flush()  # Get sale.id without committing
@@ -271,7 +289,8 @@ class SalesService:
         cart: Cart,
         payment_method: str = "cash",
         amount_tendered: float = None,
-        notes: str = None
+        notes: str = None,
+        payment_breakdown: list[dict] = None,
     ) -> Sale:
         """
         Overwrite an existing completed sale with an edited cart, in place.
@@ -310,6 +329,7 @@ class SalesService:
         sale.amount_tendered = amount_tendered
         sale.change_given = change
         sale.cart_snapshot = cart.to_snapshot()
+        sale.payment_breakdown = json.dumps(payment_breakdown) if payment_breakdown else None
         if notes:
             sale.notes = notes
 
@@ -376,7 +396,8 @@ class SalesService:
         payment_method: str = "cash",
         amount_tendered: float = None,
         notes: str = None,
-        client_id: int = None
+        client_id: int = None,
+        payment_breakdown: list[dict] = None,
     ) -> Invoice:
         if not cart.entries:
             raise ValueError("Cannot finalize an empty cart.")
@@ -396,6 +417,7 @@ class SalesService:
             notes=notes,
             status="completed",
             cart_snapshot=cart.to_snapshot(),
+            payment_breakdown=json.dumps(payment_breakdown) if payment_breakdown else None,
         )
         session.add(sale)
         session.flush()

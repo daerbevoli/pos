@@ -453,9 +453,21 @@ class ArticleDetailPanel(QFrame):
                 else:
                     ProductService.update(session, self.current_product_id, **data)
             self._mode = "display"
-            self._title_label.setText("Select article")
             self._set_edit_mode(False)
+            saved_id = self.current_product_id
+            # refresh() rebuilds the table (clearing selection along the way),
+            # which resets current_product_id via _on_row_selected -> _clear();
+            # saved_id keeps track of what to re-select afterward.
             self.parent_screen.refresh()
+            if not self.parent_screen._select_product_row(saved_id):
+                # Saved but filtered out of the current view (e.g. category/search
+                # filter no longer matches) — still show it instead of going blank.
+                with get_session() as session:
+                    product = ProductService.get_by_id(session, saved_id)
+                if product:
+                    self.show_product(product)
+                else:
+                    self._clear()
         else:
             if self.current_product_id:
                 self.parent_screen.selected_product.emit(self.current_product_id)
@@ -476,13 +488,14 @@ class ArticleDetailPanel(QFrame):
             else:
                 self._clear()
         else:
+            self.parent_screen.table.clearSelection()
             self._clear()
+        self.parent_screen.search_input.setFocus()
 
     def _on_delete(self):
         if self.current_product_id is None:
             return
         self.parent_screen._delete_product(self.current_product_id)
-        self.hide()
 
     def _on_search_barcode(self):
         self.parent_screen.search_input.setFocus()
@@ -513,12 +526,14 @@ class InventoryScreen(QWidget):
         layout.setSpacing(SPACING_MD)
 
         # ── Product table (constructed early: ArticleDetailPanel references it) ─
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 7)
         self.table.setObjectName("inventoryTable")
         self.table.setHorizontalHeaderLabels([
-            "Barcode", "Name", "Category", "Price", "Tax", "Stock", "Unit", "Actions"
+            "Barcode", "Name", "Category", "Price", "Tax", "Stock", "Unit"
         ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -549,12 +564,6 @@ class InventoryScreen(QWidget):
         self.low_stock_btn.setFixedHeight(INPUT_HEIGHT)
         self.low_stock_btn.toggled.connect(self.refresh)
         toolbar.addWidget(self.low_stock_btn)
-
-        add_btn = QPushButton("＋ Add Product")
-        add_btn.setObjectName("primaryBtn")
-        add_btn.setFixedHeight(INPUT_HEIGHT)
-        add_btn.clicked.connect(self._add_product)
-        toolbar.addWidget(add_btn)
 
         layout.addLayout(toolbar)
 
@@ -636,31 +645,6 @@ class InventoryScreen(QWidget):
             self.table.setItem(row, 5, stock_item)
             self.table.setItem(row, 6, QTableWidgetItem(p.unit))
 
-            # Action buttons
-            actions = QWidget()
-            actions_layout = QHBoxLayout(actions)
-            actions_layout.setContentsMargins(*MARGIN_COMPACT)
-            actions_layout.setSpacing(SPACING_XS)
-
-            edit_btn = QPushButton("✏️")
-            edit_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-            edit_btn.clicked.connect(lambda _, pid=p.id: self._edit_product(pid))
-            actions_layout.addWidget(edit_btn)
-
-            stock_btn = QPushButton("📦")
-            stock_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-            stock_btn.setToolTip("Adjust stock")
-            stock_btn.clicked.connect(lambda _, pid=p.id: self._adjust_stock(pid))
-            actions_layout.addWidget(stock_btn)
-
-            del_btn = QPushButton("🗑️")
-            del_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-            del_btn.clicked.connect(lambda _, pid=p.id: self._delete_product(pid))
-            actions_layout.addWidget(del_btn)
-
-            self.table.setCellWidget(row, 7, actions)
-            self.table.setRowHeight(row, ROW_HEIGHT_LARGE)
-
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
     def _on_row_selected(self):
@@ -707,6 +691,15 @@ class InventoryScreen(QWidget):
     def _clear(self):
         self.navigate.emit(0)
 
+    def _select_product_row(self, product_id: int) -> bool:
+        """Selects product_id's row in the table if it's in the current
+        (possibly filtered) view. Returns whether it found one."""
+        for row, pid in self._product_cache.items():
+            if pid == product_id:
+                self.table.selectRow(row)
+                return True
+        return False
+
     def _on_barcode_scan(self):
         if self.detail_panel._mode != "display":
             return
@@ -724,11 +717,7 @@ class InventoryScreen(QWidget):
         if not product:
             self.detail_panel._show_overlay(f"No product found for barcode '{barcode}'.")
             return
-        for row, pid in self._product_cache.items():
-            if pid == product.id:
-                self.table.selectRow(row)
-                break
-        else:
+        if not self._select_product_row(product.id):
             self.detail_panel.show_product(product)
 
 

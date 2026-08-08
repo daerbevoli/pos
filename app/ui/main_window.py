@@ -45,7 +45,6 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._start_clock()
-        self._check_low_stock()
 
     def _build_ui(self):
         central = QWidget()
@@ -212,12 +211,3 @@ class MainWindow(QMainWindow):
         now = datetime.now().strftime("%A, %d %B %Y  %H:%M")
         self.clock_label.setText(now)
 
-    # ── Low-stock warning ─────────────────────────────────────────────────────
-
-    def _check_low_stock(self):
-        with get_session() as session:
-            low = ProductService.get_low_stock_products(session)
-            if low:
-                self.statusBar().showMessage(
-                    f"⚠  {len(low)} product(s) are low on stock — check Articles tab"
-                )

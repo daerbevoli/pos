@@ -51,6 +51,9 @@ def _run_migrations():
         if "cart_snapshot" not in sales_cols:
             conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN cart_snapshot TEXT")
             conn.commit()
+        if "payment_breakdown" not in sales_cols:
+            conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN payment_breakdown TEXT")
+            conn.commit()
 
         sale_item_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sale_items)")}
         if "tax_rate" not in sale_item_cols:

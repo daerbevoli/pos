@@ -72,6 +72,7 @@ class Sale(Base):
     status = Column(Enum("completed", "refunded", "voided", name="sale_status"), default="completed")
     created_at = Column(DateTime, default=datetime.now)
     cart_snapshot = Column(Text, nullable=True)  # JSON: ordered cart entries as they were at payment time
+    payment_breakdown = Column(Text, nullable=True)  # JSON: [{"method": "cash", "amount": 20.0}, ...] — how much of final_amount each method covered
 
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
 
