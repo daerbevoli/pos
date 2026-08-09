@@ -4,7 +4,7 @@ Shared form-field widgets used by inline/dialog product & article editing.
 from PyQt6.QtWidgets import QLabel, QFrame, QHBoxLayout
 from PyQt6.QtCore import Qt
 
-from app.constants import FIELD_WIDTH_SM, INPUT_HEIGHT, SPACING_SM
+from app.constants import FIELD_WIDTH_SM, INPUT_HEIGHT_COMPACT, SPACING_XS
 
 
 class PickerDisplay(QLabel):
@@ -14,7 +14,7 @@ class PickerDisplay(QLabel):
         super().__init__(text, parent)
         self.setObjectName("pickerField")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setMinimumHeight(INPUT_HEIGHT)
+        self.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
     def mousePressEvent(self, event):
         self.setFocus()
@@ -28,8 +28,8 @@ class FieldRow(QFrame):
         super().__init__(parent)
         self.setObjectName("fieldRow")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 3, 5, 3)
-        layout.setSpacing(SPACING_SM)
+        layout.setContentsMargins(4, 1, 4, 1)
+        layout.setSpacing(SPACING_XS)
 
         lbl = QLabel(label_text)
         lbl.setObjectName("fieldLabel")

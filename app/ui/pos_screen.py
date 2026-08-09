@@ -308,7 +308,7 @@ class POSScreen(QWidget):
         pay_grid = QGridLayout()
         pay_grid.setSpacing(SPACING_XS)
 
-        self.btn_card   = FunctionButton("card", "payAltBtn")
+        self.btn_card         = FunctionButton("card", "cashBtn")
         self.btn_subtotal     = FunctionButton("Subtotal", "subtotalBtn")
         self.btn_cash         = FunctionButton("Cash", "cashBtn")
 

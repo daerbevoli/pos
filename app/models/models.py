@@ -5,7 +5,7 @@ All tables are defined here using SQLAlchemy ORM.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
-    DateTime, ForeignKey, Text, Enum
+    DateTime, ForeignKey, Text, Enum, Index, text
 )
 from sqlalchemy.orm import relationship, backref, DeclarativeBase
 
@@ -139,13 +139,24 @@ class Client(Base):
     __tablename__ = "clients"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(50), unique=True, nullable=False)
-    address = Column(String(50), unique=True, nullable=True)
-    phone = Column(String(50), unique=True, nullable=True)
-    email = Column(String(50), unique=True, nullable=True)
-    vatNumber = Column(String(50), unique=True, nullable=False)
-    website = Column(String(50), unique=True, nullable=True)
+    name = Column(String(50), nullable=False)
+    address = Column(String(50), nullable=True)
+    phone = Column(String(50), nullable=True)
+    email = Column(String(50), nullable=True)
+    vatNumber = Column(String(50), nullable=False)
+    website = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
+
+    # Uniqueness only matters among active clients — deactivating a client
+    # (soft delete) frees up its name/address/phone/email/vat/website for reuse.
+    __table_args__ = (
+        Index("ux_clients_name_active", "name", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ux_clients_address_active", "address", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ux_clients_phone_active", "phone", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ux_clients_email_active", "email", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ux_clients_vatnumber_active", "vatNumber", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ux_clients_website_active", "website", unique=True, sqlite_where=text("is_active = 1")),
+    )
 
     def __repr__(self):
         return f"<Client {self.name} {self.vatNumber}>"

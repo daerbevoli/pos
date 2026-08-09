@@ -5,7 +5,7 @@ Handles SQLite connection, table creation, and provides session access.
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
-from app.models.models import Base, Settings, Category
+from app.models.models import Base, Settings, Category, Client
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
@@ -62,6 +62,30 @@ def _run_migrations():
         if "tax_amount" not in sale_item_cols:
             conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_amount REAL DEFAULT 0.0")
             conn.commit()
+
+        client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
+        if "ux_clients_name_active" not in client_indexes:
+            _migrate_clients_to_partial_unique(conn)
+
+
+def _migrate_clients_to_partial_unique(conn):
+    """
+    Older schema had column-level UNIQUE constraints on clients
+    (name/address/phone/email/vatNumber/website), which SQLite bakes into
+    the table definition — they can't be dropped with ALTER TABLE, so the
+    table has to be rebuilt. Replaces them with partial unique indexes that
+    only apply to active clients (see Client.__table_args__).
+    """
+    conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    conn.exec_driver_sql("ALTER TABLE clients RENAME TO clients_old")
+    Client.__table__.create(conn)
+    conn.exec_driver_sql(
+        'INSERT INTO clients (id, name, address, phone, email, "vatNumber", website, is_active) '
+        'SELECT id, name, address, phone, email, "vatNumber", website, is_active FROM clients_old'
+    )
+    conn.exec_driver_sql("DROP TABLE clients_old")
+    conn.commit()
+    conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
 def get_session() -> Session:

@@ -1,100 +1,112 @@
 """
 Client Screen
-Select, view, add, edit and delete clients.
-Layout mirrors a classic POS client selection screen.
+Table list of clients on top; selecting a row shows a "Client
+selecteren"-style detail panel below, with a field list on the left and a
+function-key grid on the right (New/Modify/Delete client, Import, Search by
+vat, OK/Cancel). New/Modify client edit the fields inline in the panel
+itself, mirroring the inventory screen's article editing.
 """
+import csv
+
+from sqlalchemy.exc import IntegrityError
+
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QFrame, QSizePolicy, QMessageBox, QLineEdit, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
+    QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, pyqtSignal
 
 from app.core.client_service import ClientService
-from app.ui.dialogs.client_dialog import ClientDialog
+from app.models.models import Client
 from app.core.database import get_session
-from app.utils.utils import FunctionButton
+from app.ui.widgets.form_fields import FieldRow
+from app.ui.dialogs.file_dialog import FileDialog
+from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
-    BUTTON_HEIGHT_SM,
-    FIELD_WIDTH_MD,
-    ICON_BUTTON_SIZE,
-    MARGIN_COMPACT,
-    ROW_HEIGHT_LARGE,
+    BUTTON_HEIGHT_XS,
+    INPUT_HEIGHT,
+    INPUT_HEIGHT_COMPACT,
     SPACING_MD,
     SPACING_XS,
 )
 
-# ── Dummy client data (replace with DB later) ─────────────────────────────────
-DUMMY_CLIENTS = [
-    {"id": 1,  "name": "Bakkerij De Zon",      "street": "Kerkstraat 12",       "postcode": "2000", "city": "Antwerpen", "phone": "0471234567", "vat": "BE 0123.456.789"},
-    {"id": 2,  "name": "Slagerij Peeters",      "street": "Marktplein 5",        "postcode": "2060", "city": "Antwerpen", "phone": "0472345678", "vat": ""},
-    {"id": 3,  "name": "Café De Kroon",         "street": "Grote Markt 1",       "postcode": "2800", "city": "Mechelen",  "phone": "0473456789", "vat": "BE 0234.567.890"},
-    {"id": 4,  "name": "Frituur 't Hoekje",     "street": "Stationsstraat 44",   "postcode": "2018", "city": "Antwerpen", "phone": "0474567890", "vat": ""},
-    {"id": 5,  "name": "Apotheek Janssen",      "street": "Leopoldlei 8",        "postcode": "2930", "city": "Brasschaat","phone": "0475678901", "vat": "BE 0345.678.901"},
-    {"id": 6,  "name": "Bloemenwinkel Roos",    "street": "Antwerpseweg 22",     "postcode": "2500", "city": "Lier",      "phone": "0476789012", "vat": ""},
-    {"id": 7,  "name": "Garage Vermeersch",     "street": "Industrieweg 77",     "postcode": "2200", "city": "Herentals","phone": "0477890123", "vat": "BE 0456.789.012"},
-    {"id": 8,  "name": "Kapsalon Hairmax",      "street": "Turnhoutsebaan 15",   "postcode": "2140", "city": "Borgerhout","phone": "0478901234", "vat": ""},
-    {"id": 9,  "name": "Restaurant Azur",       "street": "Havenstraat 3",       "postcode": "2000", "city": "Antwerpen", "phone": "0479012345", "vat": "BE 0567.890.123"},
-    {"id": 10, "name": "Tuincentrum Groen",     "street": "Boomsesteenweg 99",   "postcode": "2610", "city": "Wilrijk",   "phone": "0480123456", "vat": ""},
-    {"id": 11, "name": "Parfumerie Belle",      "street": "Meir 50",             "postcode": "2000", "city": "Antwerpen", "phone": "0481234567", "vat": "BE 0678.901.234"},
-    {"id": 12, "name": "Drukkerij Snelprint",   "street": "Nijverheidskaai 14",  "postcode": "1080", "city": "Brussel",   "phone": "0482345678", "vat": "BE 0789.012.345"},
-    {"id": 13, "name": "Elektro Watt",          "street": "Diksmuidelaan 6",     "postcode": "2600", "city": "Berchem",   "phone": "0483456789", "vat": ""},
-    {"id": 14, "name": "Sportshop Running",     "street": "Atletenstraat 33",    "postcode": "2100", "city": "Deurne",    "phone": "0484567890", "vat": "BE 0890.123.456"},
-    {"id": 15, "name": "Ijswinkel Gelato",      "street": "Zomerstraat 2",       "postcode": "2000", "city": "Antwerpen", "phone": "0485678901", "vat": ""},
-    {"id": 16, "name": "Boekhandel Pagina",     "street": "Schoenmarkt 7",       "postcode": "2000", "city": "Antwerpen", "phone": "0486789012", "vat": "BE 0901.234.567"},
-    {"id": 17, "name": "Kantoorshop Pro",       "street": "Bedrijvenpark 11",    "postcode": "2300", "city": "Turnhout",  "phone": "0487890123", "vat": ""},
-    {"id": 18, "name": "Vishandel Neptuno",     "street": "Visserskaai 4",       "postcode": "8400", "city": "Oostende",  "phone": "0488901234", "vat": "BE 0012.345.678"},
-]
-
 
 class ClientDetailPanel(QFrame):
     """
-    "Detail view for a single Client:
-    a field list on the left, a function-key grid on the right.
-    Hidden until a row is selected in the table above it.
+    Detail view for a single client: a field list on the left (editable
+    inline for New/Modify), a function-key grid on the right. Hidden until a
+    row is selected in the table above it.
     """
 
     def __init__(self, parent_screen):
         super().__init__(parent_screen)
         self.parent_screen = parent_screen
         self.current_client_id = None
+        self._mode = "display"  # "display" | "new" | "edit"
+
+        self._active_row: FieldRow | None = None
+
+        self.overlay = TapToDismissOverlay(self)
+
         self.setObjectName("articleDetailPanel")
         self._build_ui()
 
+    # ── Setup ────────────────────────────────────────────────────────────
+
     def _build_ui(self):
         outer = QHBoxLayout(self)
-        outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(SPACING_MD)
+        outer.setContentsMargins(3, 3, 3, 3)
+        outer.setSpacing(SPACING_XS)
 
         # ── Left: field list ────────────────────────────────────────────
         field_frame = QFrame()
         field_frame.setObjectName("articleFieldFrame")
         field_col = QVBoxLayout(field_frame)
-        field_col.setSpacing(10)
+        field_col.setContentsMargins(6, 6, 6, 6)
+        field_col.setSpacing(SPACING_XS)
 
-        title = QLabel("Select Client")
-        title.setObjectName("articleDetailTitle")
-        field_col.addWidget(title)
+        title_row = QHBoxLayout()
+        self._title_label = QLabel("Select Client")
+        self._title_label.setObjectName("articleDetailTitle")
+        title_row.addWidget(self._title_label)
+        title_row.addStretch()
+        self._active_status_label = QLabel("—")
+        self._active_status_label.setObjectName("articleFieldValue")
+        title_row.addWidget(self._active_status_label)
+        field_col.addLayout(title_row)
 
-        self.field_labels = {}
-        field_names = [
-            ("name", "Name:"),
-            ("address", "Address:"),
-            ("vat", "VAT:"),
-            ("phone", "Phone:"),
-            ("email", "Email:")
+        self.name = QLineEdit()
+        self.name.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        self.address = QLineEdit()
+        self.address.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        self.vatNumber = QLineEdit()
+        self.vatNumber.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        self.phone = QLineEdit()
+        self.phone.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        self.email = QLineEdit()
+        self.email.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        rows_spec = [
+            ("Name *",       self.name),
+            ("Address",      self.address),
+            ("VAT Number *", self.vatNumber),
+            ("Phone",        self.phone),
+            ("Email",        self.email),
         ]
-        for key, caption in field_names:
-            row = QHBoxLayout()
-            cap_label = QLabel(caption)
-            cap_label.setObjectName("articleFieldCaption")
-            cap_label.setFixedWidth(FIELD_WIDTH_MD)
-            value_label = QLabel("—")
-            value_label.setObjectName("articleFieldValue")
-            row.addWidget(cap_label)
-            row.addWidget(value_label, stretch=1)
-            field_col.addLayout(row)
-            self.field_labels[key] = value_label
+
+        self._fields = []
+        self._row_map: dict = {}
+
+        for label_text, widget in rows_spec:
+            row = FieldRow(label_text, widget)
+            field_col.addWidget(row)
+            self._fields.append(widget)
+            self._row_map[widget] = row
+            widget.installEventFilter(self)
 
         field_col.addStretch()
         outer.addWidget(field_frame, stretch=3)
@@ -108,23 +120,26 @@ class ClientDetailPanel(QFrame):
         self.btn_delete = FunctionButton("Delete\nClient", "deleteArticleBtn")
         self.btn_error = FunctionButton("Error", "errorBtn")
 
-        self.btn_print_label = FunctionButton("Print\nlabel", "secFunc")
+        self.btn_up = FunctionButton("Up", "secFunc")
+        self.btn_import = FunctionButton("Import", "secFunc")
+        self.btn_search_key = FunctionButton("Search by\nvat", "secFunc")
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
-        self.btn_search_barcode = FunctionButton("Search by\nname", "secFunc")
-        self.btn_search_key = FunctionButton("Search by\nvat", "secFunc")
+        self.btn_down = FunctionButton("Down", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
         layout_map = [
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
             (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
 
-            (self.btn_search_barcode, 1, 1),
-            (self.btn_search_key, 1, 2), (self.btn_ok, 1, 3),
+            (self.btn_up, 1, 0), (self.btn_import, 1, 1),
+            (self.btn_search_key, 1, 2), (self.btn_cancel, 1, 3),
 
-            (self.btn_cancel, 2, 3)
+            (self.btn_down, 2, 0),
+            (self.btn_ok, 2, 3),
         ]
         for widget, r, c in layout_map:
+            widget.setMinimumHeight(BUTTON_HEIGHT_XS)
             grid.addWidget(widget, r, c)
 
         for c in range(4):
@@ -132,64 +147,253 @@ class ClientDetailPanel(QFrame):
         for r in range(5):
             grid.setRowStretch(r, 1)
 
-        outer.addLayout(grid, stretch=4)
+        outer.addLayout(grid, stretch=3)
 
-        # Wire actions to the parent screen's existing service calls
-        self.btn_new.clicked.connect(self.parent_screen._add_client)
-        self.btn_modify.clicked.connect(self._on_modify)
+        # Wire actions
+        self.btn_new.clicked.connect(self._start_new)
+        self.btn_modify.clicked.connect(self._start_edit)
         self.btn_delete.clicked.connect(self._on_delete)
-        self.btn_error.clicked.connect(self._clear)
-        self.btn_cancel.clicked.connect(self._clear)
-        self.btn_ok.clicked.connect(self._confirm_client)
-        self.btn_search_barcode.clicked.connect(self._on_search_barcode)
+        self.btn_error.clicked.connect(self._on_cancel)
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        self.btn_ok.clicked.connect(self._on_ok)
+        self.btn_import.clicked.connect(self._on_import)
         self.btn_search_key.clicked.connect(self._on_search_key)
+        self.btn_up.clicked.connect(lambda: self._navigate(-1))
+        self.btn_down.clicked.connect(lambda: self._navigate(1))
+
+        self._set_edit_mode(False)
+
+    # ── Event filter (focus tracking + keyboard nav) ───────────────────────
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.FocusIn:
+            if self._active_row:
+                self._active_row.set_active(False)
+            row = self._row_map.get(obj)
+            if row:
+                self._active_row = row
+                row.set_active(True)
+
+        elif event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Up:
+                self._navigate(-1)
+                return True
+            elif key == Qt.Key.Key_Down:
+                self._navigate(1)
+                return True
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def _navigate(self, direction: int):
+        focused = self.focusWidget()
+        if focused not in self._fields:
+            return
+        idx = self._fields.index(focused)
+        self._fields[(idx + direction) % len(self._fields)].setFocus()
+
+    # ── Mode switching ───────────────────────────────────────────────────
+
+    def _set_edit_mode(self, enabled: bool):
+        for widget in self._fields:
+            widget.setEnabled(enabled)
+        self.btn_new.setEnabled(not enabled)
+        self.btn_modify.setEnabled(not enabled and self.current_client_id is not None)
+        self.btn_delete.setEnabled(not enabled and self.current_client_id is not None)
+        self.parent_screen.table.setEnabled(not enabled)
+        if not enabled:
+            if self._active_row:
+                self._active_row.set_active(False)
+                self._active_row = None
+
+    def _reset_fields_to_placeholder(self):
+        self.name.clear()
+        self.address.clear()
+        self.vatNumber.clear()
+        self.phone.clear()
+        self.email.clear()
+
+    def _populate_fields(self, client):
+        self.name.setText(client.name or "")
+        self.address.setText(client.address or "")
+        self.vatNumber.setText(client.vatNumber or "")
+        self.phone.setText(client.phone or "")
+        self.email.setText(client.email or "")
+        is_active = getattr(client, "is_active", True)
+        self._active_status_label.setText("Active" if is_active else "Inactive")
 
     # ── Display ──────────────────────────────────────────────────────────
 
-    def _clear(self):
-        if self.current_client_id is not None:
-            self.current_client_id = None
-            for label in self.field_labels.values():
-                label.setText("—")
-
-    def _confirm_client(self):
-        if self.current_client_id:
-            self.parent_screen.selected_client.emit(self.current_client_id, self.field_labels["name"].text())
-        self.parent_screen.navigate.emit(0)
-
-
     def show_client(self, client):
         self.current_client_id = client.id
-        self.field_labels["name"].setText(client.name or "—")
-        self.field_labels["address"].setText(client.address or "-")
-        self.field_labels["vat"].setText(client.vatNumber or "—")
-        self.field_labels["phone"].setText(client.phone or "-")
-        self.field_labels["email"].setText(client.email or "-")
+        self._populate_fields(client)
+        self._mode = "display"
+        self._title_label.setText("Select Client")
+        self._set_edit_mode(False)
         self.show()
+
+    def _clear(self):
+        self.current_client_id = None
+        self._mode = "display"
+        self._reset_fields_to_placeholder()
+        self._active_status_label.setText("—")
+        self._title_label.setText("Select Client")
+        self._set_edit_mode(False)
 
     # ── Actions ──────────────────────────────────────────────────────────
 
-    def _on_modify(self):
-        if self.current_client_id is None:
+    def _start_new(self):
+        if self._mode != "display":
             return
-        self.parent_screen._edit_client(self.current_client_id)
+        self.current_client_id = None
+        self._mode = "new"
+        self._reset_fields_to_placeholder()
+        self._active_status_label.setText("Active")
+        self._title_label.setText("New Client")
+        self._set_edit_mode(True)
+        self.name.setFocus()
+
+    def _start_edit(self):
+        if self.current_client_id is None or self._mode != "display":
+            return
+        with get_session() as session:
+            client = ClientService.get_by_id(session, self.current_client_id)
+        if not client:
+            return
+        self._populate_fields(client)
+        self._mode = "edit"
+        self._title_label.setText("Modify Client")
+        self._set_edit_mode(True)
+        self.name.setFocus()
+
+    def _validate(self) -> bool:
+        if not self.name.text().strip():
+            self._show_overlay("Client name is required.")
+            return False
+        if not self.vatNumber.text().strip():
+            self._show_overlay("VAT number is required.")
+            return False
+        return True
+
+    def _collect_data(self) -> dict:
+        return {
+            "name": self.name.text().strip(),
+            "address": self.address.text().strip() or None,
+            "vatNumber": self.vatNumber.text().strip(),
+            "phone": self.phone.text().strip() or None,
+            "email": self.email.text().strip() or None,
+        }
+
+    def _on_ok(self):
+        if self._mode in ("new", "edit"):
+            if not self._validate():
+                return
+            data = self._collect_data()
+            with get_session() as session:
+                if self._mode == "new":
+                    client = ClientService.create(session, **data)
+                    self.current_client_id = client.id
+                else:
+                    ClientService.update(session, self.current_client_id, **data)
+            self._mode = "display"
+            self._set_edit_mode(False)
+            saved_id = self.current_client_id
+            # refresh() rebuilds the table (clearing selection along the way),
+            # which resets current_client_id via _on_row_selected -> _clear();
+            # saved_id keeps track of what to re-select afterward.
+            self.parent_screen.refresh()
+            if not self.parent_screen._select_client_row(saved_id):
+                with get_session() as session:
+                    client = ClientService.get_by_id(session, saved_id)
+                if client:
+                    self.show_client(client)
+                else:
+                    self._clear()
+        else:
+            if self.current_client_id:
+                self.parent_screen.selected_client.emit(self.current_client_id, self.name.text())
+            self.parent_screen.navigate.emit(0)
+
+    def _on_cancel(self):
+        if self._mode == "new":
+            self._clear()
+        elif self._mode == "edit":
+            client_id = self.current_client_id
+            self._mode = "display"
+            client = None
+            if client_id:
+                with get_session() as session:
+                    client = ClientService.get_by_id(session, client_id)
+            if client:
+                self.show_client(client)
+            else:
+                self._clear()
+        else:
+            self.parent_screen.table.clearSelection()
+            self._clear()
+        self.parent_screen.search_input.setFocus()
 
     def _on_delete(self):
         if self.current_client_id is None:
             return
         self.parent_screen._delete_client(self.current_client_id)
-        self.hide()
 
-    def _on_search_barcode(self):
-        self.parent_screen.search_input.setFocus()
-        self.parent_screen.search_input.setPlaceholderText("Scan or type barcode…")
+    def _on_import(self):
+        path = ""
+        file_dialog = FileDialog(parent=self)
+        if file_dialog.exec():
+            path = file_dialog.path
+        if not path:
+            return
+
+        with open(path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        clients_added = 0
+        clients_skipped = 0
+        with get_session() as session:
+            for row in rows:
+                vat = row.get("vat")
+                email = row.get("email") or None
+                existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
+                if not existing and email:
+                    existing = session.query(Client).filter_by(email=email).first()
+                if not vat or existing:
+                    clients_skipped += 1
+                    continue
+
+                address = ", ".join(part for part in (row.get("Street"), row.get("City"), row.get("Country")) if part)
+                phone = (row.get("phone") or "").lstrip("'") or None
+                session.add(Client(
+                    name=row.get("name"),
+                    vatNumber=vat,
+                    address=address or None,
+                    phone=phone,
+                    email=email,
+                    is_active=True,
+                ))
+                try:
+                    session.flush()
+                    clients_added += 1
+                except IntegrityError as e:
+                    session.rollback()
+                    clients_skipped += 1
+                    print(f"Skipped {row.get('name')!r}: {e}")
+
+            session.commit()
+
+        print(f"{clients_added} added, {clients_skipped} skipped")
+        self.parent_screen.refresh()
 
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()
-        self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
+        self.parent_screen.search_input.setPlaceholderText("Search by name or VAT…")
 
-    def _stub_action(self, label: str):
-        QMessageBox.information(self, label, f"{label} — coming soon.")
+    def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
+        self.overlay.show_message(message, title=title, kind=kind)
 
 
 class ClientScreen(QWidget):
@@ -202,49 +406,53 @@ class ClientScreen(QWidget):
         self._build_ui()
         self.refresh()
 
-
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(SPACING_MD)
 
-        # ── Article detail panel (always visible) ─────────────────────────────
-        self.detail_panel = ClientDetailPanel(self)
-        layout.addWidget(self.detail_panel)
-
-        # ── Search / filter bar ───────────────────────────────────────────────
-        toolbar = QHBoxLayout()
-
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by name or VAT…")
-        self.search_input.setFixedHeight(BUTTON_HEIGHT_SM)
-        self.search_input.textChanged.connect(self.refresh)
-        toolbar.addWidget(self.search_input, stretch=2)
-        layout.addLayout(toolbar)
-
-        # ── client table ─────────────────────────────────────────────────────
-        self.table = QTableWidget(0, 4)
+        # ── Client table (constructed early: ClientDetailPanel references it) ─
+        self.table = QTableWidget(0, 5)
         self.table.setObjectName("inventoryTable")
         self.table.setHorizontalHeaderLabels([
-            "Name", "Address", "Vat", "Phone", "Email"
+            "Name", "Address", "VAT", "Phone", "Email"
         ])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
+
+        # ── Client detail panel (always visible) ───────────────────────────
+        self.detail_panel = ClientDetailPanel(self)
+        layout.addWidget(self.detail_panel)
+
+        # ── Search / filter bar ─────────────────────────────────────────────
+        toolbar = QHBoxLayout()
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by name or VAT…")
+        self.search_input.setFixedHeight(INPUT_HEIGHT)
+        self.search_input.textChanged.connect(self.refresh)
+        toolbar.addWidget(self.search_input, stretch=1)
+
+        layout.addLayout(toolbar)
+
         layout.addWidget(self.table, stretch=1)
+
+        # ── Summary row ───────────────────────────────────────────────────────
+        self.summary_label = QLabel()
+        layout.addWidget(self.summary_label)
 
         self._client_cache = {}
 
     def refresh(self):
         with get_session() as session:
-
-            # Get clients
             query = self.search_input.text().strip()
             if query:
                 clients = ClientService.search(session, query)
@@ -252,8 +460,8 @@ class ClientScreen(QWidget):
                 clients = ClientService.get_all(session)
 
             self._populate_table(clients, session)
+            self.summary_label.setText(f"{len(clients)} client(s) shown")
         self.search_input.setFocus()
-
 
     def _populate_table(self, clients, session):
         self.table.setRowCount(0)
@@ -265,28 +473,9 @@ class ClientScreen(QWidget):
 
             self.table.setItem(row, 0, QTableWidgetItem(c.name or ""))
             self.table.setItem(row, 1, QTableWidgetItem(c.address or ""))
-            self.table.setItem(row, 2, QTableWidgetItem(f"{c.vatNumber}"))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{c.phone}"))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{c.email}"))
-
-            # Action buttons
-            actions = QWidget()
-            actions_layout = QHBoxLayout(actions)
-            actions_layout.setContentsMargins(*MARGIN_COMPACT)
-            actions_layout.setSpacing(SPACING_XS)
-
-            edit_btn = QPushButton("✏️")
-            edit_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-            edit_btn.clicked.connect(lambda _, cid=c.id: self._edit_client(cid))
-            actions_layout.addWidget(edit_btn)
-
-            del_btn = QPushButton("🗑️")
-            del_btn.setFixedSize(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE)
-            del_btn.clicked.connect(lambda _, cid=c.id: self._delete_client(cid))
-            actions_layout.addWidget(del_btn)
-
-            self.table.setCellWidget(row, 7, actions)
-            self.table.setRowHeight(row, ROW_HEIGHT_LARGE)
+            self.table.setItem(row, 2, QTableWidgetItem(c.vatNumber or ""))
+            self.table.setItem(row, 3, QTableWidgetItem(c.phone or ""))
+            self.table.setItem(row, 4, QTableWidgetItem(c.email or ""))
 
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
@@ -304,21 +493,11 @@ class ClientScreen(QWidget):
                 self.detail_panel._clear()
 
     def _add_client(self):
-        dialog = ClientDialog(self)
-        if dialog.exec():
-            with get_session() as session:
-                ClientService.create(session, **dialog.get_data())
-            self.refresh()
+        self.detail_panel._start_new()
 
     def _edit_client(self, client_id: int):
-        with get_session() as session:
-            client = ClientService.get_by_id(session, client_id)
-            if not client:
-                return
-            dialog = ClientDialog(self, client)
-            if dialog.exec():
-                ClientService.update(session, client_id, **dialog.get_data())
-        self.refresh()
+        self.detail_panel.current_client_id = client_id
+        self.detail_panel._start_edit()
 
     def _delete_client(self, client_id: int):
         reply = QMessageBox.question(
@@ -332,3 +511,12 @@ class ClientScreen(QWidget):
 
     def _clear(self):
         self.navigate.emit(0)
+
+    def _select_client_row(self, client_id: int) -> bool:
+        """Selects client_id's row in the table if it's in the current
+        (possibly filtered) view. Returns whether it found one."""
+        for row, cid in self._client_cache.items():
+            if cid == client_id:
+                self.table.selectRow(row)
+                return True
+        return False

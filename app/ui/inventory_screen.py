@@ -25,8 +25,10 @@ from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
+    BUTTON_HEIGHT_XS,
     ICON_BUTTON_SIZE,
     INPUT_HEIGHT,
+    INPUT_HEIGHT_COMPACT,
     MARGIN_COMPACT,
     ROW_HEIGHT_LARGE,
     SPACING_MD,
@@ -81,7 +83,8 @@ class ArticleDetailPanel(QFrame):
         field_frame = QFrame()
         field_frame.setObjectName("articleFieldFrame")
         field_col = QVBoxLayout(field_frame)
-        field_col.setSpacing(10)
+        field_col.setContentsMargins(6, 6, 6, 6)
+        field_col.setSpacing(SPACING_XS)
 
         title_row = QHBoxLayout()
         self._title_label = QLabel("Select article")
@@ -96,17 +99,17 @@ class ArticleDetailPanel(QFrame):
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("")
         self.barcode.setMaxLength(14)
-        self.barcode.setMinimumHeight(INPUT_HEIGHT)
+        self.barcode.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
         self.name = QLineEdit()
-        self.name.setMinimumHeight(INPUT_HEIGHT)
+        self.name.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
         self.price = QDoubleSpinBox()
         self.price.setLocale(QLocale.c())
         self.price.setPrefix("€ ")
         self.price.setMaximum(99999.99)
         self.price.setDecimals(2)
-        self.price.setMinimumHeight(INPUT_HEIGHT)
+        self.price.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
         self.tax_display = PickerDisplay(f"{self._tax_val} %")
 
@@ -114,14 +117,14 @@ class ArticleDetailPanel(QFrame):
         self.stock.setLocale(QLocale.c())
         self.stock.setMaximum(999999)
         self.stock.setDecimals(2)
-        self.stock.setMinimumHeight(INPUT_HEIGHT)
+        self.stock.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
         self.min_stock = QDoubleSpinBox()
         self.min_stock.setLocale(QLocale.c())
         self.min_stock.setMaximum(999999)
         self.min_stock.setDecimals(2)
         self.min_stock.setValue(5)
-        self.min_stock.setMinimumHeight(INPUT_HEIGHT)
+        self.min_stock.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
         self.unit_display = PickerDisplay(self._unit_val)
         self.category_display = PickerDisplay(self._category_name)
@@ -171,7 +174,7 @@ class ArticleDetailPanel(QFrame):
 
         # ── Right: function-key grid ────────────────────────────────────
         grid = QGridLayout()
-        grid.setSpacing(10)
+        grid.setSpacing(SPACING_XS)
 
         self.btn_new = FunctionButton("New\narticle", "newArticleBtn")
         self.btn_modify = FunctionButton("Modify\narticle", "secFunc")
@@ -184,7 +187,6 @@ class ArticleDetailPanel(QFrame):
         self.btn_up = FunctionButton("Up", "SecFunc")
         self.btn_down = FunctionButton("Down", "SecFunc")
 
-
         self.btn_search_barcode = FunctionButton("Search by\nbarcode", "secFunc")
         self.btn_search_key = FunctionButton("Search by\nkey", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
@@ -194,13 +196,13 @@ class ArticleDetailPanel(QFrame):
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
             (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
 
-            (self.btn_up, 1, 0), (self.btn_search_barcode, 1, 1),
-            (self.btn_search_key, 1, 2), (self.btn_cancel, 1, 3),
+            (self.btn_up, 1, 0), (self.btn_cancel, 1, 3),
 
-            (self.btn_down, 2, 0),
-            (self.btn_ok, 2, 3)
+            (self.btn_down, 2, 0), (self.btn_search_barcode, 2, 1),
+            (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3)
         ]
         for widget, r, c in layout_map:
+            widget.setMinimumHeight(BUTTON_HEIGHT_XS)
             grid.addWidget(widget, r, c)
 
         for c in range(4):
@@ -339,14 +341,15 @@ class ArticleDetailPanel(QFrame):
         self.name.clear()
         self.price.setSpecialValueText(" ")
         self.price.setValue(self.price.minimum())
-        self.stock.setValue(0)
+        self.stock.setSpecialValueText(" ")
+        self.stock.setValue(self.stock.minimum())
         self.min_stock.setValue(5)
         self._tax_val = "0"
         self.tax_display.setText("0 %")
         self._unit_val = "pcs"
         self.unit_display.setText("pcs")
         self._category_id = None
-        self._category_name = "— No Category —"
+        self._category_name = "—"
         self.category_display.setText(self._category_name)
 
     def _populate_fields(self, product):

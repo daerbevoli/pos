@@ -454,19 +454,19 @@ QFrame#articleFieldFrame {
 }
 
 QLabel#articleDetailTitle {
-    font-size: 18px;
+    font-size: 14px;
     font-weight: 700;
     color: #1c2430;
 }
 
 QLabel#articleFieldCaption {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 700;
     color: #1c2430;
 }
 
 QLabel#articleFieldValue {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: #2c3a52;
 }
@@ -476,7 +476,7 @@ QPushButton#newArticleBtn {
     border: 1px solid #2f74bd;
     color: #ffffff;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
 }
 
 QPushButton#newArticleBtn:hover {
@@ -488,7 +488,7 @@ QPushButton#deleteArticleBtn {
     border: 1px solid #b3392b;
     color: #fff5f2;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
 }
 
 QPushButton#deleteArticleBtn:hover {
@@ -509,14 +509,14 @@ QFrame#fieldRow[active="true"] {
 QLabel#fieldLabel {
     font-weight: 600;
     color: #2c3a52;
-    font-size: 14px;
+    font-size: 12px;
 }
 QLabel#pickerField {
     background-color: #ffffff;
     border: 1px solid #c3cbd6;
     border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 14px;
+    padding: 2px 6px;
+    font-size: 12px;
 }
 QLabel#pickerField:focus {
     border-color: #4a90d9;
@@ -536,10 +536,10 @@ QPushButton#pickerBtn {
     background-color: #d6dde6;
     border: 1px solid #aab4c2;
     border-radius: 4px;
-    padding: 6px 12px;
-    font-size: 13px;
+    padding: 4px 8px;
+    font-size: 12px;
     font-weight: 600;
-    min-height: 36px;
+    min-height: 26px;
 }
 QPushButton#pickerBtn:hover {
     background-color: #c5ccd8;
