@@ -5,7 +5,7 @@ Handles SQLite connection, table creation, and provides session access.
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
-from app.models.models import Base, Settings, Category, Client
+from app.models.models import Base, Settings, Category, Client, Invoice
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
@@ -67,6 +67,8 @@ def _run_migrations():
         if "ux_clients_name_active" not in client_indexes:
             _migrate_clients_to_partial_unique(conn)
 
+        _repair_invoices_fk_if_broken(conn)
+
 
 def _migrate_clients_to_partial_unique(conn):
     """
@@ -75,15 +77,55 @@ def _migrate_clients_to_partial_unique(conn):
     the table definition — they can't be dropped with ALTER TABLE, so the
     table has to be rebuilt. Replaces them with partial unique indexes that
     only apply to active clients (see Client.__table_args__).
+
+    PRAGMA legacy_alter_table=ON is essential here: SQLite's default (smart)
+    RENAME TABLE rewrites *other* tables' REFERENCES clauses to follow the
+    renamed table — regardless of the foreign_keys pragma, which only
+    controls constraint *enforcement*, not this schema-rewrite behavior.
+    Without it, invoices.client_id (FOREIGN KEY REFERENCES clients) would
+    get silently rewritten to REFERENCES clients_old, which is then
+    dropped — corrupting invoices permanently (see _repair_invoices_fk_if_broken,
+    which fixes databases that already hit this before the pragma was added).
     """
     conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    conn.exec_driver_sql("PRAGMA legacy_alter_table=ON")
     conn.exec_driver_sql("ALTER TABLE clients RENAME TO clients_old")
+    conn.exec_driver_sql("PRAGMA legacy_alter_table=OFF")
     Client.__table__.create(conn)
     conn.exec_driver_sql(
         'INSERT INTO clients (id, name, address, phone, email, "vatNumber", website, is_active) '
         'SELECT id, name, address, phone, email, "vatNumber", website, is_active FROM clients_old'
     )
     conn.exec_driver_sql("DROP TABLE clients_old")
+    conn.commit()
+    conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+
+def _repair_invoices_fk_if_broken(conn):
+    """
+    One-time repair for databases that already hit the bug described in
+    _migrate_clients_to_partial_unique: their invoices table's stored schema
+    still references the long-dropped clients_old table, which makes every
+    future invoice INSERT/UPDATE fail with "no such table: main.clients_old"
+    once foreign key enforcement is on. Rebuilds invoices against the
+    correct FOREIGN KEY(client_id) REFERENCES clients(id) if so.
+    """
+    row = conn.exec_driver_sql(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='invoices'"
+    ).fetchone()
+    if row is None or row[0] is None or "clients_old" not in row[0]:
+        return
+
+    conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    conn.exec_driver_sql("PRAGMA legacy_alter_table=ON")
+    conn.exec_driver_sql("ALTER TABLE invoices RENAME TO invoices_old")
+    conn.exec_driver_sql("PRAGMA legacy_alter_table=OFF")
+    Invoice.__table__.create(conn)
+    conn.exec_driver_sql(
+        "INSERT INTO invoices (id, sale_id, client_id, invoice_number) "
+        "SELECT id, sale_id, client_id, invoice_number FROM invoices_old"
+    )
+    conn.exec_driver_sql("DROP TABLE invoices_old")
     conn.commit()
     conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 

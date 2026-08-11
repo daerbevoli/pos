@@ -8,21 +8,24 @@ New/Modify article edit the fields inline in the panel itself; while a
 Tax/Unit/Category field is focused, the product table is swapped out for a
 choice-button grid in the same spot.
 """
+import csv
 import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QComboBox, QFrame, QSizePolicy,
-    QDoubleSpinBox, QStackedWidget
+    QDoubleSpinBox, QStackedWidget, QFileDialog
 )
 from PyQt6.QtCore import Qt, QEvent, QLocale, pyqtSignal
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
+from app.ui.dialogs.file_dialog import FileDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
     BUTTON_HEIGHT_XS,
@@ -34,6 +37,9 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+
+# Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
+ARTICLE_CSV_FIELDS = ["barcode", "name", "price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
 
 
 class ArticleDetailPanel(QFrame):
@@ -185,6 +191,8 @@ class ArticleDetailPanel(QFrame):
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
         self.btn_up = FunctionButton("Up", "SecFunc")
+        self.btn_export = FunctionButton("Export\narticles", "secFunc")
+        self.btn_import = FunctionButton("Import\narticles", "secFunc")
         self.btn_down = FunctionButton("Down", "SecFunc")
 
         self.btn_search_barcode = FunctionButton("Search by\nbarcode", "secFunc")
@@ -196,7 +204,8 @@ class ArticleDetailPanel(QFrame):
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
             (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
 
-            (self.btn_up, 1, 0), (self.btn_cancel, 1, 3),
+            (self.btn_up, 1, 0), (self.btn_export, 1, 1),
+            (self.btn_import, 1, 2), (self.btn_cancel, 1, 3),
 
             (self.btn_down, 2, 0), (self.btn_search_barcode, 2, 1),
             (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3)
@@ -223,6 +232,8 @@ class ArticleDetailPanel(QFrame):
         self.btn_search_key.clicked.connect(self._on_search_key)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
+        self.btn_export.clicked.connect(self._on_export)
+        self.btn_import.clicked.connect(self._on_import)
 
         self._set_edit_mode(False)
 
@@ -507,6 +518,100 @@ class ArticleDetailPanel(QFrame):
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()
         self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
+
+    def _on_export(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export Articles", "articles.csv", "CSV Files (*.csv)")
+        if not path:
+            return
+
+        with get_session() as session:
+            products = ProductService.get_all(session, active_only=False)
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=ARTICLE_CSV_FIELDS)
+                writer.writeheader()
+                for p in products:
+                    writer.writerow({
+                        "barcode": p.barcode or "",
+                        "name": p.name,
+                        "price": p.price,
+                        "tax": p.tax,
+                        "unit": p.unit,
+                        "stock_quantity": p.stock_quantity,
+                        "min_stock_level": p.min_stock_level,
+                        "category": p.category.name if p.category else "",
+                    })
+
+        self._show_overlay(f"Exported {len(products)} article(s).", title="Export complete")
+
+    def _on_import(self):
+        path = ""
+        file_dialog = FileDialog(parent=self)
+        if file_dialog.exec():
+            path = file_dialog.path
+        if not path:
+            return
+
+        with open(path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        self._load_categories()
+        category_id_by_name = {name: cid for name, cid in self._categories}
+
+        added = 0
+        skipped = 0
+        with get_session() as session:
+            for row in rows:
+                name = (row.get("name") or "").strip()
+                barcode = (row.get("barcode") or "").strip() or None
+                if not name:
+                    skipped += 1
+                    continue
+
+                existing = session.query(Product).filter_by(barcode=barcode).first() if barcode else None
+                if existing:
+                    skipped += 1
+                    continue
+
+                try:
+                    price = float(row.get("price") or 0)
+                except ValueError:
+                    price = 0.0
+                try:
+                    tax = int(float(row.get("tax") or 0))
+                except ValueError:
+                    tax = 0
+                try:
+                    stock_quantity = float(row.get("stock_quantity") or 0)
+                except ValueError:
+                    stock_quantity = 0.0
+                try:
+                    min_stock_level = float(row.get("min_stock_level") or 5)
+                except ValueError:
+                    min_stock_level = 5.0
+
+                session.add(Product(
+                    barcode=barcode,
+                    name=name,
+                    price=price,
+                    tax=tax,
+                    unit=(row.get("unit") or "pcs").strip(),
+                    stock_quantity=stock_quantity,
+                    min_stock_level=min_stock_level,
+                    category_id=category_id_by_name.get((row.get("category") or "").strip()),
+                    is_active=True,
+                ))
+                try:
+                    session.flush()
+                    added += 1
+                except IntegrityError:
+                    session.rollback()
+                    skipped += 1
+
+            session.commit()
+
+        self.parent_screen.refresh()
+        self._show_overlay(f"{added} added, {skipped} skipped.", title="Import complete")
 
     def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
         self.overlay.show_message(message, title=title, kind=kind)

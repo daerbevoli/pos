@@ -100,16 +100,11 @@ class Cart:
         if quantity is not None:
             # Walk backwards until we hit a subtotal marker.
             for entry in reversed(self.entries):
-                if isinstance(entry, SubtotalMarker):
+                if (isinstance(entry, SubtotalMarker) or
+                        isinstance(entry, CartItem) and
+                        entry.product_id == product.id and
+                        entry.quantity is not None):
                     break
-
-                if (
-                        isinstance(entry, CartItem)
-                        and entry.product_id == product.id
-                        and entry.quantity is not None
-                ):
-                    entry.quantity += quantity
-                    return
 
         # No matching item in the current section.
         self.entries.append(
@@ -193,7 +188,7 @@ class Cart:
         return cls(entries=entries)
 
 
-def _calc_tax(line_total: float, tax_rate: int) -> float:
+def calc_tax(line_total: float, tax_rate: int) -> float:
     """Return the VAT portion of a tax-inclusive line total."""
     if tax_rate == 0:
         return 0.0
@@ -229,7 +224,7 @@ class SalesService:
 
         sale_number = SalesService._generate_sale_number(session)
         change = None
-        if payment_method == "cash" or payment_method == "card" and amount_tendered is not None:
+        if payment_method in ("cash", "card") and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
 
         sale = Sale(
@@ -252,7 +247,7 @@ class SalesService:
 
             if not isinstance(entry, CartItem):
                 continue
-            tax_amount = _calc_tax(entry.line_total, entry.tax_rate)
+            tax_amount = calc_tax(entry.line_total, entry.tax_rate)
             total_tax += tax_amount
             sale_item = SaleItem(
                 sale_id=sale.id,
@@ -320,7 +315,7 @@ class SalesService:
         session.flush()
 
         change = None
-        if payment_method == "cash" or payment_method == "card" and amount_tendered is not None:
+        if payment_method in ("cash", "card") and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
 
         sale.total_amount = cart.subtotal
@@ -337,7 +332,7 @@ class SalesService:
         for entry in cart.entries:
             if not isinstance(entry, CartItem):
                 continue
-            tax_amount = _calc_tax(entry.line_total, entry.tax_rate)
+            tax_amount = calc_tax(entry.line_total, entry.tax_rate)
             total_tax += tax_amount
             sale_item = SaleItem(
                 sale_id=sale.id,
@@ -404,7 +399,7 @@ class SalesService:
 
         sale_number = SalesService._generate_sale_number(session)
         change = None
-        if payment_method == "cash" or payment_method == "card" and amount_tendered is not None:
+        if payment_method in ("cash", "card") and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
 
         sale = Sale(
@@ -427,7 +422,7 @@ class SalesService:
 
             if not isinstance(entry, CartItem):
                 continue
-            tax_amount = _calc_tax(entry.line_total, entry.tax_rate)
+            tax_amount = calc_tax(entry.line_total, entry.tax_rate)
             total_tax += tax_amount
             sale_item = SaleItem(
                 sale_id=sale.id,
