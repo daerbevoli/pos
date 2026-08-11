@@ -233,9 +233,13 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 1, QTableWidgetItem(
                     sale.created_at.strftime("%d/%m/%Y %H:%M")
                 ))
-                client_name = sale.invoice.client.name if sale.invoice else "/"
+                # Read the invoice's own snapshot, not the live client — a
+                # renamed/deactivated client (or an invoice issued with no
+                # client at all) must not change what an already-issued
+                # invoice is shown as having billed.
+                client_name = (sale.invoice.client_name if sale.invoice else None) or "/"
                 self.sales_table.setItem(row, 2, QTableWidgetItem(client_name))
-                vat_num = sale.invoice.client.vatNumber if sale.invoice else "/"
+                vat_num = (sale.invoice.client_vat_number if sale.invoice else None) or "/"
                 self.sales_table.setItem(row, 3, QTableWidgetItem(vat_num))
                 self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
                 if sale.payment_method == "mixed":

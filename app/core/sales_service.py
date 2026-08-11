@@ -7,7 +7,7 @@ from datetime import date
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.models import Sale, SaleItem, Product, Invoice
+from app.models.models import Sale, SaleItem, Product, Invoice, Client
 from app.core.product_service import ProductService
 
 @dataclass
@@ -448,10 +448,21 @@ class SalesService:
 
         sale.tax_amount = round(total_tax, 2)
 
+        client = session.query(Client).filter_by(id=client_id).first() if client_id else None
+
         invoice = Invoice(
             sale_id=sale.id,
             client_id=client_id,
-            invoice_number=sale_number.replace("S-", "I-", 1)
+            invoice_number=sale_number.replace("S-", "I-", 1),
+            # Snapshot now, once — never re-derived from the live client/sale
+            # afterward, so this document can't silently change later.
+            client_name=client.name if client else None,
+            client_vat_number=client.vatNumber if client else None,
+            client_address=client.address if client else None,
+            total_amount=sale.total_amount,
+            tax_amount=sale.tax_amount,
+            final_amount=sale.final_amount,
+            line_items_snapshot=cart.to_snapshot(),
         )
         session.add(invoice)
         session.commit()

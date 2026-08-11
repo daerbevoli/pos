@@ -480,6 +480,31 @@ def test_reopen_ticket_noop_when_not_finished(screen):
     assert screen._current_sale_id is None
 
 
+def test_reopen_ticket_blocked_once_invoiced(screen):
+    """An issued invoice must stay immutable — reopening the sale it came
+    from (to overwrite its line items via update_sale) has to be refused."""
+    with get_session() as session:
+        client = ClientService.create(session, name="Acme", vatNumber="V1")
+        client_id = client.id
+    pid, barcode, _ = _add_product(barcode="reopen3", price=5.0)
+
+    screen.set_client(client_id, "Acme")
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    sale_id = screen._current_sale_id
+    assert screen.sale_finished is True
+
+    screen._reopen_ticket()
+
+    assert screen.sale_finished is True  # still frozen — reopen was refused
+    assert screen._current_sale_id == sale_id
+    assert not screen.overlay.isHidden()
+    with get_session() as session:
+        sale = session.query(Sale).filter_by(id=sale_id).first()
+        assert sale.invoice is not None
+        assert sale.status == "completed"  # untouched by the refused reopen
+
+
 def test_removing_item_after_reopen_appends_reversal_line(screen):
     pid, barcode, _ = _add_product(barcode="rev1", price=5.0, stock_quantity=50)
     _scan(screen, barcode)

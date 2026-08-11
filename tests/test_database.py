@@ -164,6 +164,62 @@ def test_migrations_are_noop_when_columns_already_present(monkeypatch):
     database._run_migrations()  # should be a no-op, not raise
 
 
+def test_migrations_add_invoice_snapshot_columns_preserving_data(monkeypatch):
+    """An invoices table predating the client/amount snapshot columns gets
+    them added, with existing rows preserved."""
+    engine = _memory_engine()
+    monkeypatch.setattr(database, "ENGINE", engine)
+
+    with engine.connect() as conn:
+        # Full old-style clients columns so the (unrelated) client-index
+        # migration this triggers can complete — this test is only about
+        # the invoices snapshot columns.
+        conn.exec_driver_sql("""
+            CREATE TABLE clients (
+                id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, address TEXT,
+                phone TEXT, email TEXT, vatNumber TEXT UNIQUE NOT NULL, website TEXT,
+                is_active BOOLEAN DEFAULT 1
+            )
+        """)
+        conn.exec_driver_sql("""
+            CREATE TABLE sales (
+                id INTEGER PRIMARY KEY, sale_number TEXT UNIQUE NOT NULL,
+                total_amount REAL, final_amount REAL, cart_snapshot TEXT, payment_breakdown TEXT
+            )
+        """)
+        conn.exec_driver_sql("""
+            CREATE TABLE sale_items (
+                id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER, product_name TEXT,
+                quantity REAL, unit_price REAL, line_total REAL, tax_rate INTEGER, tax_amount REAL
+            )
+        """)
+        # Old-style invoices: just the original 4 columns, no snapshot fields.
+        conn.exec_driver_sql("""
+            CREATE TABLE invoices (
+                id INTEGER PRIMARY KEY, sale_id INTEGER UNIQUE, client_id INTEGER,
+                invoice_number TEXT UNIQUE
+            )
+        """)
+        conn.exec_driver_sql(
+            "INSERT INTO invoices (sale_id, client_id, invoice_number) VALUES (1, 1, 'I-OLD')"
+        )
+        conn.commit()
+
+    database._run_migrations()
+
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(invoices)")}
+        assert {
+            "issued_at", "client_name", "client_vat_number", "client_address",
+            "total_amount", "tax_amount", "final_amount", "line_items_snapshot",
+        } <= cols
+
+        row = conn.exec_driver_sql(
+            "SELECT sale_id, client_id, invoice_number FROM invoices"
+        ).fetchone()
+        assert row == (1, 1, "I-OLD")
+
+
 # ── _migrate_clients_to_partial_unique ──────────────────────────────────
 
 def test_migrate_clients_preserves_data_and_relaxes_uniqueness(monkeypatch):

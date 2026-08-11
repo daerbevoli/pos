@@ -1051,6 +1051,13 @@ class POSScreen(QWidget):
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
+            if sale.invoice is not None:
+                self._show_overlay(
+                    "This sale has already been invoiced and can't be edited.\n"
+                    "Issue a credit note for corrections instead.",
+                    title="Invoice already issued", kind="error",
+                )
+                return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
 
         self.sale_finished     = False

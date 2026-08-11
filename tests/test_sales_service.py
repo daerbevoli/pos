@@ -225,6 +225,56 @@ def test_finalize_invoice_number_mirrors_sale_number(db_session):
     assert invoice.invoice_number == invoice.sale.sale_number.replace("S-", "I-", 1)
 
 
+def test_finalize_invoice_snapshots_client_and_amounts(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Acme Corp", vatNumber="BE001", address="1 Main St")
+    product = _make_product(db_session, price=12.1, tax=21)  # 10 base, 2.1 tax
+
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+
+    assert invoice.client_name == "Acme Corp"
+    assert invoice.client_vat_number == "BE001"
+    assert invoice.client_address == "1 Main St"
+    assert invoice.total_amount == invoice.sale.total_amount
+    assert invoice.tax_amount == pytest.approx(2.1, abs=0.01)
+    assert invoice.final_amount == 12.1
+    assert invoice.issued_at is not None
+
+    snapshot = json.loads(invoice.line_items_snapshot)
+    assert snapshot[0]["product_id"] == product.id
+    assert snapshot[0]["quantity"] == 1
+
+
+def test_finalize_invoice_without_client_leaves_snapshot_fields_none(db_session):
+    product = _make_product(db_session)
+    invoice = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)))
+
+    assert invoice.client_id is None
+    assert invoice.client_name is None
+    assert invoice.client_vat_number is None
+    assert invoice.client_address is None
+    # Amount/line-item snapshot is independent of whether there's a client.
+    assert invoice.final_amount == invoice.sale.final_amount
+
+
+def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Original Name", vatNumber="V-ORIG")
+    product = _make_product(db_session)
+
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+
+    ClientService.update(db_session, client.id, name="Renamed Later", vatNumber="V-CHANGED")
+    db_session.refresh(invoice)
+
+    assert invoice.client_name == "Original Name"
+    assert invoice.client_vat_number == "V-ORIG"
+
+
 # ── Reports / queries ────────────────────────────────────────────────────
 
 def test_get_sales_for_date_filters_by_date_and_status(db_session):

@@ -232,6 +232,52 @@ def test_invoice_relationships(db_session):
     assert client.invoices == [invoice]
 
 
+def test_invoice_snapshot_fields_default_to_none_and_issued_at_is_set(db_session):
+    sale = Sale(sale_number="S-SNAP", total_amount=1, final_amount=1)
+    db_session.add(sale)
+    db_session.commit()
+
+    invoice = Invoice(sale_id=sale.id, invoice_number="I-SNAP")
+    db_session.add(invoice)
+    db_session.commit()
+
+    assert invoice.issued_at is not None
+    assert invoice.client_name is None
+    assert invoice.client_vat_number is None
+    assert invoice.client_address is None
+    assert invoice.total_amount is None
+    assert invoice.tax_amount is None
+    assert invoice.final_amount is None
+    assert invoice.line_items_snapshot is None
+
+
+def test_invoice_snapshot_survives_client_mutation(db_session):
+    """The whole point of the snapshot: once written, it must not change
+    even if the live client it was copied from is later edited."""
+    client = Client(name="Original Name", vatNumber="V-ORIG", address="Old Address")
+    sale = Sale(sale_number="S-SNAP2", total_amount=10.0, final_amount=10.0)
+    db_session.add_all([client, sale])
+    db_session.commit()
+
+    invoice = Invoice(
+        sale_id=sale.id, client_id=client.id, invoice_number="I-SNAP2",
+        client_name=client.name, client_vat_number=client.vatNumber, client_address=client.address,
+        total_amount=sale.total_amount, tax_amount=0.0, final_amount=sale.final_amount,
+    )
+    db_session.add(invoice)
+    db_session.commit()
+
+    client.name = "Renamed Later"
+    client.vatNumber = "V-CHANGED"
+    client.is_active = False
+    db_session.commit()
+    db_session.refresh(invoice)
+
+    assert invoice.client_name == "Original Name"
+    assert invoice.client_vat_number == "V-ORIG"
+    assert invoice.client_address == "Old Address"
+
+
 def test_invoice_number_unique(db_session):
     sale1 = Sale(sale_number="S-A", total_amount=1, final_amount=1)
     sale2 = Sale(sale_number="S-B", total_amount=1, final_amount=1)

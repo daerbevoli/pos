@@ -67,7 +67,26 @@ def _run_migrations():
         if "ux_clients_name_active" not in client_indexes:
             _migrate_clients_to_partial_unique(conn)
 
+        # Rebuilds invoices (if broken) using the current model, so it already
+        # has the columns added below — run this first.
         _repair_invoices_fk_if_broken(conn)
+
+        invoice_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(invoices)")}
+        if invoice_cols:  # empty means the table doesn't exist yet — create_all() will make it current
+            new_invoice_columns = {
+                "issued_at": "DATETIME",
+                "client_name": "TEXT",
+                "client_vat_number": "TEXT",
+                "client_address": "TEXT",
+                "total_amount": "REAL",
+                "tax_amount": "REAL",
+                "final_amount": "REAL",
+                "line_items_snapshot": "TEXT",
+            }
+            for col, col_type in new_invoice_columns.items():
+                if col not in invoice_cols:
+                    conn.exec_driver_sql(f"ALTER TABLE invoices ADD COLUMN {col} {col_type}")
+                    conn.commit()
 
 
 def _migrate_clients_to_partial_unique(conn):
