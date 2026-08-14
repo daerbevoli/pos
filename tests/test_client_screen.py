@@ -100,13 +100,12 @@ def test_new_client_happy_path_persists(screen):
     panel.name.setText("Brand New")
     panel.vatNumber.setText("VNEW")
     panel._on_ok()
+    assert panel._mode == "display"
 
     with get_session() as session:
         found = ClientService.get_by_name(session, "Brand New")
     assert found is not None
     assert found.vatNumber == "VNEW"
-    assert panel._mode == "display"
-
 
 def test_new_client_validation_blocks_empty_name(screen):
     panel = screen.detail_panel
@@ -128,6 +127,7 @@ def test_new_client_validation_blocks_empty_vat(screen):
     panel.vatNumber.setText("")
 
     panel._on_ok()
+    assert panel._mode != "display"
 
     with get_session() as session:
         assert ClientService.get_all(session) == []
@@ -257,3 +257,52 @@ def test_import_csv_no_path_selected_is_noop(screen, monkeypatch):
     screen.detail_panel._on_import()
     with get_session() as session:
         assert ClientService.get_all(session) == []
+
+
+def test_import_csv_bad_encoding_shows_error_and_imports_nothing(screen, monkeypatch, tmp_path):
+    csv_path = tmp_path / "clients.csv"
+    # Latin-1 bytes containing an accented char that isn't valid UTF-8.
+    csv_path.write_bytes("name,vat\nCaf\xe9,VAT1\n".encode("latin-1"))
+
+    monkeypatch.setattr(
+        "app.ui.client_screen.FileDialog",
+        lambda parent=None: _FakeFileDialog(str(csv_path)),
+    )
+
+    screen.detail_panel._on_import()
+
+    assert not screen.detail_panel.overlay.isHidden()
+    with get_session() as session:
+        assert ClientService.get_all(session) == []
+
+
+def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path):
+    import app.ui.client_screen as client_screen_module
+
+    real_init = client_screen_module.Client.__init__
+
+    def flaky_init(self, *args, **kwargs):
+        if kwargs.get("vatNumber") == "BADVAT":
+            raise RuntimeError("boom")
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(client_screen_module.Client, "__init__", flaky_init)
+
+    csv_path = tmp_path / "clients.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["name", "vat", "email", "phone", "Street", "City", "Country"])
+        writer.writeheader()
+        writer.writerow({"name": "Bad Row", "vat": "BADVAT", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
+        writer.writerow({"name": "Good Row", "vat": "GOODVAT", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
+
+    monkeypatch.setattr(
+        "app.ui.client_screen.FileDialog",
+        lambda parent=None: _FakeFileDialog(str(csv_path)),
+    )
+
+    screen.detail_panel._on_import()
+
+    with get_session() as session:
+        names = {c.name for c in ClientService.get_all(session)}
+    assert "Good Row" in names
+    assert "Bad Row" not in names

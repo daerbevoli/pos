@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QStackedWidget, QFileDialog
 )
 from PyQt6.QtCore import Qt, QEvent, QLocale, pyqtSignal
-from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
@@ -550,10 +549,21 @@ class ArticleDetailPanel(QFrame):
             path = file_dialog.path
         if not path:
             return
-
-        with open(path, "r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+        if not path.endswith((".csv", ".txt")):
+            self._show_overlay("Only csv and txt files allowed to import", title="Import failed", kind="error")
+            return
+        try:
+            with open(path, "r", newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except UnicodeDecodeError:
+            self._show_overlay(
+                "This file isn't valid UTF-8 text. Re-save it as UTF-8 CSV and try again.",
+                title="Import failed", kind="error",
+            )
+            return
+        except (OSError, csv.Error) as e:
+            self._show_overlay(f"Couldn't read file: {e}", title="Import failed", kind="error")
+            return
 
         self._load_categories()
         category_id_by_name = {name: cid for name, cid in self._categories}
@@ -562,51 +572,52 @@ class ArticleDetailPanel(QFrame):
         skipped = 0
         with get_session() as session:
             for row in rows:
-                name = (row.get("name") or "").strip()
-                barcode = (row.get("barcode") or "").strip() or None
-                if not name:
-                    skipped += 1
-                    continue
+                try:
+                    name = (row.get("name") or "").strip()
+                    barcode = (row.get("barcode") or "").strip() or None
+                    if not name:
+                        skipped += 1
+                        continue
 
-                existing = session.query(Product).filter_by(barcode=barcode).first() if barcode else None
-                if existing:
-                    skipped += 1
-                    continue
+                    existing = session.query(Product).filter_by(barcode=barcode).first() if barcode else None
+                    if existing:
+                        skipped += 1
+                        continue
 
-                try:
-                    price = float(row.get("price") or 0)
-                except ValueError:
-                    price = 0.0
-                try:
-                    tax = int(float(row.get("tax") or 0))
-                except ValueError:
-                    tax = 0
-                try:
-                    stock_quantity = float(row.get("stock_quantity") or 0)
-                except ValueError:
-                    stock_quantity = 0.0
-                try:
-                    min_stock_level = float(row.get("min_stock_level") or 5)
-                except ValueError:
-                    min_stock_level = 5.0
+                    try:
+                        price = float(row.get("price") or 0)
+                    except ValueError:
+                        price = 0.0
+                    try:
+                        tax = int(float(row.get("tax") or 0))
+                    except (ValueError, OverflowError):
+                        tax = 0
+                    try:
+                        stock_quantity = float(row.get("stock_quantity") or 0)
+                    except ValueError:
+                        stock_quantity = 0.0
+                    try:
+                        min_stock_level = float(row.get("min_stock_level") or 5)
+                    except ValueError:
+                        min_stock_level = 5.0
 
-                session.add(Product(
-                    barcode=barcode,
-                    name=name,
-                    price=price,
-                    tax=tax,
-                    unit=(row.get("unit") or "pcs").strip(),
-                    stock_quantity=stock_quantity,
-                    min_stock_level=min_stock_level,
-                    category_id=category_id_by_name.get((row.get("category") or "").strip()),
-                    is_active=True,
-                ))
-                try:
+                    session.add(Product(
+                        barcode=barcode,
+                        name=name,
+                        price=price,
+                        tax=tax,
+                        unit=(row.get("unit") or "pcs").strip(),
+                        stock_quantity=stock_quantity,
+                        min_stock_level=min_stock_level,
+                        category_id=category_id_by_name.get((row.get("category") or "").strip()),
+                        is_active=True,
+                    ))
                     session.flush()
                     added += 1
-                except IntegrityError:
+                except Exception as e:
                     session.rollback()
                     skipped += 1
+                    print(f"Skipped {row.get('name')!r}: {e}")
 
             session.commit()
 

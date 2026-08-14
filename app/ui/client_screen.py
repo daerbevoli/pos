@@ -8,11 +8,9 @@ itself, mirroring the inventory screen's article editing.
 """
 import csv
 
-from sqlalchemy.exc import IntegrityError
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
-    QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
+    QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
 
@@ -29,6 +27,8 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+# Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
+CLIENT_CSV_FIELDS = ["name", "vat", "address", "phone", "email", "active"]
 
 
 class ClientDetailPanel(QFrame):
@@ -122,6 +122,7 @@ class ClientDetailPanel(QFrame):
 
         self.btn_up = FunctionButton("Up", "secFunc")
         self.btn_import = FunctionButton("Import", "secFunc")
+        self.btn_export = FunctionButton("Export", "secFunc")
         self.btn_search_key = FunctionButton("Search by\nvat", "secFunc")
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
@@ -133,9 +134,9 @@ class ClientDetailPanel(QFrame):
             (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
 
             (self.btn_up, 1, 0), (self.btn_import, 1, 1),
-            (self.btn_search_key, 1, 2), (self.btn_cancel, 1, 3),
+            (self.btn_export, 1, 2), (self.btn_cancel, 1, 3),
 
-            (self.btn_down, 2, 0),
+            (self.btn_down, 2, 0), (self.btn_search_key, 2, 2),
             (self.btn_ok, 2, 3),
         ]
         for widget, r, c in layout_map:
@@ -157,6 +158,7 @@ class ClientDetailPanel(QFrame):
         self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_import.clicked.connect(self._on_import)
+        self.btn_export.clicked.connect(self._on_export)
         self.btn_search_key.clicked.connect(self._on_search_key)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
@@ -340,6 +342,28 @@ class ClientDetailPanel(QFrame):
             return
         self.parent_screen._delete_client(self.current_client_id)
 
+    def _on_export(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export Clients", "clients.csv", "CSV Files (*.csv)")
+        if not path:
+            return
+
+        with get_session() as session:
+            clients = ClientService.get_all(session, active_only=False)
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=CLIENT_CSV_FIELDS)
+                writer.writeheader()
+                for c in clients:
+                    writer.writerow({
+                        "name": c.name,
+                        "vat": c.vatNumber,
+                        "address": c.address,
+                        "phone": c.phone or "",
+                        "email": c.email or "",
+                        "active": 1 if c.is_active else 0,
+                    })
+
+        self._show_overlay(f"Exported {len(clients)} client(s).", title="Export complete")
+
     def _on_import(self):
         path = ""
         file_dialog = FileDialog(parent=self)
@@ -347,38 +371,49 @@ class ClientDetailPanel(QFrame):
             path = file_dialog.path
         if not path:
             return
-
-        with open(path, "r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+        if not path.endswith((".csv", ".txt")):
+            self._show_overlay("Only csv and txt files allowed to import", title="Import failed", kind="error")
+            return
+        try:
+            with open(path, "r", newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except UnicodeDecodeError:
+            self._show_overlay(
+                "This file isn't valid UTF-8 text. Re-save it as UTF-8 CSV and try again.",
+                title="Import failed", kind="error",
+            )
+            return
+        except (OSError, csv.Error) as e:
+            self._show_overlay(f"Couldn't read file: {e}", title="Import failed", kind="error")
+            return
 
         clients_added = 0
         clients_skipped = 0
-        with get_session() as session:
+        with (get_session() as session):
             for row in rows:
-                vat = row.get("vat")
-                email = row.get("email") or None
-                existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
-                if not existing and email:
-                    existing = session.query(Client).filter_by(email=email).first()
-                if not vat or existing:
-                    clients_skipped += 1
-                    continue
-
-                address = ", ".join(part for part in (row.get("Street"), row.get("City"), row.get("Country")) if part)
-                phone = (row.get("phone") or "").lstrip("'") or None
-                session.add(Client(
-                    name=row.get("name"),
-                    vatNumber=vat,
-                    address=address or None,
-                    phone=phone,
-                    email=email,
-                    is_active=True,
-                ))
                 try:
+                    vat = row.get("vat")
+                    email = row.get("email") or None
+                    existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
+                    if not existing and email:
+                        existing = session.query(Client).filter_by(email=email).first()
+                    if not vat or existing:
+                        clients_skipped += 1
+                        continue
+
+                    address = ", ".join(part for part in (row.get("Street"), row.get("City"), row.get("Country")) if part) or row.get("address")
+                    phone = (row.get("phone") or "").lstrip("'") or None
+                    session.add(Client(
+                        name=row.get("name"),
+                        vatNumber=vat,
+                        address=address or None,
+                        phone=phone,
+                        email=email,
+                        is_active=True,
+                    ))
                     session.flush()
                     clients_added += 1
-                except IntegrityError as e:
+                except Exception as e:
                     session.rollback()
                     clients_skipped += 1
                     print(f"Skipped {row.get('name')!r}: {e}")

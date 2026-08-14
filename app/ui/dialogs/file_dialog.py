@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from PyQt6.QtWidgets import QWidget, QLineEdit, QPushButton, QHBoxLayout, QFileDialog, QDialog
+from PyQt6.QtWidgets import QLineEdit, QPushButton, QHBoxLayout, QFileDialog, QDialog, QLabel, QVBoxLayout
 
-from app.constants import DIALOG_WIDTH_SM
+from app.constants import BUTTON_HEIGHT
+from app.utils.utils import FunctionButton
 
 
 class FileDialog(QDialog):
@@ -15,16 +16,24 @@ class FileDialog(QDialog):
         self.line_edit = QLineEdit()
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.clicked.connect(self.browse)
-        self.ok_btn = QPushButton("OK")
+        self.ok_btn = FunctionButton("OK", "okBtn")
+        self.ok_btn.setFixedHeight(BUTTON_HEIGHT)
         self.ok_btn.clicked.connect(self.on_ok)
 
-        layout = QHBoxLayout(self)
-        layout.addWidget(self.line_edit)
-        layout.addWidget(self.browse_btn)
-        layout.addWidget(self.ok_btn)
+        label = QLabel("Select File to import: ")
+
+        layoutV = QVBoxLayout(self)
+        layoutH = QHBoxLayout()
+        layoutV.addWidget(label)
+        layoutV.addLayout(layoutH)
+        layoutH.addWidget(self.line_edit)
+        layoutH.addWidget(self.browse_btn)
+        layoutV.addWidget(self.ok_btn)
 
     def browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select File")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select File", "", "CSV/Text Files (*.csv *.txt)"
+        )
         if path:
             self.line_edit.setText(path)
 

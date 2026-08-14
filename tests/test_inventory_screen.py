@@ -418,6 +418,40 @@ def test_import_no_path_selected_is_noop(screen, monkeypatch):
         assert ProductService.get_all(session, active_only=False) == []
 
 
+def test_import_bad_encoding_shows_error_and_imports_nothing(screen, monkeypatch, tmp_path):
+    csv_path = tmp_path / "articles.csv"
+    # Latin-1 bytes containing an accented char that isn't valid UTF-8.
+    csv_path.write_bytes("name,barcode\nCaf\xe9,BC1\n".encode("latin-1"))
+
+    _import_from(screen, monkeypatch, csv_path)
+
+    assert not screen.detail_panel.overlay.isHidden()
+    with get_session() as session:
+        assert ProductService.get_all(session, active_only=False) == []
+
+
+def test_import_overflowing_tax_defaults_instead_of_aborting_batch(screen, monkeypatch, tmp_path):
+    csv_path = tmp_path / "articles.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["barcode", "name", "price", "tax", "unit", "stock_quantity", "min_stock_level", "category"])
+        writer.writeheader()
+        # tax="1e400" parses as float('inf'); int(float('inf')) raises OverflowError,
+        # which used to escape the row loop and abort the whole import.
+        writer.writerow({"barcode": "OVF1", "name": "Overflowing Tax", "price": "1", "tax": "1e400",
+                          "unit": "pcs", "stock_quantity": "0", "min_stock_level": "5", "category": ""})
+        writer.writerow({"barcode": "OVF2", "name": "After Bad Row", "price": "1", "tax": "0",
+                          "unit": "pcs", "stock_quantity": "0", "min_stock_level": "5", "category": ""})
+
+    _import_from(screen, monkeypatch, csv_path)
+
+    with get_session() as session:
+        names = {p.name for p in ProductService.get_all(session, active_only=False)}
+        overflowing = session.query(Product).filter_by(barcode="OVF1").first()
+    assert "Overflowing Tax" in names
+    assert overflowing.tax == 0
+    assert "After Bad Row" in names
+
+
 def test_export_then_import_round_trip_restores_catalog(screen, monkeypatch, tmp_path):
     """The intended real-world use: export the current catalog, wipe the
     products table (e.g. a fresh/reset database), then re-import the CSV
