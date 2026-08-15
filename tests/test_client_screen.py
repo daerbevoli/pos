@@ -25,6 +25,7 @@ def screen(qtbot, patched_db):
 def _add_client(**overrides):
     data = {"name": "Client A", "vatNumber": "V1"}
     data.update(overrides)
+    data.setdefault("address", f"1 Main St, {data['name']}")
     with get_session() as session:
         client = ClientService.create(session, **data)
         return client.id
@@ -98,6 +99,7 @@ def test_new_client_happy_path_persists(screen):
     assert panel._mode == "new"
 
     panel.name.setText("Brand New")
+    panel.address.setText("1 Main St")
     panel.vatNumber.setText("VNEW")
     panel._on_ok()
     assert panel._mode == "display"
@@ -111,6 +113,21 @@ def test_new_client_validation_blocks_empty_name(screen):
     panel = screen.detail_panel
     panel._start_new()
     panel.name.setText("")
+    panel.address.setText("1 Main St")
+    panel.vatNumber.setText("V1")
+
+    panel._on_ok()
+
+    assert panel._mode == "new"  # still editing — nothing was saved
+    with get_session() as session:
+        assert ClientService.get_all(session) == []
+
+
+def test_new_client_validation_blocks_empty_address(screen):
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.name.setText("Has Name")
+    panel.address.setText("")
     panel.vatNumber.setText("V1")
 
     panel._on_ok()
@@ -124,6 +141,7 @@ def test_new_client_validation_blocks_empty_vat(screen):
     panel = screen.detail_panel
     panel._start_new()
     panel.name.setText("Has Name")
+    panel.address.setText("1 Main St")
     panel.vatNumber.setText("")
 
     panel._on_ok()
@@ -292,8 +310,8 @@ def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["name", "vat", "email", "phone", "Street", "City", "Country"])
         writer.writeheader()
-        writer.writerow({"name": "Bad Row", "vat": "BADVAT", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
-        writer.writerow({"name": "Good Row", "vat": "GOODVAT", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
+        writer.writerow({"name": "Bad Row", "vat": "BADVAT", "email": "", "phone": "", "Street": "Main St", "City": "Town", "Country": "BE"})
+        writer.writerow({"name": "Good Row", "vat": "GOODVAT", "email": "", "phone": "", "Street": "Main St", "City": "Town", "Country": "BE"})
 
     monkeypatch.setattr(
         "app.ui.client_screen.FileDialog",

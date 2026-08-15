@@ -140,7 +140,7 @@ class Client(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50), nullable=False)
-    address = Column(String(50), nullable=True)
+    address = Column(String(50), nullable=False)
     phone = Column(String(50), nullable=True)
     email = Column(String(50), nullable=True)
     vatNumber = Column(String(50), nullable=False)
@@ -166,7 +166,7 @@ class Invoice(Base):
 
     id = Column(Integer, primary_key=True)
     sale_id = Column(Integer, ForeignKey("sales.id"), unique=True)
-    client_id = Column(Integer, ForeignKey("clients.id"))
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     invoice_number = Column(String, unique=True)
 
     # Snapshot of billing-relevant data as of the moment the invoice was
@@ -175,9 +175,9 @@ class Invoice(Base):
     # represents can never change after the fact — even if the client is
     # later renamed/deactivated or the underlying sale is edited/reopened.
     issued_at = Column(DateTime, default=datetime.now)
-    client_name = Column(String, nullable=True)
-    client_vat_number = Column(String, nullable=True)
-    client_address = Column(String, nullable=True)
+    client_name = Column(String, nullable=False)
+    client_vat_number = Column(String, nullable=False)
+    client_address = Column(String, nullable=False)
     total_amount = Column(Float, nullable=True)
     tax_amount = Column(Float, nullable=True)
     final_amount = Column(Float, nullable=True)

@@ -113,7 +113,9 @@ def _migrate_clients_to_partial_unique(conn):
     Client.__table__.create(conn)
     conn.exec_driver_sql(
         'INSERT INTO clients (id, name, address, phone, email, "vatNumber", website, is_active) '
-        'SELECT id, name, address, phone, email, "vatNumber", website, is_active FROM clients_old'
+        # address is now NOT NULL; older rows that predate the address
+        # requirement get an empty string rather than failing the copy.
+        'SELECT id, name, COALESCE(address, \'\'), phone, email, "vatNumber", website, is_active FROM clients_old'
     )
     conn.exec_driver_sql("DROP TABLE clients_old")
     conn.commit()
@@ -140,13 +142,51 @@ def _repair_invoices_fk_if_broken(conn):
     conn.exec_driver_sql("ALTER TABLE invoices RENAME TO invoices_old")
     conn.exec_driver_sql("PRAGMA legacy_alter_table=OFF")
     Invoice.__table__.create(conn)
+
+    # client_id and the client_name/vat/address snapshot are NOT NULL now,
+    # but invoices_old may predate all of that (client_id could be NULL —
+    # invoices didn't always require a client — and the snapshot columns
+    # may not even exist yet). Route orphaned rows to a placeholder client
+    # and backfill missing/NULL snapshot text with '' rather than losing
+    # the row or fabricating a real customer.
+    old_cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(invoices_old)")}
+    has_orphans = "client_id" not in old_cols or conn.exec_driver_sql(
+        "SELECT 1 FROM invoices_old WHERE client_id IS NULL LIMIT 1"
+    ).fetchone() is not None
+    if has_orphans:
+        placeholder_id = _ensure_legacy_placeholder_client(conn)
+        client_id_expr = f"COALESCE(client_id, {placeholder_id})" if "client_id" in old_cols else str(placeholder_id)
+    else:
+        client_id_expr = "client_id"
+    snapshot_cols = ["client_name", "client_vat_number", "client_address"]
+    select_parts = ["id", "sale_id", client_id_expr, "invoice_number"] + [
+        f"COALESCE({col}, '')" if col in old_cols else "''" for col in snapshot_cols
+    ]
     conn.exec_driver_sql(
-        "INSERT INTO invoices (id, sale_id, client_id, invoice_number) "
-        "SELECT id, sale_id, client_id, invoice_number FROM invoices_old"
+        f"INSERT INTO invoices (id, sale_id, client_id, invoice_number, {', '.join(snapshot_cols)}) "
+        f"SELECT {', '.join(select_parts)} FROM invoices_old"
     )
     conn.exec_driver_sql("DROP TABLE invoices_old")
     conn.commit()
     conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+
+def _ensure_legacy_placeholder_client(conn) -> int:
+    """Inactive client that pre-existing invoices with no client_id get
+    attached to, so invoices.client_id (NOT NULL) can be satisfied without
+    inventing a real customer. Hidden from normal use since is_active=0."""
+    existing = conn.exec_driver_sql(
+        "SELECT id FROM clients WHERE \"vatNumber\" = 'LEGACY-NO-CLIENT'"
+    ).fetchone()
+    if existing:
+        return existing[0]
+    conn.exec_driver_sql(
+        'INSERT INTO clients (name, address, "vatNumber", is_active) '
+        "VALUES ('(legacy invoice, no client on file)', '', 'LEGACY-NO-CLIENT', 0)"
+    )
+    return conn.exec_driver_sql(
+        "SELECT id FROM clients WHERE \"vatNumber\" = 'LEGACY-NO-CLIENT'"
+    ).fetchone()[0]
 
 
 def get_session() -> Session:

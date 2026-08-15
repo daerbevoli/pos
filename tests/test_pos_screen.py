@@ -316,6 +316,27 @@ def test_full_payment_with_overpayment_shows_change(screen):
     assert "Change" in screen.footer_change_lbl.text()
 
 
+def test_overpayment_breakdown_records_amount_tendered_not_remaining(screen):
+    """Regression: the breakdown row must record what was actually handed
+    over (e.g. 20 tendered for a 10 balance), not just the balance owed —
+    change is derived separately and was already correct even when this
+    was broken."""
+    import json
+
+    pid, barcode, _ = _add_product(barcode="pay2b", price=10.0)
+    _scan(screen, barcode)
+
+    screen.combined_input.setText("20")
+    screen._open_payment("cash")
+
+    with get_session() as session:
+        sale = session.query(Sale).filter_by(id=screen._current_sale_id).first()
+        breakdown = json.loads(sale.payment_breakdown)
+
+    assert breakdown == [{"method": "cash", "amount": 20.0}]
+    assert sale.change_given == 10.0
+
+
 def test_payment_deducts_stock(screen):
     pid, barcode, _ = _add_product(barcode="pay3", price=1.0, stock_quantity=50)
     _scan(screen, barcode)
@@ -396,7 +417,7 @@ def test_payment_zero_amount_shows_overlay(screen):
 
 def test_set_client_marks_invoice_and_shows_label(screen):
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1")
+        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
         client_id = client.id
 
     screen.set_client(client_id, "Acme")
@@ -409,7 +430,7 @@ def test_set_client_marks_invoice_and_shows_label(screen):
 
 def test_invoice_payment_creates_invoice_record(screen):
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1")
+        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
         client_id = client.id
     pid, barcode, _ = _add_product(barcode="inv1", price=8.0)
 
@@ -484,7 +505,7 @@ def test_reopen_ticket_blocked_once_invoiced(screen):
     """An issued invoice must stay immutable — reopening the sale it came
     from (to overwrite its line items via update_sale) has to be refused."""
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1")
+        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
         client_id = client.id
     pid, barcode, _ = _add_product(barcode="reopen3", price=5.0)
 

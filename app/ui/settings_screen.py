@@ -9,12 +9,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 from app.core.database import get_session
+from app.core.printer_service import PrinterError, PrinterService
 from app.core.settings_service import SettingsService
 from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
+from app.utils.utils import FunctionButton
 
 
 class SettingsScreen(QWidget):
     settings_saved = pyqtSignal()
+    navigate = pyqtSignal(int)
+
 
     def __init__(self):
         super().__init__()
@@ -34,6 +38,7 @@ class SettingsScreen(QWidget):
         self.store_name = QLineEdit()
         self.store_address = QLineEdit()
         self.store_phone = QLineEdit()
+        self.vat_number = QLineEdit()
         self.currency = QLineEdit()
         self.currency.setPlaceholderText("e.g. €")
         self.receipt_footer = QLineEdit()
@@ -53,6 +58,7 @@ class SettingsScreen(QWidget):
         store_form.addRow("Store Name:", self.store_name)
         store_form.addRow("Address:", self.store_address)
         store_form.addRow("Phone:", self.store_phone)
+        store_form.addRow("Vat Number:", self.vat_number)
         store_form.addRow("Currency Symbol:", self.currency)
         store_form.addRow("Receipt Footer:", self.receipt_footer)
         store_form.addRow("Logo:", logo_row)
@@ -70,17 +76,21 @@ class SettingsScreen(QWidget):
         printer_form.addRow("Vendor ID:", self.receipt_vendor)
         printer_form.addRow("Product ID:", self.receipt_product)
 
-        test_btn = QPushButton("🖨 Test Print")
+        test_btn = QPushButton("Test Print")
         test_btn.clicked.connect(self._test_print)
         printer_form.addRow("", test_btn)
         layout.addWidget(printer_group)
 
         # ── Save ──────────────────────────────────────────────────────────────
-        save_btn = QPushButton("💾  Save Settings")
+        save_btn = QPushButton("Save Information")
         save_btn.setObjectName("primaryBtn")
         save_btn.setFixedHeight(BUTTON_HEIGHT_LG)
         save_btn.clicked.connect(self._save)
+        ok_btn = FunctionButton("OK", "okBtn")
+        ok_btn.setFixedHeight(BUTTON_HEIGHT_LG)
+        ok_btn.clicked.connect(self._on_ok)
         layout.addWidget(save_btn)
+        layout.addWidget(ok_btn)
         layout.addStretch()
 
     def _show_logo_preview(self, path: str):
@@ -110,6 +120,7 @@ class SettingsScreen(QWidget):
         self.store_name.setText(s.get("store_name", ""))
         self.store_address.setText(s.get("store_address", ""))
         self.store_phone.setText(s.get("store_phone", ""))
+        self.vat_number.setText(s.get("vat_number", ""))
         self.currency.setText(s.get("currency_symbol", "€"))
         self.receipt_footer.setText(s.get("receipt_footer", ""))
         self.receipt_vendor.setText(s.get("receipt_printer_vendor_id", ""))
@@ -123,6 +134,7 @@ class SettingsScreen(QWidget):
             SettingsService.set(session, "store_name", self.store_name.text())
             SettingsService.set(session, "store_address", self.store_address.text())
             SettingsService.set(session, "store_phone", self.store_phone.text())
+            SettingsService.set(session, "vat_number", self.vat_number.text())
             SettingsService.set(session, "currency_symbol", self.currency.text())
             SettingsService.set(session, "receipt_footer", self.receipt_footer.text())
             SettingsService.set(session, "receipt_printer_vendor_id", self.receipt_vendor.text())
@@ -132,6 +144,13 @@ class SettingsScreen(QWidget):
         QMessageBox.information(self, "Saved", "Settings saved successfully.")
         self.settings_saved.emit()
 
+    def _on_ok(self):
+        self.navigate.emit(0)
+
     def _test_print(self):
-        # TODO: send a test page to the receipt printer
-        QMessageBox.information(self, "Test Print", "Test print feature coming soon.")
+        try:
+            PrinterService.test_print(self.receipt_vendor.text(), self.receipt_product.text())
+        except PrinterError as e:
+            QMessageBox.warning(self, "Test Print Failed", str(e))
+        else:
+            QMessageBox.information(self, "Test Print", "Test page sent to the printer.")

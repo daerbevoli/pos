@@ -92,7 +92,7 @@ class ClientDetailPanel(QFrame):
 
         rows_spec = [
             ("Name *",       self.name),
-            ("Address",      self.address),
+            ("Address *",    self.address),
             ("VAT Number *", self.vatNumber),
             ("Phone",        self.phone),
             ("Email",        self.email),
@@ -274,6 +274,9 @@ class ClientDetailPanel(QFrame):
         if not self.name.text().strip():
             self._show_overlay("Client name is required.")
             return False
+        if not self.address.text().strip():
+            self._show_overlay("Address is required.")
+            return False
         if not self.vatNumber.text().strip():
             self._show_overlay("VAT number is required.")
             return False
@@ -282,7 +285,7 @@ class ClientDetailPanel(QFrame):
     def _collect_data(self) -> dict:
         return {
             "name": self.name.text().strip(),
-            "address": self.address.text().strip() or None,
+            "address": self.address.text().strip(),
             "vatNumber": self.vatNumber.text().strip(),
             "phone": self.phone.text().strip() or None,
             "email": self.email.text().strip() or None,
@@ -397,16 +400,16 @@ class ClientDetailPanel(QFrame):
                     existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
                     if not existing and email:
                         existing = session.query(Client).filter_by(email=email).first()
-                    if not vat or existing:
+                    address = ", ".join(part for part in (row.get("Street"), row.get("City"), row.get("Country")) if part) or row.get("address")
+                    if not vat or existing or not row.get("name") or not address:
                         clients_skipped += 1
                         continue
 
-                    address = ", ".join(part for part in (row.get("Street"), row.get("City"), row.get("Country")) if part) or row.get("address")
                     phone = (row.get("phone") or "").lstrip("'") or None
                     session.add(Client(
                         name=row.get("name"),
                         vatNumber=vat,
-                        address=address or None,
+                        address=address,
                         phone=phone,
                         email=email,
                         is_active=True,

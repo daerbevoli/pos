@@ -164,22 +164,22 @@ def test_settings_repr(db_session):
 # ── Client ───────────────────────────────────────────────────────────────
 
 def test_client_defaults(db_session):
-    c = Client(name="ACME", vatNumber="BE0123456789")
+    c = Client(name="ACME", vatNumber="BE0123456789", address="1 Main St")
     db_session.add(c)
     db_session.commit()
 
     assert c.is_active is True
-    assert c.address is None
+    assert c.address == "1 Main St"
     assert repr(c) == "<Client ACME BE0123456789>"
 
 
 def test_client_unique_fields_enforced_only_while_active(db_session):
-    c1 = Client(name="Dup Client", vatNumber="VAT1")
+    c1 = Client(name="Dup Client", vatNumber="VAT1", address="1 Main St")
     db_session.add(c1)
     db_session.commit()
 
     # Same name, active — should violate the partial unique index.
-    c2 = Client(name="Dup Client", vatNumber="VAT2")
+    c2 = Client(name="Dup Client", vatNumber="VAT2", address="1 Main St")
     db_session.add(c2)
     with pytest.raises(IntegrityError):
         db_session.commit()
@@ -189,7 +189,7 @@ def test_client_unique_fields_enforced_only_while_active(db_session):
     c1.is_active = False
     db_session.commit()
 
-    c3 = Client(name="Dup Client", vatNumber="VAT3")
+    c3 = Client(name="Dup Client", vatNumber="VAT3", address="1 Main St")
     db_session.add(c3)
     db_session.commit()  # should not raise
 
@@ -197,30 +197,39 @@ def test_client_unique_fields_enforced_only_while_active(db_session):
 
 
 def test_client_unique_vat_while_active(db_session):
-    db_session.add(Client(name="A", vatNumber="SAMEVAT"))
+    db_session.add(Client(name="A", vatNumber="SAMEVAT", address="1 Main St"))
     db_session.commit()
-    db_session.add(Client(name="B", vatNumber="SAMEVAT"))
+    db_session.add(Client(name="B", vatNumber="SAMEVAT", address="2 Main St"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_client_requires_address(db_session):
+    db_session.add(Client(name="A", vatNumber="V1"))
     with pytest.raises(IntegrityError):
         db_session.commit()
 
 
 def test_client_null_optional_fields_do_not_collide(db_session):
-    """address/phone/email/website are nullable; multiple NULLs must not
+    """phone/email/website are nullable; multiple NULLs must not
     trip the partial unique indexes (SQL NULL != NULL)."""
-    db_session.add(Client(name="A", vatNumber="V1", address=None, phone=None, email=None, website=None))
-    db_session.add(Client(name="B", vatNumber="V2", address=None, phone=None, email=None, website=None))
+    db_session.add(Client(name="A", vatNumber="V1", address="1 Main St", phone=None, email=None, website=None))
+    db_session.add(Client(name="B", vatNumber="V2", address="2 Main St", phone=None, email=None, website=None))
     db_session.commit()  # should not raise
 
 
 # ── Invoice ──────────────────────────────────────────────────────────────
 
 def test_invoice_relationships(db_session):
-    client = Client(name="Client", vatNumber="V1")
+    client = Client(name="Client", vatNumber="V1", address="1 Main St")
     sale = Sale(sale_number="S-INV", total_amount=5.0, final_amount=5.0)
     db_session.add_all([client, sale])
     db_session.commit()
 
-    invoice = Invoice(sale_id=sale.id, client_id=client.id, invoice_number="I-1")
+    invoice = Invoice(
+        sale_id=sale.id, client_id=client.id, invoice_number="I-1",
+        client_name=client.name, client_vat_number=client.vatNumber, client_address=client.address,
+    )
     db_session.add(invoice)
     db_session.commit()
     db_session.refresh(sale)
@@ -232,23 +241,16 @@ def test_invoice_relationships(db_session):
     assert client.invoices == [invoice]
 
 
-def test_invoice_snapshot_fields_default_to_none_and_issued_at_is_set(db_session):
+def test_invoice_requires_client(db_session):
+    """An invoice cannot exist without a client — client_id and the
+    client snapshot fields are all mandatory."""
     sale = Sale(sale_number="S-SNAP", total_amount=1, final_amount=1)
     db_session.add(sale)
     db_session.commit()
 
-    invoice = Invoice(sale_id=sale.id, invoice_number="I-SNAP")
-    db_session.add(invoice)
-    db_session.commit()
-
-    assert invoice.issued_at is not None
-    assert invoice.client_name is None
-    assert invoice.client_vat_number is None
-    assert invoice.client_address is None
-    assert invoice.total_amount is None
-    assert invoice.tax_amount is None
-    assert invoice.final_amount is None
-    assert invoice.line_items_snapshot is None
+    db_session.add(Invoice(sale_id=sale.id, invoice_number="I-SNAP"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
 
 
 def test_invoice_snapshot_survives_client_mutation(db_session):
@@ -279,25 +281,39 @@ def test_invoice_snapshot_survives_client_mutation(db_session):
 
 
 def test_invoice_number_unique(db_session):
+    client = Client(name="Client", vatNumber="V1", address="1 Main St")
     sale1 = Sale(sale_number="S-A", total_amount=1, final_amount=1)
     sale2 = Sale(sale_number="S-B", total_amount=1, final_amount=1)
-    db_session.add_all([sale1, sale2])
+    db_session.add_all([client, sale1, sale2])
     db_session.commit()
 
-    db_session.add(Invoice(sale_id=sale1.id, invoice_number="I-DUP"))
+    db_session.add(Invoice(
+        sale_id=sale1.id, client_id=client.id, invoice_number="I-DUP",
+        client_name=client.name, client_vat_number=client.vatNumber, client_address=client.address,
+    ))
     db_session.commit()
-    db_session.add(Invoice(sale_id=sale2.id, invoice_number="I-DUP"))
+    db_session.add(Invoice(
+        sale_id=sale2.id, client_id=client.id, invoice_number="I-DUP",
+        client_name=client.name, client_vat_number=client.vatNumber, client_address=client.address,
+    ))
     with pytest.raises(IntegrityError):
         db_session.commit()
 
 
 def test_invoice_sale_id_unique_one_to_one(db_session):
+    client = Client(name="Client", vatNumber="V1", address="1 Main St")
     sale = Sale(sale_number="S-ONE", total_amount=1, final_amount=1)
-    db_session.add(sale)
+    db_session.add_all([client, sale])
     db_session.commit()
 
-    db_session.add(Invoice(sale_id=sale.id, invoice_number="I-1"))
+    db_session.add(Invoice(
+        sale_id=sale.id, client_id=client.id, invoice_number="I-1",
+        client_name=client.name, client_vat_number=client.vatNumber, client_address=client.address,
+    ))
     db_session.commit()
-    db_session.add(Invoice(sale_id=sale.id, invoice_number="I-2"))
+    db_session.add(Invoice(
+        sale_id=sale.id, client_id=client.id, invoice_number="I-2",
+        client_name=client.name, client_vat_number=client.vatNumber, client_address=client.address,
+    ))
     with pytest.raises(IntegrityError):
         db_session.commit()

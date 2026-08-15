@@ -107,7 +107,7 @@ def test_load_report_shows_client_name_for_invoices(screen):
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Acme Corp", vatNumber="BE001")
+        client = ClientService.create(session, name="Acme Corp", vatNumber="BE001", address="1 Main St")
         client_id = client.id
     _finalize_sale(product, client_id=client_id)
 
@@ -116,30 +116,13 @@ def test_load_report_shows_client_name_for_invoices(screen):
     assert screen.sales_table.item(0, 3).text() == "BE001"
 
 
-def test_load_report_invoice_without_client_shows_slash_not_crash(screen):
-    """finalize_invoice() allows client_id=None; the report must not try to
-    dereference a None client — it should fall back to '/' like a non-invoice sale."""
-    with get_session() as session:
-        product = _make_product(session)
-        cart = Cart(entries=[CartItem(
-            product_id=product.id, product_name=product.name, product_barcode=product.barcode or "",
-            unit_price=product.price, quantity=1, tax_rate=product.tax,
-        )])
-        SalesService.finalize_invoice(session, cart, client_id=None)
-
-    screen._load_report()  # must not raise
-
-    assert screen.sales_table.item(0, 2).text() == "/"
-    assert screen.sales_table.item(0, 3).text() == "/"
-
-
 def test_load_report_shows_invoiced_client_name_as_issued_even_after_rename(screen):
     """The report must reflect the invoice's own snapshot, not the client's
     current (possibly since-changed) name/VAT — same guarantee as the model."""
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Original Name", vatNumber="V-ORIG")
+        client = ClientService.create(session, name="Original Name", vatNumber="V-ORIG", address="1 Main St")
         client_id = client.id
     _finalize_sale(product, client_id=client_id)
 
@@ -201,7 +184,7 @@ def test_invoices_only_filters_out_regular_sales(screen):
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Client", vatNumber="V1")
+        client = ClientService.create(session, name="Client", vatNumber="V1", address="1 Main St")
         client_id = client.id
     _finalize_sale(product)  # regular sale
     _finalize_sale(product, client_id=client_id)  # invoice

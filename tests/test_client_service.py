@@ -8,6 +8,7 @@ from app.models.models import Client
 def _make_client(session, **overrides):
     data = {"name": "Client A", "vatNumber": "VAT-A"}
     data.update(overrides)
+    data.setdefault("address", f"1 Main St, {data['name']}")
     return ClientService.create(session, **data)
 
 

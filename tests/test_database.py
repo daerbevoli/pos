@@ -281,7 +281,7 @@ def test_migrate_clients_preserves_data_and_relaxes_uniqueness(monkeypatch):
         # impossible under the old blanket column-level UNIQUE.
         conn.exec_driver_sql("UPDATE clients SET is_active = 0 WHERE name = 'Acme'")
         conn.commit()
-        conn.exec_driver_sql("INSERT INTO clients (name, vatNumber, is_active) VALUES ('Acme', 'V2', 1)")
+        conn.exec_driver_sql("INSERT INTO clients (name, address, vatNumber, is_active) VALUES ('Acme', '2 Main St', 'V2', 1)")
         conn.commit()
 
         count = conn.exec_driver_sql("SELECT COUNT(*) FROM clients").scalar()
@@ -416,7 +416,8 @@ def test_repair_invoices_fk_fixes_already_corrupted_database(monkeypatch):
 
         conn.exec_driver_sql("PRAGMA foreign_keys=ON")
         conn.exec_driver_sql(
-            "INSERT INTO invoices (sale_id, client_id, invoice_number) VALUES (NULL, 1, 'I-NEW')"
+            "INSERT INTO invoices (sale_id, client_id, invoice_number, client_name, client_vat_number, client_address) "
+            "SELECT NULL, id, 'I-NEW', name, \"vatNumber\", '1 Main St' FROM clients WHERE id = 1"
         )
         conn.commit()  # must not raise
 

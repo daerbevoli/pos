@@ -21,6 +21,7 @@ from app.core.product_service import ProductService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService
 from app.models.models import Sale
 from app.core.settings_service import SettingsService
+from app.core.printer_service import PrinterError, PrinterService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.dialogs.numpad_dialog import NumpadDialog
 from app.constants import (
@@ -343,6 +344,10 @@ class POSScreen(QWidget):
 
         self.btn_left.clicked.connect(self._previous_sale)
         self.btn_right.clicked.connect(self._next_sale)
+
+        self.btn_print_ticket.clicked.connect(self._print_ticket)
+        self.btn_print_invoice.clicked.connect(self._print_invoice)
+        self.btn_drawer.clicked.connect(self._open_drawer)
 
         return col
 
@@ -956,9 +961,9 @@ class POSScreen(QWidget):
         breakdown = [{"method": p.method, "amount": p.amount} for p in prior_payments]
         existing_final = next((b for b in breakdown if b["method"] == method), None)
         if existing_final is not None:
-            existing_final["amount"] = round(existing_final["amount"] + remaining, 2)
+            existing_final["amount"] = round(existing_final["amount"] + tendered, 2)
         else:
-            breakdown.append({"method": method, "amount": round(remaining, 2)})
+            breakdown.append({"method": method, "amount": round(tendered, 2)})
 
         self.cart.entries = [e for e in self.cart.entries if not isinstance(e, PaymentEntry)]
 
@@ -1018,6 +1023,7 @@ class POSScreen(QWidget):
         self.input_stack.setCurrentIndex(1)
         self._refresh_cart(select_last=True)
         self.ticket_total_lbl.setVisible(False)
+        self._open_drawer()
         self.cart_table.setFocus()
 
     def _update_payment_footer(self):
@@ -1120,6 +1126,41 @@ class POSScreen(QWidget):
         self.ticket_date.setText(sale.created_at.strftime("%d-%m-%Y %H:%M"))
         self._refresh_cart()
 
+
+    def _print_ticket(self):
+        if self._current_sale_id is None:
+            self._show_overlay("No ticket to print.", title="Nothing to print", kind="error")
+            return
+        with get_session() as session:
+            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            if not sale:
+                self._show_overlay("Sale not found.", kind="error")
+                return
+            try:
+                PrinterService.print_receipt(session, sale)
+            except PrinterError as e:
+                self._show_overlay(str(e), title="Printer Error", kind="error")
+
+    def _print_invoice(self):
+        if self._current_sale_id is None:
+            self._show_overlay("No ticket to print.", title="Nothing to print", kind="error")
+            return
+        with get_session() as session:
+            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            if not sale or not sale.invoice:
+                self._show_overlay("This sale has no invoice.", kind="error")
+                return
+            try:
+                PrinterService.print_invoice(session, sale.invoice)
+            except PrinterError as e:
+                self._show_overlay(str(e), title="Printer Error", kind="error")
+
+    def _open_drawer(self):
+        with get_session() as session:
+            try:
+                PrinterService.open_drawer(session)
+            except PrinterError as e:
+                self._show_overlay(str(e), title="Printer Error", kind="error")
 
     def _get_selected_entry_index(self) -> int | None:
         """Index into cart.entries for the selected row; None for divider/non-entry rows."""

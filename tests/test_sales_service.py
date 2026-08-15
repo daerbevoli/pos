@@ -197,7 +197,7 @@ def test_void_sale_cannot_void_twice(db_session):
 
 def test_finalize_invoice_creates_sale_and_invoice(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
     product = _make_product(db_session, stock_quantity=10)
 
     invoice = SalesService.finalize_invoice(
@@ -220,8 +220,12 @@ def test_finalize_invoice_empty_cart_raises(db_session):
 
 
 def test_finalize_invoice_number_mirrors_sale_number(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
     product = _make_product(db_session)
-    invoice = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)))
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
     assert invoice.invoice_number == invoice.sale.sale_number.replace("S-", "I-", 1)
 
 
@@ -247,21 +251,23 @@ def test_finalize_invoice_snapshots_client_and_amounts(db_session):
     assert snapshot[0]["quantity"] == 1
 
 
-def test_finalize_invoice_without_client_leaves_snapshot_fields_none(db_session):
+def test_finalize_invoice_without_client_raises(db_session):
     product = _make_product(db_session)
-    invoice = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)))
+    with pytest.raises(ValueError):
+        SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)))
 
-    assert invoice.client_id is None
-    assert invoice.client_name is None
-    assert invoice.client_vat_number is None
-    assert invoice.client_address is None
-    # Amount/line-item snapshot is independent of whether there's a client.
-    assert invoice.final_amount == invoice.sale.final_amount
+
+def test_finalize_invoice_unknown_client_id_raises(db_session):
+    product = _make_product(db_session)
+    with pytest.raises(ValueError):
+        SalesService.finalize_invoice(
+            db_session, _cart_with(_item_for(product, quantity=1)), client_id=999999
+        )
 
 
 def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Original Name", vatNumber="V-ORIG")
+    client = ClientService.create(db_session, name="Original Name", vatNumber="V-ORIG", address="1 Main St")
     product = _make_product(db_session)
 
     invoice = SalesService.finalize_invoice(

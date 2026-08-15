@@ -397,6 +397,10 @@ class SalesService:
         if not cart.entries:
             raise ValueError("Cannot finalize an empty cart.")
 
+        client = session.query(Client).filter_by(id=client_id).first() if client_id else None
+        if not client:
+            raise ValueError("An invoice requires a valid client.")
+
         sale_number = SalesService._generate_sale_number(session)
         change = None
         if payment_method in ("cash", "card") and amount_tendered is not None:
@@ -448,17 +452,15 @@ class SalesService:
 
         sale.tax_amount = round(total_tax, 2)
 
-        client = session.query(Client).filter_by(id=client_id).first() if client_id else None
-
         invoice = Invoice(
             sale_id=sale.id,
             client_id=client_id,
             invoice_number=sale_number.replace("S-", "I-", 1),
             # Snapshot now, once — never re-derived from the live client/sale
             # afterward, so this document can't silently change later.
-            client_name=client.name if client else None,
-            client_vat_number=client.vatNumber if client else None,
-            client_address=client.address if client else None,
+            client_name=client.name,
+            client_vat_number=client.vatNumber,
+            client_address=client.address,
             total_amount=sale.total_amount,
             tax_amount=sale.tax_amount,
             final_amount=sale.final_amount,

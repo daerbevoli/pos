@@ -73,7 +73,7 @@ def test_reports_screen_navigate_signal_switches_stack(window):
 
 def test_selected_client_signal_sets_pos_screen_client(window):
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1")
+        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
         client_id = client.id
 
     window.client_screen.selected_client.emit(client_id, "Acme")
