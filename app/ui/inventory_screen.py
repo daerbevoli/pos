@@ -20,7 +20,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QEvent, QLocale, pyqtSignal
 
 from app.core.database import get_session
+from app.core.label_service import LabelPrinterService
 from app.core.product_service import ProductService
+from app.core.receipt_service import PrinterError
 from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
@@ -194,7 +196,6 @@ class ArticleDetailPanel(QFrame):
         self.btn_import = FunctionButton("Import\narticles", "secFunc")
         self.btn_down = FunctionButton("Down", "SecFunc")
 
-        self.btn_search_barcode = FunctionButton("Search by\nbarcode", "secFunc")
         self.btn_search_key = FunctionButton("Search by\nkey", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
@@ -206,7 +207,7 @@ class ArticleDetailPanel(QFrame):
             (self.btn_up, 1, 0), (self.btn_export, 1, 1),
             (self.btn_import, 1, 2), (self.btn_cancel, 1, 3),
 
-            (self.btn_down, 2, 0), (self.btn_search_barcode, 2, 1),
+            (self.btn_down, 2, 0), (self.btn_print_label, 2, 1),
             (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3)
         ]
         for widget, r, c in layout_map:
@@ -227,7 +228,7 @@ class ArticleDetailPanel(QFrame):
         self.btn_error.clicked.connect(self._on_cancel)
         self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_ok.clicked.connect(self._on_ok)
-        self.btn_search_barcode.clicked.connect(self._on_search_barcode)
+        self.btn_print_label.clicked.connect(self._on_print_label)
         self.btn_search_key.clicked.connect(self._on_search_key)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
@@ -510,9 +511,19 @@ class ArticleDetailPanel(QFrame):
             return
         self.parent_screen._delete_product(self.current_product_id)
 
-    def _on_search_barcode(self):
-        self.parent_screen.search_input.setFocus()
-        self.parent_screen.search_input.setPlaceholderText("Scan or type barcode…")
+    def _on_print_label(self):
+        if self.current_product_id is None:
+            return
+        with get_session() as session:
+            product = ProductService.get_by_id(session, self.current_product_id)
+            if not product:
+                self._show_overlay("Product not found.", title="Print label failed", kind="error")
+                return
+            try:
+                LabelPrinterService.print_product_label(session, product)
+            except PrinterError as e:
+                self._show_overlay(str(e), title="Print label failed", kind="error")
+                return
 
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()

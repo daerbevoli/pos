@@ -73,7 +73,7 @@ def test_test_print_shows_success_dialog(screen, monkeypatch):
 
 
 def test_test_print_shows_warning_on_failure(screen, monkeypatch):
-    from app.core.printer_service import PrinterError
+    from app.core.receipt_service import PrinterError
 
     calls = []
 

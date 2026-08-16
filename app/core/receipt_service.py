@@ -231,7 +231,7 @@ def _print_b2b_info(printer, invoice):
     printer.text(f"{invoice.client_vat_number}\n")
     printer.text("-" * LINE_WIDTH + "\n")
 
-class PrinterService:
+class ReceiptService:
 
     @staticmethod
     def test_print(vendor_id: str, product_id: str):

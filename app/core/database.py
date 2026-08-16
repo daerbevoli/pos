@@ -207,6 +207,7 @@ def _seed_defaults():
             ("receipt_printer_vendor_id", "", "USB vendor ID for receipt printer"),
             ("receipt_printer_product_id", "", "USB product ID for receipt printer"),
             ("label_printer_vendor_id", "", "USB vendor ID for label printer"),
+            ("label_printer_product_id", "", "USB product ID for label printer"),
             # ("logo", "Browse logo", "Logo shown on receipts")
         ]
         for key, value, desc in defaults:

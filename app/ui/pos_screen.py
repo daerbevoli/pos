@@ -21,11 +21,9 @@ from app.core.product_service import ProductService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService
 from app.models.models import Sale
 from app.core.settings_service import SettingsService
-from app.core.printer_service import PrinterError, PrinterService
+from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
-from app.ui.dialogs.numpad_dialog import NumpadDialog
 from app.constants import (
-    BUTTON_HEIGHT,
     BUTTON_HEIGHT_COMPACT,
     CART_LABEL_HEIGHT,
     COLOR_ROW_DISCOUNT,
@@ -43,7 +41,6 @@ from app.constants import (
 
 
 from datetime import date
-import logging
 
 ADMIN_CODE = "2060"
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
@@ -1137,7 +1134,7 @@ class POSScreen(QWidget):
                 self._show_overlay("Sale not found.", kind="error")
                 return
             try:
-                PrinterService.print_receipt(session, sale)
+                ReceiptService.print_receipt(session, sale)
             except PrinterError as e:
                 self._show_overlay(str(e), title="Printer Error", kind="error")
 
@@ -1151,14 +1148,14 @@ class POSScreen(QWidget):
                 self._show_overlay("This sale has no invoice.", kind="error")
                 return
             try:
-                PrinterService.print_invoice(session, sale.invoice)
+                ReceiptService.print_invoice(session, sale.invoice)
             except PrinterError as e:
                 self._show_overlay(str(e), title="Printer Error", kind="error")
 
     def _open_drawer(self):
         with get_session() as session:
             try:
-                PrinterService.open_drawer(session)
+                ReceiptService.open_drawer(session)
             except PrinterError as e:
                 self._show_overlay(str(e), title="Printer Error", kind="error")
 
