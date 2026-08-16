@@ -93,29 +93,22 @@ class TapToDismissOverlay(QWidget):
         card_layout.setContentsMargins(28, 24, 28, 24)
         card_layout.setSpacing(SPACING_MD)
 
-        self.title_label = QLabel("")
-        self.title_label.setObjectName("tapDismissTitle")
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.title_label.setWordWrap(True)
-
         self.message_label = QLabel("")
         self.message_label.setObjectName("tapDismissMessage")
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
 
-        card_layout.addWidget(self.title_label)
         card_layout.addWidget(self.message_label)
 
         layout.addWidget(self.card)
 
-    def show_message(self, message: str, title: str = "", kind: str = "info"):
+    def show_message(self, message: str, kind: str = "info"):
         """kind: 'info' | 'error' — controls the card's accent color."""
-        self.title_label.setText(title)
-        self.title_label.setVisible(bool(title))
         self.message_label.setText(message)
-        self.card.setProperty("kind", kind)
-        self.card.style().unpolish(self.card)
-        self.card.style().polish(self.card)
+        for widget in (self.card, self.message_label):
+            widget.setProperty("kind", kind)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
 
         self.setGeometry(self.parentWidget().rect())
         self.raise_()

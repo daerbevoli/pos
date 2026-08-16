@@ -19,7 +19,7 @@ from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService
-from app.models.models import Sale
+from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
@@ -101,11 +101,23 @@ class POSScreen(QWidget):
         """True once a partial tender has been taken but the sale isn't fully paid yet."""
         return not self.sale_finished and self.cart.paid_total > 0
 
+    @property
+    def reopened_ticket(self) -> bool:
+        """True while editing a ticket reopened from a completed sale, awaiting re-payment."""
+        return not self.sale_finished and self._current_sale_id is not None
+
     def _guard_payment_in_progress(self) -> bool:
         """Blocks cart-mutating actions while a partial payment is outstanding.
         Returns True (and shows an overlay) if the action should be blocked."""
         if self.payment_in_progress:
-            self._show_overlay("Finish or remove the pending payment first.", title="Payment in progress", kind="error")
+            self._show_overlay("Finish or remove the pending payment first", kind="error")
+            return True
+        return False
+
+    def _guard_reopened_ticket(self) -> bool:
+        """Blocks quantity changes on a reopened ticket.
+        Returns True (and shows an overlay) if the action should be blocked."""
+        if self.reopened_ticket:
             return True
         return False
 
@@ -188,7 +200,7 @@ class POSScreen(QWidget):
         self.client_label = QLabel("")
         self.client_label.setObjectName("clientLabel")
         self.client_label.setMinimumHeight(CART_LABEL_HEIGHT)
-        self.client_label.setVisible(False)
+        self.client_label.hide()
         col.addWidget(self.client_label)
 
         self.cart_table.backspace_pressed.connect(self._remove_selected)
@@ -444,9 +456,9 @@ class POSScreen(QWidget):
 
         if s.client_name:
             self.client_label.setText(s.client_name)
-            self.client_label.setVisible(True)
+            self.client_label.show()
         else:
-            self.client_label.setVisible(False)
+            self.client_label.hide()
 
         # Restore frozen / unfrozen visuals
         self._frozen_breakdown = s.frozen_breakdown or []
@@ -512,7 +524,7 @@ class POSScreen(QWidget):
             # treat anything over 6 characters (incl. the decimal point) as
             # an attempted scan and block it until the amount is filled in.
             if len(query) > 6:
-                self._show_overlay("Enter the pending amount before scanning another item.", kind="info")
+                self._show_overlay("Enter the pending amount before scanning another item", kind="info")
                 self.combined_input.clear()
                 return
             amount = self._read_amount_input()
@@ -571,7 +583,7 @@ class POSScreen(QWidget):
     def _clear_cart(self, override: bool = False):
         if not override and not self.cart_active:
             return
-        if override or QMessageBox.question(self, "et", "Clear cart?") == QMessageBox.StandardButton.Yes:
+        if override or QMessageBox.question(self, "Clear cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
             self._frozen_breakdown = []
             self._frozen_change    = 0.0
             self._frozen_total     = 0.0
@@ -604,7 +616,7 @@ class POSScreen(QWidget):
             return
         entry = self.cart.entries[idx]
         if self.payment_in_progress and not isinstance(entry, PaymentEntry):
-            self._show_overlay("Finish or remove the pending payment first.", title="Payment in progress", kind="error")
+            self._show_overlay("Finish or remove the pending payment first", kind="error")
             return
         needs_reversal = (
             self._current_sale_id is not None
@@ -648,11 +660,11 @@ class POSScreen(QWidget):
             return
         value = self._read_amount_input()
         if value is None:
-            self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
+            self._show_overlay("Enter a number first to apply a discount", kind="info")
             return
         base = self._get_discount_base()
         if base is None or base <= 0:
-            self._show_overlay("Nothing to discount.", title="Empty Ticket", kind="error")
+            self._show_overlay("Nothing to discount", kind="error")
             return
         pct = min(value, 100.0)
         amount = round(base * pct / 100.0, 2)
@@ -668,11 +680,11 @@ class POSScreen(QWidget):
             return
         value = self._read_amount_input()
         if value is None:
-            self._show_overlay("Enter a number first to apply a discount", "Empty discount", kind="info")
+            self._show_overlay("Enter a number first to apply a discount", kind="info")
             return
         base = self._get_discount_base()
         if base is None or base <= 0:
-            self._show_overlay("Nothing to discount.", title="Empty Ticket", kind="error")
+            self._show_overlay("Nothing to discount", kind="error")
             return
         amount = round(min(value, base), 2)
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"{self.currency}{amount:.2f}"))
@@ -920,10 +932,10 @@ class POSScreen(QWidget):
             self._show_overlay("No sale")
             return
         if not any(isinstance(e, CartItem) for e in self.cart.entries):
-            self._show_overlay("Add items before payment.", title="Empty Ticket", kind="error")
+            self._show_overlay("Add items before payment", kind="error")
             return
         if any(isinstance(e, CartItem) and e.quantity is None for e in self.cart.entries):
-            self._show_overlay("Fill in the amount for pending items first.", title="Amount needed", kind="error")
+            self._show_overlay("Fill in the amount for pending items first", kind="error")
             return
 
         total     = self.cart.total
@@ -932,7 +944,7 @@ class POSScreen(QWidget):
         tendered  = round(remaining if typed is None else typed, 2)
 
         if tendered <= 0:
-            self._show_overlay("Enter an amount first.", title="Amount needed", kind="error")
+            self._show_overlay("Enter an amount first", kind="error")
             return
 
         if tendered + 0.005 < remaining:
@@ -1057,8 +1069,7 @@ class POSScreen(QWidget):
             if sale.invoice is not None:
                 self._show_overlay(
                     "This sale has already been invoiced and can't be edited.\n"
-                    "Issue a credit note for corrections instead.",
-                    title="Invoice already issued", kind="error",
+                    "Issue a credit note for corrections instead", kind="error",
                 )
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
@@ -1071,6 +1082,7 @@ class POSScreen(QWidget):
         self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
+        self.ticket_total_lbl.setVisible(True)
         self.cart_table.setFocus()
 
     def _previous_sale(self):
@@ -1108,6 +1120,11 @@ class POSScreen(QWidget):
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
+            if sale.invoice:
+                self.client_label.setText("INVOICE - " + sale.invoice.client_name)
+                self.client_label.show()
+            else:
+                self.client_label.hide()
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
 
         self.sale_finished     = True
@@ -1126,38 +1143,38 @@ class POSScreen(QWidget):
 
     def _print_ticket(self):
         if self._current_sale_id is None:
-            self._show_overlay("No ticket to print.", title="Nothing to print", kind="error")
+            self._show_overlay("No ticket to print", kind="error")
             return
         with get_session() as session:
             sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
             if not sale:
-                self._show_overlay("Sale not found.", kind="error")
+                self._show_overlay("Sale not found", kind="error")
                 return
             try:
                 ReceiptService.print_receipt(session, sale)
             except PrinterError as e:
-                self._show_overlay(str(e), title="Printer Error", kind="error")
+                self._show_overlay(str(e), kind="error")
 
     def _print_invoice(self):
         if self._current_sale_id is None:
-            self._show_overlay("No ticket to print.", title="Nothing to print", kind="error")
+            self._show_overlay("No ticket to print", kind="error")
             return
         with get_session() as session:
             sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
             if not sale or not sale.invoice:
-                self._show_overlay("This sale has no invoice.", kind="error")
+                self._show_overlay("This sale has no invoice", kind="error")
                 return
             try:
                 ReceiptService.print_invoice(session, sale.invoice)
             except PrinterError as e:
-                self._show_overlay(str(e), title="Printer Error", kind="error")
+                self._show_overlay(str(e), kind="error")
 
     def _open_drawer(self):
         with get_session() as session:
             try:
                 ReceiptService.open_drawer(session)
             except PrinterError as e:
-                self._show_overlay(str(e), title="Printer Error", kind="error")
+                self._show_overlay(str(e), kind="error")
 
     def _get_selected_entry_index(self) -> int | None:
         """Index into cart.entries for the selected row; None for divider/non-entry rows."""
@@ -1177,20 +1194,20 @@ class POSScreen(QWidget):
         return entry.product_id if isinstance(entry, CartItem) else None
 
     def _increase_product(self):
-        if self._guard_payment_in_progress():
+        if self._guard_payment_in_progress() or self._guard_reopened_ticket():
             return
         idx = self._get_selected_entry_index()
         if idx is None:
             return
         entry = self.cart.entries[idx]
-        if isinstance(entry, CartItem) and entry.quantity is not None:
+        if isinstance(entry, CartItem) and entry.quantity is not None and not entry.is_reversal and not entry.has_reversal:
             if entry.unit in WEIGHT_UNITS:
                 return
             entry.quantity += 1
             self._refresh_cart()
 
     def _decrease_product(self):
-        if self._guard_payment_in_progress():
+        if self._guard_payment_in_progress() or self._guard_reopened_ticket():
             return
         idx = self._get_selected_entry_index()
         if idx is None:
@@ -1225,14 +1242,14 @@ class POSScreen(QWidget):
         #         self.salesperson_changed.emit("Admin")
 
     def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
-        self.overlay.show_message(message, title=title, kind=kind)
+        self.overlay.show_message(message, kind=kind)
 
     def set_client(self, client_id: int, client_name: str):
         if client_id and client_name:
             if self.sale_finished:
                 self._unfreeze_ticket()
             self.client_label.setText("INVOICE - " + client_name)
-            self.client_label.setVisible(True)
+            self.client_label.show()
             self.client_id = client_id
             self.is_invoice = True
             self._refresh_cart(select_last=True)
@@ -1242,7 +1259,7 @@ class POSScreen(QWidget):
         if self._guard_payment_in_progress():
             return
         if self._selected_pending_item() is not None:
-            self._show_overlay("Enter the pending amount before adding another item.", kind="info")
+            self._show_overlay("Enter the pending amount before adding another item", kind="info")
             return
 
         query = self.combined_input.text().strip()
@@ -1262,6 +1279,6 @@ class POSScreen(QWidget):
 
     def _emit_signal(self, signal: int):
         if signal == 4 and not self.isAdmin:
-            self._show_overlay("Only Admin", title="No Permission", kind="error")
+            self._show_overlay("Only Admin", kind="error")
             return
         self.navigate.emit(signal)

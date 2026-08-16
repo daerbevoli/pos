@@ -95,6 +95,7 @@ QLabel#ticketTotalLbl {
 
 QLabel#ticketTotalLbl[frozen=True] {
     background-color: #ccc5be;
+    background-color: #ccc5be;
     color: #665C57;
 }
 
@@ -134,12 +135,7 @@ QTableWidget#cartTable[frozen="true"] {
 }
 
 QTableWidget#cartTable[frozen="true"]::item {
-    color: #7a6a62;
-}
-
-QTableWidget#cartTable[frozen="true"]::item:selected {
-    background-color: #b8b0a8;
-    color: #5a4a42;
+    color: #140707;
 }
 
 QHeaderView::section {
@@ -607,4 +603,24 @@ QLabel#ticketTotalLbl {
     font-weight: 700;
     color: #052F6C;
     padding: 2px 6px;
+}
+
+QWidget#tapDismissCard[kind="info"] {
+    background-color: #05A669;
+}
+
+QWidget#tapDismissMessage[kind="info"] {
+    background-color: #05A669;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+QWidget#tapDismissCard[kind="error"] {
+    background-color: #F54444;
+}
+
+QWidget#tapDismissMessage[kind="error"] {
+    background-color: #F54444;
+    font-size: 22px;
+    font-weight: 700;
 }

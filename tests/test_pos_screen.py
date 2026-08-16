@@ -587,7 +587,7 @@ def test_repaying_a_reopened_ticket_overwrites_the_same_sale(screen):
     sale_id = screen._current_sale_id
 
     screen._reopen_ticket()
-    screen._increase_product()  # quantity 1 -> 2, total now 10.0
+    _scan(screen, barcode)  # second line, total now 10.0
     screen._open_payment("cash")
 
     assert screen._current_sale_id == sale_id
@@ -595,6 +595,23 @@ def test_repaying_a_reopened_ticket_overwrites_the_same_sale(screen):
         assert session.query(Sale).filter_by(status="completed").count() == 1
         sale = session.query(Sale).filter_by(id=sale_id).first()
     assert sale.final_amount == 10.0
+
+
+def test_reopened_ticket_blocks_quantity_changes(screen):
+    pid, barcode, _ = _add_product(barcode="rev5", price=5.0, stock_quantity=50)
+    _scan(screen, barcode)
+    screen._increase_product()  # quantity 1 -> 2, before the sale is ever frozen
+    screen._open_payment("cash")
+
+    screen._reopen_ticket()
+    entry = _selected_entry(screen)
+    assert entry.quantity == 2
+
+    screen._increase_product()
+    assert entry.quantity == 2
+
+    screen._decrease_product()
+    assert entry.quantity == 2
 
 
 # ── Tab state persistence ────────────────────────────────────────────────
