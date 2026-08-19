@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QSizePolicy, QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRegularExpression
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRegularExpression, QItemSelectionModel, QItemSelection
 from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
 from app.core.database import get_session
@@ -85,6 +85,8 @@ class POSScreen(QWidget):
         self._current_sale_id = None   # DB Sale.id this tab's frozen ticket was saved as, if any
         self.sale_ids         = []     # all of today's completed sale ids, chronological, shared across tabs
         self.sales            = -1     # index into sale_ids: browse cursor / index of most recent sale
+        self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
+        self._barcode_entry_quantity = None   # quantity typed before the Barcode button was pressed, if any
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -206,6 +208,7 @@ class POSScreen(QWidget):
         self.cart_table.backspace_pressed.connect(self._remove_selected)
         self.cart_table.enter_pressed.connect(self._on_barcode_enter)
         self.cart_table.text_entered.connect(self._on_ticket_text)
+        self.cart_table.barcode_scanned.connect(self._on_barcode_scan)
 
         col.addWidget(self.cart_table, stretch=1)
 
@@ -274,6 +277,7 @@ class POSScreen(QWidget):
         self.btn_down  = FunctionButton("↓", "navBtn")
         self.btn_minus = FunctionButton("-", "navBtn")
         self.btn_admin = FunctionButton("Admin", "secFunc")
+        self.btn_barcode = FunctionButton("Barcode", "secFunc")
 
         self.btn_disc_amt = FunctionButton("€\ndiscount", "discountBtn")
         self.btn_disc_pct = FunctionButton("%\ndiscount", "discountBtn")
@@ -298,8 +302,8 @@ class POSScreen(QWidget):
             (self.btn_settings, 2, 3, 1, 1), (self.btn_admin, 2, 5, 1, 1),
 
             (self.btn_disc_amt, 3, 0, 1, 1), (self.btn_disc_pct, 3, 1, 1, 1),
-            (self.btn_articles, 3, 2, 1, 1), (self.btn_drawer, 3, 4, 1, 1),
-            (self.btn_reports, 3, 5, 1, 1),
+            (self.btn_barcode, 3, 2, 1, 1), (self.btn_articles, 3, 3, 1, 1),
+            (self.btn_drawer, 3, 4, 1, 1), (self.btn_reports, 3, 5, 1, 1),
 
             (self.btn_client, 4, 2, 1, 1),
             (self.btn_ok, 4, 5, 1, 1),
@@ -357,6 +361,8 @@ class POSScreen(QWidget):
         self.btn_print_ticket.clicked.connect(self._print_ticket)
         self.btn_print_invoice.clicked.connect(self._print_invoice)
         self.btn_drawer.clicked.connect(self._open_drawer)
+
+        self.btn_barcode.clicked.connect(self._open_barcode)
 
         return col
 
@@ -479,6 +485,7 @@ class POSScreen(QWidget):
 
     # ── Numpad / scan input helpers ──────────────────────────────────────
 
+
     def _numpad_press(self, label: str):
         if label == "⌫":
             self.combined_input.setText(self.combined_input.text()[:-1])
@@ -511,11 +518,18 @@ class POSScreen(QWidget):
             return entry
         return None
 
-    def _on_barcode_enter(self):
+
+    def _handle_pending_or_guards(self) -> bool:
+        """Shared entry point for barcode input: unfreezes a finished sale,
+        blocks while a partial payment is outstanding, and if a weight/volume
+        item is awaiting its amount, consumes combined_input as that amount
+        instead of a new scan. Returns True if the caller should return
+        immediately (blocked, or handled as a pending amount); False if it
+        should continue resolving a new barcode."""
         if self.sale_finished:
             self._unfreeze_ticket()
         if self._guard_payment_in_progress():
-            return
+            return True
 
         pending_entry = self._selected_pending_item()
         if pending_entry is not None:
@@ -526,25 +540,38 @@ class POSScreen(QWidget):
             if len(query) > 6:
                 self._show_overlay("Enter the pending amount before scanning another item", kind="info")
                 self.combined_input.clear()
-                return
+                return True
             amount = self._read_amount_input()
             if amount is None or amount <= 0:
                 self._show_overlay("Enter an valid amount", kind="info")
-                return
+                return True
             pending_entry.quantity = amount
             self.combined_input.clear()
             self._refresh_cart(select_last=True)
+            return True
+
+        return False
+
+    def _on_barcode_scan(self, barcode):
+        if self._barcode_entry_mode:
+            # A real scan interrupted manual barcode entry — whatever's in
+            # combined_input is a partial typed barcode, not a quantity.
+            self._barcode_entry_mode = False
+            self._barcode_entry_quantity = None
+            self.combined_input.clear()
+
+        if self._handle_pending_or_guards():
             return
 
         query = self.combined_input.text().strip()
-        if not query:
-            return
+        if query:
+            quantity = int(round(float(query)))
+        else:
+            quantity = 1
 
         with get_session() as session:
-            product, quantity, quantity_typed = self._resolve_scan(session, query)
+            product = ProductService.get_by_barcode(session, barcode)
             if product:
-                if product.unit in WEIGHT_UNITS and not quantity_typed:
-                    quantity = None
                 self.cart.add_product(product, quantity=quantity)
                 self._refresh_cart(select_last=True)
                 self.combined_input.clear()
@@ -552,33 +579,46 @@ class POSScreen(QWidget):
                 self._show_overlay("Unknown barcode", kind="error")
         self.combined_input.clear()
 
-    def _resolve_scan(self, session, query: str):
-        """Split combined_input's text into (product, quantity, quantity_typed).
+    def _open_barcode(self):
+        """Enter manual barcode-entry mode: whatever quantity was already
+        typed into combined_input carries over and applies to the item once
+        an exact barcode match is confirmed."""
+        if self._handle_pending_or_guards():
+            return
+        prefix = self.combined_input.text().strip()
+        try:
+            self._barcode_entry_quantity = int(round(float(prefix))) if prefix else None
+        except ValueError:
+            self._barcode_entry_quantity = None
+        self._barcode_entry_mode = True
+        self.cart_table.setFocus()
 
-        Barcodes in this catalog are 13 or 14 digits, so a fixed-length split
-        can't tell a bare barcode apart from a typed quantity prefix followed
-        by one. Try the plain scan first, then peel off a prefix assuming a
-        14-digit barcode, then again assuming 13 — whichever actually matches
-        a product wins.
-        """
-        product = ProductService.get_by_barcode(session, query)
-        if product:
-            return product, 1, False
+    def _on_barcode_enter(self):
+        if self._handle_pending_or_guards():
+            return
 
-        for barcode_len in (14, 13):
-            if len(query) <= barcode_len:
-                continue
-            prefix, barcode = query[:-barcode_len], query[-barcode_len:]
-            try:
-                quantity = int(round(float(prefix)))
-            except ValueError:
-                continue
-            product = ProductService.get_by_barcode(session, barcode)
+        if not self._barcode_entry_mode:
+            return
+
+        self._barcode_entry_mode = False
+        code = self.combined_input.text().strip()
+        self.combined_input.clear()
+        if not code:
+            return
+        with get_session() as session:
+            product = ProductService.get_by_barcode(session, code)
             if product:
-                return product, quantity, True
-
-        return None, 1, False
-
+                quantity = self._barcode_entry_quantity
+                quantity_typed = quantity is not None
+                if product.unit in WEIGHT_UNITS and not quantity_typed:
+                    quantity = None
+                elif quantity is None:
+                    quantity = 1
+                self.cart.add_product(product, quantity=quantity)
+                self._refresh_cart(select_last=True)
+            else:
+                self._show_overlay("Unknown barcode", kind="error")
+        self._barcode_entry_quantity = None
 
     def _clear_cart(self, override: bool = False):
         if not override and not self.cart_active:
@@ -687,7 +727,7 @@ class POSScreen(QWidget):
             self._show_overlay("Nothing to discount", kind="error")
             return
         amount = round(min(value, base), 2)
-        self.cart.entries.append(DiscountEntry(amount=amount, label=f"{self.currency}{amount:.2f}"))
+        self.cart.entries.append(DiscountEntry(amount=amount, label=f"{amount:.2f}"))
         self.combined_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
@@ -756,7 +796,7 @@ class POSScreen(QWidget):
             QTableWidgetItem(str(count)),
             QTableWidgetItem("SUBTOTAL"),
             QTableWidgetItem(""),
-            QTableWidgetItem(f"{self.currency}{total:.2f}"),
+            QTableWidgetItem(f"{total:.2f}"),
         ]
         font = QFont()
         font.setBold(True)
@@ -776,6 +816,27 @@ class POSScreen(QWidget):
             self.cart_table.setItem(r, c, cell)
         self.cart_table.setRowHeight(r, 3)
         self._row_to_entry.append(None)
+
+    def _select_cart_row(self, row: int):
+        """Drives the selection model directly instead of QTableWidget.selectRow(),
+        which was observed (via selectionChanged/currentRowChanged logging) to update
+        currentRow without actually adding the row to the selection on repeat calls
+        in this app, leaving the row visually unhighlighted despite currentRow being
+        correct."""
+        if row < 0:
+            return
+        model = self.cart_table.model()
+        sel_model = self.cart_table.selectionModel()
+        if model is None or sel_model is None:
+            return
+        top_left = model.index(row, 0)
+        bottom_right = model.index(row, model.columnCount() - 1)
+        selection = QItemSelection(top_left, bottom_right)
+        sel_model.select(
+            selection,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
+        )
+        sel_model.setCurrentIndex(top_left, QItemSelectionModel.SelectionFlag.Current)
 
     def _refresh_cart(self, select_last=False):
         prev_idx = self._get_selected_entry_index()
@@ -800,19 +861,19 @@ class POSScreen(QWidget):
                     qty_text = "?" if pending else ("-1" if entry.quantity < 0 else "1")
                     weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
                     name_text = f"{entry.product_name} - {weight_text}"
-                    price_text = f"{self.currency}{entry.unit_price:.2f}/{entry.unit}"
+                    price_text = f"{entry.unit_price:.2f}/{entry.unit}"
                     # A weight article is one line item, not `quantity` kg of them.
                     count_contribution = 0 if pending else (-1 if entry.quantity < 0 else 1)
                 else:
                     qty_text = "?" if pending else f"{entry.quantity:g}"
                     name_text = entry.product_name
-                    price_text = f"{self.currency}{entry.unit_price:.2f}"
+                    price_text = f"{entry.unit_price:.2f}"
                     count_contribution = entry.quantity or 0
                 for col, text in enumerate([
                     qty_text,
                     name_text,
                     price_text,
-                    "?" if pending else f"{self.currency}{entry.line_total:.2f}",
+                    "?" if pending else f"{entry.line_total:.2f}",
                 ]):
                     cell = QTableWidgetItem(text)
                     cell.setFont(font_item)
@@ -832,7 +893,7 @@ class POSScreen(QWidget):
                     QTableWidgetItem(""),
                     QTableWidgetItem(f"DISCOUNT  {entry.label}"),
                     QTableWidgetItem(""),
-                    QTableWidgetItem(f"-{self.currency}{entry.amount:.2f}"),
+                    QTableWidgetItem(f"-{entry.amount:.2f}"),
                 ]
                 for c, cell in enumerate(cells):
                     cell.setFont(font_bold)
@@ -862,7 +923,7 @@ class POSScreen(QWidget):
                     QTableWidgetItem(""),
                     QTableWidgetItem(f"PAID  {method_label}"),
                     QTableWidgetItem(""),
-                    QTableWidgetItem(f"-{self.currency}{entry.amount:.2f}"),
+                    QTableWidgetItem(f"-{entry.amount:.2f}"),
                 ]
                 for c, cell in enumerate(cells):
                     cell.setFont(font_bold)
@@ -900,11 +961,13 @@ class POSScreen(QWidget):
 
         # ── Row selection ────────────────────────────────────────────────
         if select_last or not self.cart.entries or self.sale_finished:
-            self.cart_table.selectRow(self.cart_table.rowCount() - 1)
+            row_to_select = self.cart_table.rowCount() - 1
         elif prev_idx is not None and prev_idx in self._row_to_entry:
-            self.cart_table.selectRow(self._row_to_entry.index(prev_idx))
+            row_to_select = self._row_to_entry.index(prev_idx)
         else:
-            self.cart_table.selectRow(self.cart_table.rowCount() - 1)
+            row_to_select = self.cart_table.rowCount() - 1
+        self._select_cart_row(row_to_select)
+        self.cart_table.viewport().update()
 
         # ── Tab button label ─────────────────────────────────────────────
         remaining = self.cart.remaining_due
@@ -916,7 +979,7 @@ class POSScreen(QWidget):
             self.ticket_total_lbl.setText("")
         else:
             label = "Remaining" if self.cart.paid_total > 0 else "Total"
-            self.ticket_total_lbl.setText(f"{label}  {self.currency}{remaining:.2f}")
+            self.ticket_total_lbl.setText(f"{label}  {remaining:.2f}")
 
     def _move_selection(self, delta: int):
         if self.sale_finished:

@@ -12,14 +12,42 @@ from app.constants import (
 
 
 class TicketTable(QTableWidget):
+    """The scanner should be programmed to wrap every scan in SCAN_MARKER
+    (e.g. 'A12345678A'), a character no one would type manually. That lets
+    us tell a scan apart from typed digits with certainty instead of
+    guessing from length."""
+
+    SCAN_MARKER = "A"
+
     backspace_pressed = pyqtSignal()
     text_entered = pyqtSignal(str)
     enter_pressed = pyqtSignal()
+    barcode_scanned = pyqtSignal(str)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._scanning = False
+        self._scan_buffer = ""
 
     def keyPressEvent(self, event):
         key = event.key()
         text = event.text()
         mods = event.modifiers()
+
+        if text == self.SCAN_MARKER and not self._scanning:
+            self._scanning = True
+            self._scan_buffer = ""
+            return
+
+        if self._scanning:
+            if text == self.SCAN_MARKER:
+                self._scanning = False
+                self.barcode_scanned.emit(self._scan_buffer)
+                self._scan_buffer = ""
+            else:
+                self._scan_buffer += text
+            return
+
         if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self.backspace_pressed.emit()
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -29,6 +57,14 @@ class TicketTable(QTableWidget):
             self.text_entered.emit(text)
         else:
             super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        # Clicking empty space below the rows would otherwise clear the
+        # current selection; ignore that so the last selected row stays
+        # highlighted.
+        if self.itemAt(event.position().toPoint()) is None:
+            return
+        super().mousePressEvent(event)
 
 class TicketTab(QPushButton):
     """One of the V1 / V2 / V3 sale-slot tabs along the top."""

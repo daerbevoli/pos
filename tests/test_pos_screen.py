@@ -44,7 +44,25 @@ def _add_product(**overrides):
 
 
 def _scan(screen, text):
-    screen.combined_input.setText(text)
+    """Drives the Barcode-button flow: types a quantity prefix (if `text`
+    looks like one followed by a 13/14-digit barcode), presses Barcode
+    (which carries that quantity over), then types the barcode and confirms."""
+    prefix, barcode = "", text
+    for barcode_len in (14, 13):
+        if len(text) <= barcode_len:
+            continue
+        candidate_prefix, candidate_barcode = text[:-barcode_len], text[-barcode_len:]
+        try:
+            float(candidate_prefix)
+        except ValueError:
+            continue
+        prefix, barcode = candidate_prefix, candidate_barcode
+        break
+
+    if prefix:
+        screen.combined_input.setText(prefix)
+    screen._open_barcode()
+    screen.combined_input.setText(barcode)
     screen._on_barcode_enter()
 
 

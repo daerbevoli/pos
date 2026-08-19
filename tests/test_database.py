@@ -61,10 +61,9 @@ def test_init_db_creates_tables_and_seeds(monkeypatch):
         categories = session.query(Category).all()
 
     assert {s.key for s in settings} == {
-        "store_name", "store_address", "store_phone", "currency_symbol",
-        "receipt_footer", "receipt_printer_vendor_id",
-        "receipt_printer_product_id", "label_printer_vendor_id",
-        "label_printer_product_id",
+        "store_name", "store_address", "store_phone", "currency_symbol", "receipt_footer",
+        "receipt_printer_vendor_id", "receipt_printer_product_id",
+        "label_printer_vendor_id", "label_printer_product_id",
     }
     assert {c.name for c in categories} == {
         "Fruit & Vegetables", "Dairy & Eggs", "Meat & Fish", "Bakery",

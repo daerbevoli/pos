@@ -30,7 +30,7 @@ def main():
 
     # Launch main window
     window = MainWindow()
-    window.showMaximized()
+    window.show()
 
     sys.exit(app.exec())
 

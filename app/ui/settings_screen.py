@@ -4,13 +4,15 @@ Store info, receipt printer, label printer configuration.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog
+    QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog, QGridLayout, QListWidget
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 from app.core.database import get_session
 from app.core.label_service import LabelPrinterService
+from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
+from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
 from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
 from app.utils.utils import FunctionButton
@@ -31,6 +33,14 @@ class SettingsScreen(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
+
+        columns = QHBoxLayout()
+        columns.setSpacing(15)
+        left_col = QVBoxLayout()
+        right_col = QVBoxLayout()
+        columns.addLayout(left_col, 1)
+        columns.addLayout(right_col, 1)
+        layout.addLayout(columns)
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -63,7 +73,8 @@ class SettingsScreen(QWidget):
         store_form.addRow("Currency Symbol:", self.currency)
         store_form.addRow("Receipt Footer:", self.receipt_footer)
         store_form.addRow("Logo:", logo_row)
-        layout.addWidget(store_group)
+        left_col.addWidget(store_group)
+        left_col.addStretch()
 
         # ── Printer config ────────────────────────────────────────────────────
         printer_group = QGroupBox("Receipt Printer (USB)")
@@ -80,7 +91,7 @@ class SettingsScreen(QWidget):
         test_btn = QPushButton("Test Print")
         test_btn.clicked.connect(self._test_print)
         printer_form.addRow("", test_btn)
-        layout.addWidget(printer_group)
+        right_col.addWidget(printer_group)
 
         # ── Label printer config ─────────────────────────────────────────────
         label_group = QGroupBox("Label Printer (USB)")
@@ -97,19 +108,32 @@ class SettingsScreen(QWidget):
         label_test_btn = QPushButton("Test Print")
         label_test_btn.clicked.connect(self._test_print_label)
         label_form.addRow("", label_test_btn)
-        layout.addWidget(label_group)
+        right_col.addWidget(label_group)
+
+        # ── Categories ─────────────────────────────────────────────
+        cats_group = QGroupBox("Categories")
+        cats_layout = QVBoxLayout(cats_group)
+        self.categories_list = QListWidget()
+        with get_session() as session:
+            cats = ProductService.get_all_categories(session)
+        for cat in cats:
+            self.categories_list.addItem(cat.name)
+        cats_layout.addWidget(self.categories_list)
+        right_col.addWidget(cats_group)
 
         # ── Save ──────────────────────────────────────────────────────────────
         save_btn = QPushButton("Save Information")
         save_btn.setObjectName("primaryBtn")
         save_btn.setFixedHeight(BUTTON_HEIGHT_LG)
         save_btn.clicked.connect(self._save)
+
         ok_btn = FunctionButton("OK", "okBtn")
         ok_btn.setFixedHeight(BUTTON_HEIGHT_LG)
         ok_btn.clicked.connect(self._on_ok)
         layout.addWidget(save_btn)
         layout.addWidget(ok_btn)
         layout.addStretch()
+
 
     def _show_logo_preview(self, path: str):
         pixmap = QPixmap(path)
