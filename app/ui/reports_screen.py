@@ -8,7 +8,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QDateEdit, QGroupBox, QGridLayout
+    QDateEdit, QGroupBox, QGridLayout, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 
@@ -80,9 +80,20 @@ class ReportsScreen(QWidget):
         load_btn.clicked.connect(self._load_report)
         controls.addWidget(load_btn)
 
+        sales_btn = FunctionButton("Sales", "salesBtn")
+        sales_btn.setFixedHeight(BUTTON_HEIGHT)
+        controls.addWidget(sales_btn)
+
+        vat_btn = FunctionButton("VAT breakdown", "InvBtn")
+        vat_btn.setFixedHeight(BUTTON_HEIGHT)
+        controls.addWidget(vat_btn)
+
+        cats_btn = FunctionButton("Categories", "InvBtn")
+        cats_btn.setFixedHeight(BUTTON_HEIGHT)
+        controls.addWidget(cats_btn)
+
         invoices_btn = FunctionButton("Invoices", "InvBtn")
         invoices_btn.setFixedHeight(BUTTON_HEIGHT)
-        invoices_btn.clicked.connect(self._invoices_only)
         controls.addWidget(invoices_btn)
 
         self.btn_ok = FunctionButton("OK", "okBtn")
@@ -109,6 +120,7 @@ class ReportsScreen(QWidget):
         cards_layout.addWidget(self.card_cash, 0, 3)
         cards_layout.addWidget(self.card_card, 0, 4)
 
+        cards_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(cards_group)
 
         # ── Sales table ───────────────────────────────────────────────────────
@@ -126,36 +138,27 @@ class ReportsScreen(QWidget):
         self.sales_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.sales_table)
+        self.sales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        layout.addWidget(self.sales_table, stretch=1)
 
         # ── VAT breakdown ─────────────────────────────────────────────────────
-        vat_group = QGroupBox("VAT Breakdown")
-        vat_layout = QGridLayout(vat_group)
-        for col, header in enumerate(["Rate", "Base (excl. tax)", "Tax", "Total (incl. tax)"]):
-            lbl = QLabel(header)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            font = lbl.font()
-            font.setBold(True)
-            lbl.setFont(font)
-            vat_layout.addWidget(lbl, 0, col)
-        self._vat_labels = {}
-        for i, rate in enumerate([0, 6, 21]):
-            vat_layout.addWidget(QLabel(f"{rate}%"), i + 1, 0)
-            base_lbl = QLabel("€0.00")
-            base_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            tax_lbl = QLabel("€0.00")
-            tax_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            total_lbl = QLabel("€0.00")
-            total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            vat_layout.addWidget(base_lbl, i + 1, 1)
-            vat_layout.addWidget(tax_lbl, i + 1, 2)
-            vat_layout.addWidget(total_lbl, i + 1, 3)
-            self._vat_labels[rate] = (base_lbl, tax_lbl, total_lbl)
-        layout.addWidget(vat_group)
+        self.vat_table = QTableWidget(0, 4)
+        self.vat_table.setObjectName("reportTable")
+        self.vat_table.setHorizontalHeaderLabels([
+            "Rate", "Base (excl. tax)", "Tax", "Total (incl. tax)"
+        ])
+        self.vat_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.vat_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.vat_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.vat_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.vat_table.verticalHeader().setVisible(False)
+        self.vat_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.vat_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        layout.addWidget(self.vat_table, stretch=1)
 
         # ── Categories breakdown ─────────────────────────────────────────────
-        categories_group = QGroupBox("Categories")
-        categories_layout = QVBoxLayout(categories_group)
         self.categories_table = QTableWidget(0, 3)
         self.categories_table.setHorizontalHeaderLabels(["Category", "Quantity", "Total Amount"])
         self.categories_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -163,8 +166,14 @@ class ReportsScreen(QWidget):
         self.categories_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.categories_table.verticalHeader().setVisible(False)
         self.categories_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        categories_layout.addWidget(self.categories_table)
-        layout.addWidget(categories_group)
+        self.categories_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        layout.addWidget(self.categories_table, stretch=1)
+
+        sales_btn.clicked.connect(lambda: self._show_table("sales"))
+        invoices_btn.clicked.connect(self._invoices_only)
+        vat_btn.clicked.connect(lambda: self._show_table("vat"))
+        cats_btn.clicked.connect(lambda: self._show_table("categories"))
 
 
     def _make_card(self, title: str, value: str, bold: bool = False) -> QGroupBox:
@@ -195,6 +204,7 @@ class ReportsScreen(QWidget):
     def _load_today(self):
         self.date_from.setDate(QDate.currentDate().toPyDate())
         self.date_to.setDate(QDate.currentDate().toPyDate())
+        self._show_table("sales")
         self._load_report()
 
     def _load_report(self, invoices: bool = False):
@@ -203,10 +213,11 @@ class ReportsScreen(QWidget):
 
         with get_session() as session:
             currency = SettingsService.get(session, "currency_symbol", "€")
-            sales = SalesService.get_sales_range(session, start, end)
+            all_sales = SalesService.get_sales_range(session, start, end)
 
+            sales = all_sales
             if invoices:
-                sales = [sale for sale in sales if sale.invoice is not None]
+                sales = [sale for sale in all_sales if sale.invoice is not None]
 
             total_revenue = sum(s.final_amount for s in sales)
             total_transactions = len(sales)
@@ -251,7 +262,6 @@ class ReportsScreen(QWidget):
                 self.sales_table.setRowHeight(row, ROW_HEIGHT)
 
                 for item in sale.items:
-
                     rate = item.tax_rate if item.tax_rate in vat_totals else 0
                     vat_totals[rate][0] += item.tax_amount
                     vat_totals[rate][1] += item.line_total
@@ -260,12 +270,16 @@ class ReportsScreen(QWidget):
                     qty_sum, amount_sum = category_totals.get(category_name, [0.0, 0.0])
                     category_totals[category_name] = [qty_sum + item.quantity, amount_sum + item.line_total]
 
+            self.vat_table.setRowCount(0)
             for rate, (tax_sum, total_sum) in vat_totals.items():
                 base_sum = total_sum - tax_sum
-                base_lbl, tax_lbl, total_lbl = self._vat_labels[rate]
-                base_lbl.setText(f"{currency}{base_sum:.2f}")
-                tax_lbl.setText(f"{currency}{tax_sum:.2f}")
-                total_lbl.setText(f"{currency}{total_sum:.2f}")
+                row = self.vat_table.rowCount()
+                self.vat_table.insertRow(row)
+                self.vat_table.setItem(row, 0, QTableWidgetItem(f"{rate}%"))
+                self.vat_table.setItem(row, 1, QTableWidgetItem(f"{currency}{base_sum:.2f}"))
+                self.vat_table.setItem(row, 2, QTableWidgetItem(f"{currency}{tax_sum:.2f}"))
+                self.vat_table.setItem(row, 3, QTableWidgetItem(f"{currency}{total_sum:.2f}"))
+                self.vat_table.setRowHeight(row, ROW_HEIGHT)
 
             self.categories_table.setRowCount(0)
             for category_name, (qty_sum, amount_sum) in sorted(category_totals.items()):
@@ -282,3 +296,17 @@ class ReportsScreen(QWidget):
     def _invoices_only(self):
         self.invoices_only = not self.invoices_only
         self._load_report(invoices=self.invoices_only)
+
+    def _show_table(self, table: str):
+        tables_list = [
+            (self.sales_table, "sales"),
+            (self.categories_table, "categories"),
+            (self.vat_table, "vat"),
+        ]
+
+        for table_item, table_name in tables_list:
+            if table == table_name:
+                table_item.show()
+            else:
+                table_item.hide()
+
