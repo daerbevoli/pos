@@ -1001,6 +1001,15 @@ class POSScreen(QWidget):
             self._show_overlay("Fill in the amount for pending items first", kind="error")
             return
 
+        prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
+        if prior_payments and any(p.method != method for p in prior_payments):
+            self._show_overlay(
+                f"Already paying by {prior_payments[0].method.title()} — finish with that method "
+                "or clear the cart to restart.",
+                kind="error",
+            )
+            return
+
         total     = self.cart.total
         remaining = self.cart.remaining_due
         typed     = self._read_amount_input()
@@ -1025,10 +1034,9 @@ class POSScreen(QWidget):
 
         # Enough to cover what's left — fold every method's contribution into
         # one breakdown row per method, for persistence and the receipt.
-        prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
+        # (prior_payments is guaranteed single-method by the guard above.)
         total_tendered = round(sum(p.amount for p in prior_payments) + tendered, 2)
-        methods_used = {p.method for p in prior_payments} | {method}
-        final_method = method if len(methods_used) == 1 else "mixed"
+        final_method = method
 
         breakdown = [{"method": p.method, "amount": p.amount} for p in prior_payments]
         existing_final = next((b for b in breakdown if b["method"] == method), None)

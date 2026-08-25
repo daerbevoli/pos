@@ -88,6 +88,11 @@ def _run_migrations():
                     conn.exec_driver_sql(f"ALTER TABLE invoices ADD COLUMN {col} {col_type}")
                     conn.commit()
 
+        z_report_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(z_reports)")}
+        if z_report_cols and "category_breakdown" not in z_report_cols:
+            conn.exec_driver_sql("ALTER TABLE z_reports ADD COLUMN category_breakdown TEXT")
+            conn.commit()
+
 
 def _migrate_clients_to_partial_unique(conn):
     """

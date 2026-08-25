@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.sales_service import Cart, CartItem, DiscountEntry, SubtotalMarker
 from app.core.settings_service import SettingsService
-from app.models.models import Invoice, Sale
+from app.models.models import Invoice, Sale, ZReport
 
 logger = logging.getLogger("pos")
 
@@ -224,6 +224,78 @@ def _print_company_info(printer, settings):
     if settings.get("vat_number"):
         printer.text(f"{settings['vat_number']}")
 
+RATE_COL = 6
+AMT_COL = (LINE_WIDTH - RATE_COL) // 3  # 14 — Base / Tax / Total (incl.) columns
+
+
+def _print_report_header(printer, title: str, report_number, period_start, period_end):
+    printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
+    printer.text(f"{title}\n")
+    printer.set(align="left", bold=False, width=1, height=1, custom_size=True)
+    if report_number:
+        printer.text(f"{report_number}\n")
+    printer.text(
+        f"{period_start.strftime('%d/%m/%Y %H:%M')}\n{period_end.strftime('%d/%m/%Y %H:%M')}\n"
+    )
+    printer.set(align="left")
+    printer.text("-" * LINE_WIDTH + "\n")
+
+
+def _print_report_totals(printer, currency: str, totals: dict):
+
+    printer.set(bold=True)
+    printer.text(f"{'Payment':<{LABEL_COL}}{'Amount':>{TOTAL_COL}}\n")
+    printer.set(bold=False)
+    printer.text(f"{'TOTAL':<{LABEL_COL}} {totals['final_amount']:>10.2f}\n")
+    for leg in totals["payment_breakdown"]:
+        printer.text(
+            f"{leg['method'].capitalize():<{LABEL_COL}}{leg['amount']:>{TOTAL_COL}.2f}\n"
+        )
+    printer.text("-" * LINE_WIDTH + "\n")
+
+    printer.set(bold=True)
+    printer.text(f"{'Transactions':<{LABEL_COL}}{totals['transaction_count']:>{TOTAL_COL}}\n")
+    printer.text("-" * LINE_WIDTH + "\n")
+
+    printer.text(f"{'Rate':<{RATE_COL}}{'Base':>{AMT_COL}}{'Tax':>{AMT_COL}}{'Total':>{AMT_COL}}\n")
+    printer.set(bold=False)
+    total_base = total_tax = total_incl = 0.0
+    for rate, amounts in totals["vat_breakdown"].items():
+        total_base += amounts["base"]
+        total_tax += amounts["tax"]
+        total_incl += amounts["total"]
+        printer.text(
+            f"{rate + '%':<{RATE_COL}}{amounts['base']:>{AMT_COL}.2f}"
+            f"{amounts['tax']:>{AMT_COL}.2f}{amounts['total']:>{AMT_COL}.2f}\n"
+        )
+    printer.set(bold=True)
+    printer.text(
+        f"{'Total':<{RATE_COL}}{total_base:>{AMT_COL}.2f}"
+        f"{total_tax:>{AMT_COL}.2f}{total_incl:>{AMT_COL}.2f}\n"
+    )
+    printer.set(bold=False)
+    printer.text("-" * LINE_WIDTH + "\n")
+
+    _print_categories(printer, currency, totals)
+
+
+
+CAT_NAME_COL = 24
+CAT_QTY_COL = 10
+CAT_AMT_COL = LINE_WIDTH - CAT_NAME_COL - CAT_QTY_COL  # 14
+
+
+def _print_categories(printer, currency: str, totals: dict):
+    printer.set(bold=True)
+    printer.text(f"{'Category':<{CAT_NAME_COL}}{'Qty':>{CAT_QTY_COL}}{'Amount':>{CAT_AMT_COL}}\n")
+    printer.set(bold=False)
+    for name, (qty, amount) in totals["category_breakdown"].items():
+        printer.text(
+            f"{name:<{CAT_NAME_COL}}{qty:>{CAT_QTY_COL}g}{amount:>{CAT_AMT_COL}.2f}\n"
+        )
+    printer.text("-" * LINE_WIDTH + "\n")
+
+
 def _print_b2b_info(printer, invoice):
     printer.set(align="left", bold=True, width=1, height=1)
     printer.text(f"{invoice.client_name}\n")
@@ -280,6 +352,56 @@ class ReceiptService:
             raise
         except Exception as e:
             logger.exception("Failed to print receipt for sale %s", sale.sale_number)
+            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+        finally:
+            printer.close()
+
+    @staticmethod
+    def print_x_report(session: Session, totals: dict):
+        settings = SettingsService.get_all(session)
+        currency = settings.get("currency_symbol", "€")
+        printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
+        try:
+            _print_company_info(printer, settings)
+            printer.text("\n")
+            _print_report_header(printer, "X REPORT", None, totals["period_start"], totals["period_end"])
+            _print_report_totals(printer, currency, totals)
+            printer.text("\n")
+
+            printer.cut()
+        except PrinterError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to print X report")
+            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+        finally:
+            printer.close()
+
+    @staticmethod
+    def print_z_report(session: Session, z_report: ZReport):
+        settings = SettingsService.get_all(session)
+        currency = settings.get("currency_symbol", "€")
+        printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
+        try:
+            totals = {
+                "transaction_count": z_report.transaction_count,
+                "tax_amount": z_report.tax_amount,
+                "final_amount": z_report.final_amount,
+                "vat_breakdown": json.loads(z_report.vat_breakdown) if z_report.vat_breakdown else {},
+                "category_breakdown": json.loads(z_report.category_breakdown) if z_report.category_breakdown else {},
+                "payment_breakdown": json.loads(z_report.payment_breakdown) if z_report.payment_breakdown else [],
+            }
+            _print_company_info(printer, settings)
+            printer.text("\n")
+            _print_report_header(printer, "Z REPORT", z_report.report_number, z_report.period_start, z_report.period_end)
+            _print_report_totals(printer, currency, totals)
+            printer.text("\n")
+
+            printer.cut()
+        except PrinterError:
+            raise
+        except Exception as e:
+            logger.exception("Failed to print Z report %s", z_report.report_number)
             raise PrinterError(f"Printer connected but failed to print: {e}") from e
         finally:
             printer.close()

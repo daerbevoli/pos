@@ -2,8 +2,6 @@
 Reports Screen
 Daily summary, date range sales, and top products.
 """
-import json
-
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -12,27 +10,15 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 
+from PyQt6.QtWidgets import QMessageBox
+
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
-from app.models.models import Product
+from app.core.receipt_service import ReceiptService, PrinterError
+from app.core.report_service import XZReportService
 from app.utils.utils import FunctionButton
 from app.constants import BUTTON_HEIGHT, ROW_HEIGHT
-
-
-def _payment_breakdown(sale) -> list[dict]:
-    """Per-method split of a sale's payment; falls back to a single-method
-    entry for sales recorded before split payments existed."""
-    if sale.payment_breakdown:
-        try:
-            return json.loads(sale.payment_breakdown)
-        except (ValueError, TypeError):
-            pass
-    return [{"method": sale.payment_method, "amount": sale.final_amount}]
-
-
-def _amount_for_method(sale, method: str) -> float:
-    return sum(leg.get("amount", 0.0) for leg in _payment_breakdown(sale) if leg.get("method") == method)
 
 
 class ReportsScreen(QWidget):
@@ -96,6 +82,16 @@ class ReportsScreen(QWidget):
         invoices_btn.setFixedHeight(BUTTON_HEIGHT)
         controls.addWidget(invoices_btn)
 
+        x_report_btn = FunctionButton("X Report", "InvBtn")
+        x_report_btn.setFixedHeight(BUTTON_HEIGHT)
+        x_report_btn.clicked.connect(self._print_x_report)
+        controls.addWidget(x_report_btn)
+
+        z_report_btn = FunctionButton("Z Report", "InvBtn")
+        z_report_btn.setFixedHeight(BUTTON_HEIGHT)
+        z_report_btn.clicked.connect(self._print_z_report)
+        controls.addWidget(z_report_btn)
+
         self.btn_ok = FunctionButton("OK", "okBtn")
         self.btn_ok.setFixedHeight(BUTTON_HEIGHT)
         self.btn_ok.clicked.connect(self._confirm)
@@ -108,11 +104,11 @@ class ReportsScreen(QWidget):
         cards_group = QGroupBox("Summary")
         cards_layout = QGridLayout(cards_group)
 
-        self.card_revenue = self._make_card("Total Revenue", "€0.00", True)
+        self.card_revenue = self._make_card("Total Revenue", "0.00", True)
         self.card_transactions = self._make_card("Transactions", "0")
-        self.card_avg = self._make_card("Avg. Transaction", "€0.00")
-        self.card_cash = self._make_card("Cash Sales", "€0.00")
-        self.card_card = self._make_card("Card Sales", "€0.00")
+        self.card_avg = self._make_card("Avg. Transaction", "0.00")
+        self.card_cash = self._make_card("Cash Sales", "0.00")
+        self.card_card = self._make_card("Card Sales", "0.00")
 
         cards_layout.addWidget(self.card_revenue, 0, 0)
         cards_layout.addWidget(self.card_transactions, 0, 1)
@@ -219,22 +215,18 @@ class ReportsScreen(QWidget):
             if invoices:
                 sales = [sale for sale in all_sales if sale.invoice is not None]
 
-            total_revenue = sum(s.final_amount for s in sales)
-            total_transactions = len(sales)
-            avg = total_revenue / total_transactions if total_transactions else 0
-            cash_total = sum(_amount_for_method(s, "cash") for s in sales)
-            card_total = sum(_amount_for_method(s, "card") for s in sales)
+            totals = XZReportService.compute_totals(session, sales)
+            transaction_count = totals["transaction_count"]
+            avg = totals["final_amount"] / transaction_count if transaction_count else 0
+            payment_totals = {leg["method"]: leg["amount"] for leg in totals["payment_breakdown"]}
 
-            self.card_revenue._value_label.setText(f"{currency}{total_revenue:.2f}")
-            self.card_transactions._value_label.setText(str(total_transactions))
-            self.card_avg._value_label.setText(f"{currency}{avg:.2f}")
-            self.card_cash._value_label.setText(f"{currency}{cash_total:.2f}")
-            self.card_card._value_label.setText(f"{currency}{card_total:.2f}")
+            self.card_revenue._value_label.setText(f"{totals['final_amount']:.2f}")
+            self.card_transactions._value_label.setText(str(transaction_count))
+            self.card_avg._value_label.setText(f"{avg:.2f}")
+            self.card_cash._value_label.setText(f"{payment_totals.get('cash', 0.0):.2f}")
+            self.card_card._value_label.setText(f"{payment_totals.get('card', 0.0):.2f}")
 
             self.sales_table.setRowCount(0)
-
-            vat_totals = {0: [0.0, 0.0], 6: [0.0, 0.0], 21: [0.0, 0.0]}  # rate -> [tax_sum, total_sum]
-            category_totals = {}
 
             for sale in sales:
                 row = self.sales_table.rowCount()
@@ -253,42 +245,57 @@ class ReportsScreen(QWidget):
                 vat_num = (sale.invoice.client_vat_number if sale.invoice else None) or "/"
                 self.sales_table.setItem(row, 3, QTableWidgetItem(vat_num))
                 self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
-                if sale.payment_method == "mixed":
-                    payment_str = "CASH+CARD"
-                else:
-                    payment_str = sale.payment_method.upper()
-                self.sales_table.setItem(row, 5, QTableWidgetItem(payment_str))
-                self.sales_table.setItem(row, 6, QTableWidgetItem(f"{currency}{sale.final_amount:.2f}"))
+                self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
+                self.sales_table.setItem(row, 6, QTableWidgetItem(f"{sale.final_amount:.2f}"))
                 self.sales_table.setRowHeight(row, ROW_HEIGHT)
 
-                for item in sale.items:
-                    rate = item.tax_rate if item.tax_rate in vat_totals else 0
-                    vat_totals[rate][0] += item.tax_amount
-                    vat_totals[rate][1] += item.line_total
-
-                    category_name = item.product.category.name if item.product.category else "Uncategorized"
-                    qty_sum, amount_sum = category_totals.get(category_name, [0.0, 0.0])
-                    category_totals[category_name] = [qty_sum + item.quantity, amount_sum + item.line_total]
-
             self.vat_table.setRowCount(0)
-            for rate, (tax_sum, total_sum) in vat_totals.items():
-                base_sum = total_sum - tax_sum
+            for rate, amounts in totals["vat_breakdown"].items():
                 row = self.vat_table.rowCount()
                 self.vat_table.insertRow(row)
                 self.vat_table.setItem(row, 0, QTableWidgetItem(f"{rate}%"))
-                self.vat_table.setItem(row, 1, QTableWidgetItem(f"{currency}{base_sum:.2f}"))
-                self.vat_table.setItem(row, 2, QTableWidgetItem(f"{currency}{tax_sum:.2f}"))
-                self.vat_table.setItem(row, 3, QTableWidgetItem(f"{currency}{total_sum:.2f}"))
+                self.vat_table.setItem(row, 1, QTableWidgetItem(f"{amounts['base']:.2f}"))
+                self.vat_table.setItem(row, 2, QTableWidgetItem(f"{amounts['tax']:.2f}"))
+                self.vat_table.setItem(row, 3, QTableWidgetItem(f"{amounts['total']:.2f}"))
                 self.vat_table.setRowHeight(row, ROW_HEIGHT)
 
             self.categories_table.setRowCount(0)
-            for category_name, (qty_sum, amount_sum) in sorted(category_totals.items()):
+            for category_name, (qty_sum, amount_sum) in sorted(totals["category_breakdown"].items()):
                 row = self.categories_table.rowCount()
                 self.categories_table.insertRow(row)
                 self.categories_table.setItem(row, 0, QTableWidgetItem(category_name))
                 self.categories_table.setItem(row, 1, QTableWidgetItem(f"{qty_sum:g}"))
-                self.categories_table.setItem(row, 2, QTableWidgetItem(f"{currency}{amount_sum:.2f}"))
+                self.categories_table.setItem(row, 2, QTableWidgetItem(f"{amount_sum:.2f}"))
                 self.categories_table.setRowHeight(row, ROW_HEIGHT)
+
+    def _print_x_report(self):
+        with get_session() as session:
+            try:
+                totals = XZReportService.generate_x_report(session)
+                ReceiptService.print_x_report(session, totals)
+            except PrinterError as e:
+                QMessageBox.critical(self, "Printer Error", str(e))
+
+    def _print_z_report(self):
+        reply = QMessageBox.question(
+            self, "Print Z Report",
+            "This will print the Z report and permanently clear all sales "
+            "recorded since the last Z report. This cannot be undone.\nContinue?"
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        with get_session() as session:
+            z_report = XZReportService.close_z_report(session)
+            try:
+                ReceiptService.print_z_report(session, z_report)
+            except PrinterError as e:
+                QMessageBox.critical(
+                    self, "Printer Error",
+                    f"Z report {z_report.report_number} was saved successfully, "
+                    f"but printing failed:\n{e}"
+                )
+        self._load_report(invoices=self.invoices_only)
 
     def _confirm(self):
         self.navigate.emit(0)

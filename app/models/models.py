@@ -65,7 +65,7 @@ class Sale(Base):
     total_amount = Column(Float, nullable=False)
     tax_amount = Column(Float, default=0.0)
     final_amount = Column(Float, nullable=False)
-    payment_method = Column(Enum("cash", "card", "bancontact", "meal_voucher", "mixed", name="payment_method"), default="cash")
+    payment_method = Column(Enum("cash", "card", name="payment_method"), default="cash")
     amount_tendered = Column(Float, nullable=True)     # Cash given by customer
     change_given = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
@@ -160,6 +160,26 @@ class Client(Base):
 
     def __repr__(self):
         return f"<Client {self.name} {self.vatNumber}>"
+
+class ZReport(Base):
+    __tablename__ = "z_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_number = Column(String(20), unique=True, nullable=False)  # e.g. "Z-0001"
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    transaction_count = Column(Integer, nullable=False, default=0)
+    total_amount = Column(Float, nullable=False, default=0.0)   # excl. tax
+    tax_amount = Column(Float, nullable=False, default=0.0)
+    final_amount = Column(Float, nullable=False, default=0.0)   # incl. tax
+    vat_breakdown = Column(Text, nullable=True)      # JSON: {"0": {"base":.., "tax":..}, "6": {...}, "21": {...}}
+    category_breakdown = Column(Text, nullable=True)
+    payment_breakdown = Column(Text, nullable=True)  # JSON: [{"method": "cash", "amount": ..}, ...]
+
+    def __repr__(self):
+        return f"<ZReport {self.report_number} €{self.final_amount:.2f}>"
+
 
 class Invoice(Base):
     __tablename__ = "invoices"

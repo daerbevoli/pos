@@ -2,7 +2,8 @@
 import pytest
 from PyQt6.QtCore import QDate
 
-from app.ui.reports_screen import ReportsScreen, _payment_breakdown, _amount_for_method
+from app.ui.reports_screen import ReportsScreen
+from app.core.report_service import _payment_breakdown, _amount_for_method
 from app.core.product_service import ProductService
 from app.core.sales_service import Cart, CartItem, SalesService
 from app.core.client_service import ClientService
@@ -75,7 +76,7 @@ def test_amount_for_method_sums_matching_legs():
 # ── Screen behavior ──────────────────────────────────────────────────────
 
 def test_initial_state_shows_zero_summary(screen):
-    assert screen.card_revenue._value_label.text() == "€0.00"
+    assert screen.card_revenue._value_label.text() == "0.00"
     assert screen.card_transactions._value_label.text() == "0"
     assert screen.sales_table.rowCount() == 0
 
@@ -88,10 +89,10 @@ def test_load_report_populates_summary_and_table(screen):
 
     screen._load_report()
 
-    assert screen.card_revenue._value_label.text() == "€30.00"
+    assert screen.card_revenue._value_label.text() == "30.00"
     assert screen.card_transactions._value_label.text() == "2"
-    assert screen.card_cash._value_label.text() == "€20.00"
-    assert screen.card_card._value_label.text() == "€10.00"
+    assert screen.card_cash._value_label.text() == "20.00"
+    assert screen.card_card._value_label.text() == "10.00"
     assert screen.sales_table.rowCount() == 2
 
 
@@ -169,7 +170,7 @@ def test_category_breakdown(screen):
     assert screen.categories_table.rowCount() == 1
     assert screen.categories_table.item(0, 0).text() == "Custom Drinks"
     assert screen.categories_table.item(0, 1).text() == "3"
-    assert screen.categories_table.item(0, 2).text() == "€15.00"
+    assert screen.categories_table.item(0, 2).text() == "15.00"
 
 
 def test_category_breakdown_uncategorized(screen):
@@ -219,11 +220,3 @@ def test_confirm_emits_navigate_signal(screen, qtbot):
     assert blocker.args == [0]
 
 
-def test_mixed_payment_method_displayed_as_cash_plus_card(screen):
-    with get_session() as session:
-        product = _make_product(session)
-    _finalize_sale(product, payment_method="mixed",
-                    payment_breakdown=[{"method": "cash", "amount": 5.0}, {"method": "card", "amount": 5.0}])
-
-    screen._load_report()
-    assert screen.sales_table.item(0, 5).text() == "CASH+CARD"

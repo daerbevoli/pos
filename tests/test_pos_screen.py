@@ -393,7 +393,7 @@ def test_second_partial_payment_merges_same_method(screen):
     assert payments[0].amount == 10.0
 
 
-def test_mixed_payment_completes_sale_with_mixed_method(screen):
+def test_switching_payment_method_mid_payment_is_blocked(screen):
     pid, barcode, _ = _add_product(barcode="pay6", price=20.0)
     _scan(screen, barcode)
 
@@ -401,14 +401,23 @@ def test_mixed_payment_completes_sale_with_mixed_method(screen):
     screen._open_payment("cash")  # partial cash
 
     screen.combined_input.setText("15")
-    screen._open_payment("card")  # rest via card -> settles
+    screen._open_payment("card")  # blocked -> only cash/card, no mixing
 
+    assert screen.sale_finished is False
+    assert screen._current_sale_id is None
+    assert not screen.overlay.isHidden()
+    payments = [e for e in screen.cart.entries if isinstance(e, PaymentEntry)]
+    assert len(payments) == 1
+    assert payments[0].method == "cash"
+    assert payments[0].amount == 5.0
+
+    # Finishing with the same method (cash) still works.
+    screen.combined_input.setText("15")
+    screen._open_payment("cash")
     assert screen.sale_finished is True
     with get_session() as session:
         sale = session.query(Sale).filter_by(id=screen._current_sale_id).first()
-    assert sale.payment_method == "mixed"
-    breakdown = {leg["method"]: leg["amount"] for leg in screen._frozen_breakdown}
-    assert breakdown == {"cash": 5.0, "card": 15.0}
+    assert sale.payment_method == "cash"
 
 
 def test_payment_guard_blocks_cart_mutation_mid_payment(screen):
