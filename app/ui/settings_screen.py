@@ -4,7 +4,8 @@ Store info, receipt printer, label printer configuration.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog, QGridLayout, QListWidget
+    QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog, QGridLayout,
+    QListWidget, QListWidgetItem
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -15,6 +16,7 @@ from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
 from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
+from app.ui.dialogs.category_dialog import CategoryDialog
 from app.utils.utils import FunctionButton
 
 
@@ -114,23 +116,33 @@ class SettingsScreen(QWidget):
         cats_group = QGroupBox("Categories")
         cats_layout = QVBoxLayout(cats_group)
         self.categories_list = QListWidget()
-        with get_session() as session:
-            cats = ProductService.get_all_categories(session)
-        for cat in cats:
-            self.categories_list.addItem(cat.name)
+        self.categories_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
         cats_layout.addWidget(self.categories_list)
         right_col.addWidget(cats_group)
+        self._reload_categories()
+        btn_add = FunctionButton("Add")
+        btn_add.clicked.connect(self._on_add)
+        btn_remove = FunctionButton("Remove")
+        btn_remove.clicked.connect(self._on_remove)
+        btn_edit = FunctionButton("Edit")
+        btn_edit.clicked.connect(self._on_edit)
+        cats_btn_layout = QHBoxLayout()
+        cats_btn_layout.addWidget(btn_add)
+        cats_btn_layout.addWidget(btn_edit)
+        cats_btn_layout.addWidget(btn_remove)
+        right_col.addLayout(cats_btn_layout)
 
-        # ── Save ──────────────────────────────────────────────────────────────
-        save_btn = QPushButton("Save Information")
-        save_btn.setObjectName("primaryBtn")
-        save_btn.setFixedHeight(BUTTON_HEIGHT_LG)
-        save_btn.clicked.connect(self._save)
+
+        # # ── Save ──────────────────────────────────────────────────────────────
+        # save_btn = QPushButton("Save Information")
+        # save_btn.setObjectName("primaryBtn")
+        # save_btn.setFixedHeight(BUTTON_HEIGHT_LG)
+        # save_btn.clicked.connect(self._save)
 
         ok_btn = FunctionButton("OK", "okBtn")
         ok_btn.setFixedHeight(BUTTON_HEIGHT_LG)
         ok_btn.clicked.connect(self._on_ok)
-        layout.addWidget(save_btn)
+        # layout.addWidget(save_btn)
         layout.addWidget(ok_btn)
         layout.addStretch()
 
@@ -173,6 +185,65 @@ class SettingsScreen(QWidget):
         if self._logo_path:
             self._show_logo_preview(self._logo_path)
 
+    def _reload_categories(self):
+        """Repopulate the list from the DB, stashing each category id on its item."""
+        self.categories_list.clear()
+        with get_session() as session:
+            for cat in ProductService.get_all_categories(session):
+                item = QListWidgetItem(cat.name)
+                item.setData(Qt.ItemDataRole.UserRole, cat.id)
+                self.categories_list.addItem(item)
+
+    def _selected_category(self):
+        """Return (id, name) of the selected category, or (None, None)."""
+        item = self.categories_list.currentItem()
+        if item is None:
+            return None, None
+        return item.data(Qt.ItemDataRole.UserRole), item.text()
+
+    def _category_names(self):
+        return [self.categories_list.item(i).text() for i in range(self.categories_list.count())]
+
+    def _on_add(self):
+        dialog = CategoryDialog(parent=self, existing_names=self._category_names())
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            created = ProductService.create_category(session, dialog.cat_name)
+        if created is None:
+            QMessageBox.warning(self, "Category", "Could not add category — Category already exists.")
+        self._reload_categories()
+
+    def _on_edit(self):
+        cat_id, cat_name = self._selected_category()
+        if cat_id is None:
+            QMessageBox.information(self, "Category", "Select a category to edit.")
+            return
+        dialog = CategoryDialog(parent=self, cat_name=cat_name, existing_names=self._category_names())
+        if not dialog.exec() or dialog.cat_name == cat_name:
+            return
+        with get_session() as session:
+            renamed = ProductService.rename_category(session, cat_id, dialog.cat_name)
+        if renamed is None:
+            QMessageBox.warning(self, "Category", "Could not rename category — that name is already in use.")
+        self._reload_categories()
+
+    def _on_remove(self):
+        cat_id, cat_name = self._selected_category()
+        if cat_id is None:
+            QMessageBox.information(self, "Category", "Select a category to remove.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Remove Category",
+            f"Remove “{cat_name}”?\nProducts in this category will be left uncategorized.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        with get_session() as session:
+            ProductService.delete_category(session, cat_id)
+        self._reload_categories()
+
     def _save(self):
         with get_session() as session:
             SettingsService.set(session, "store_name", self.store_name.text())
@@ -191,6 +262,7 @@ class SettingsScreen(QWidget):
         self.settings_saved.emit()
 
     def _on_ok(self):
+        self._save()
         self.navigate.emit(0)
 
     def _test_print(self):

@@ -148,6 +148,11 @@ QHeaderView::section {
     font-size: 12px;
 }
 
+QListWidget::item:selected {
+    background-color: #076293;
+    color: #ffffff;
+}
+
 /* ── Function-key grid (right panel) ─────────────────────── */
 QPushButton {
     background-color: #d6dde6;

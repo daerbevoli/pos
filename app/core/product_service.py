@@ -3,6 +3,7 @@ Product & Inventory Service
 All business logic for managing products and stock.
 """
 from typing import Optional
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Product, Category, StockMovement
 from app.core.database import get_session
@@ -136,9 +137,65 @@ class ProductService:
         return session.query(Category).order_by(Category.name).all()
 
     @staticmethod
-    def create_category(session: Session, name: str, description: str = None) -> Category:
+    def _category_by_name(session: Session, name: str) -> Category | None:
+        """Case-insensitive lookup so 'Bakery' and 'bakery' are the same category."""
+        return (
+            session.query(Category)
+            .filter(func.lower(Category.name) == name.strip().lower())
+            .first()
+        )
+
+    @staticmethod
+    def create_category(session: Session, name: str, description: str = None) -> Category | None:
+        """Create a category. Returns None if the name is blank or already taken."""
+        name = name.strip()
+        if not name or ProductService._category_by_name(session, name):
+            return None
         cat = Category(name=name, description=description)
         session.add(cat)
         session.commit()
         session.refresh(cat)
         return cat
+
+    @staticmethod
+    def rename_category(session: Session, category_id: int, new_name: str) -> Category | None:
+        """
+        Rename an existing category. Returns None if the category doesn't exist,
+        the new name is blank, or the name is already used by another category.
+        """
+        new_name = new_name.strip()
+        if not new_name:
+            return None
+        cat = session.query(Category).filter_by(id=category_id).first()
+        if not cat:
+            return None
+        clash = (
+            session.query(Category)
+            .filter(
+                func.lower(Category.name) == new_name.lower(),
+                Category.id != category_id,
+            )
+            .first()
+        )
+        if clash:
+            return None
+        cat.name = new_name
+        session.commit()
+        session.refresh(cat)
+        return cat
+
+    @staticmethod
+    def delete_category(session: Session, category_id: int) -> bool:
+        """
+        Delete a category. Any products in it are left uncategorised
+        (category_id set to NULL). Returns False if it doesn't exist.
+        """
+        cat = session.query(Category).filter_by(id=category_id).first()
+        if not cat:
+            return False
+        session.query(Product).filter_by(category_id=category_id).update(
+            {Product.category_id: None}, synchronize_session=False
+        )
+        session.delete(cat)
+        session.commit()
+        return True
