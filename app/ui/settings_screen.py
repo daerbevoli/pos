@@ -17,6 +17,7 @@ from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
 from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
 from app.ui.dialogs.category_dialog import CategoryDialog
+from app.ui.dialogs.shortcut_dialog import ShortcutDialog
 from app.utils.utils import FunctionButton
 
 
@@ -77,6 +78,26 @@ class SettingsScreen(QWidget):
         store_form.addRow("Logo:", logo_row)
         left_col.addWidget(store_group)
         left_col.addStretch()
+
+        sc_group = QGroupBox("Shortcuts")
+        sc_layout = QVBoxLayout(sc_group)
+        self.shortcuts_list = QListWidget()
+        self.shortcuts_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
+        self.shortcuts_list.itemDoubleClicked.connect(lambda _: self._on_edit_sc())
+        sc_layout.addWidget(self.shortcuts_list)
+        left_col.addWidget(sc_group)
+        self._reload_shortcuts()
+        btn_add_sc = FunctionButton("Add")
+        btn_add_sc.clicked.connect(self._on_add_sc)
+        btn_edit_sc = FunctionButton("Edit")
+        btn_edit_sc.clicked.connect(self._on_edit_sc)
+        btn_remove_sc = FunctionButton("Remove")
+        btn_remove_sc.clicked.connect(self._on_remove_sc)
+        sc_btn_layout = QHBoxLayout()
+        sc_btn_layout.addWidget(btn_add_sc)
+        sc_btn_layout.addWidget(btn_edit_sc)
+        sc_btn_layout.addWidget(btn_remove_sc)
+        left_col.addLayout(sc_btn_layout)
 
         # ── Printer config ────────────────────────────────────────────────────
         printer_group = QGroupBox("Receipt Printer (USB)")
@@ -194,6 +215,15 @@ class SettingsScreen(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, cat.id)
                 self.categories_list.addItem(item)
 
+    def _reload_shortcuts(self):
+        """Repopulate the list from the DB, stashing each shortcut id on its item."""
+        self.shortcuts_list.clear()
+        with get_session() as session:
+            for sc in ProductService.get_all_shortcuts(session):
+                item = QListWidgetItem(sc.name)
+                item.setData(Qt.ItemDataRole.UserRole, sc.id)
+                self.shortcuts_list.addItem(item)
+
     def _selected_category(self):
         """Return (id, name) of the selected category, or (None, None)."""
         item = self.categories_list.currentItem()
@@ -204,6 +234,9 @@ class SettingsScreen(QWidget):
     def _category_names(self):
         return [self.categories_list.item(i).text() for i in range(self.categories_list.count())]
 
+    def _shortcut_names(self):
+        return [self.shortcuts_list.item(i).text() for i in range(self.shortcuts_list.count())]
+
     def _on_add(self):
         dialog = CategoryDialog(parent=self, existing_names=self._category_names())
         if not dialog.exec():
@@ -213,6 +246,65 @@ class SettingsScreen(QWidget):
         if created is None:
             QMessageBox.warning(self, "Category", "Could not add category — Category already exists.")
         self._reload_categories()
+
+    def _selected_shortcut(self):
+        """Return (id, name) of the selected shortcut, or (None, None)."""
+        item = self.shortcuts_list.currentItem()
+        if item is None:
+            return None, None
+        return item.data(Qt.ItemDataRole.UserRole), item.text()
+
+    def _on_add_sc(self):
+        dialog = ShortcutDialog(parent=self, existing_names=self._shortcut_names())
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            created = ProductService.create_shortcut(session, dialog.sc_name)
+            if created is None:
+                QMessageBox.warning(self, "Shortcut", "Could not add shortcut — that name is already in use.")
+            else:
+                ProductService.set_shortcut_items(session, created.id, dialog.product_ids)
+        self._reload_shortcuts()
+
+    def _on_edit_sc(self):
+        sc_id, sc_name = self._selected_shortcut()
+        if sc_id is None:
+            QMessageBox.information(self, "Shortcut", "Select a shortcut to edit.")
+            return
+        with get_session() as session:
+            product_ids = ProductService.get_shortcut_product_ids(session, sc_id)
+        dialog = ShortcutDialog(
+            parent=self,
+            sc_name=sc_name,
+            product_ids=product_ids,
+            existing_names=self._shortcut_names(),
+        )
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            if dialog.sc_name != sc_name:
+                renamed = ProductService.rename_shortcut(session, sc_id, dialog.sc_name)
+                if renamed is None:
+                    QMessageBox.warning(self, "Shortcut", "Could not rename shortcut — that name is already in use.")
+                    return
+            ProductService.set_shortcut_items(session, sc_id, dialog.product_ids)
+        self._reload_shortcuts()
+
+    def _on_remove_sc(self):
+        sc_id, sc_name = self._selected_shortcut()
+        if sc_id is None:
+            QMessageBox.information(self, "Shortcut", "Select a shortcut to remove.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Remove Shortcut",
+            f"Remove “{sc_name}”?\nThe products themselves are not affected.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        with get_session() as session:
+            ProductService.delete_shortcut(session, sc_id)
+        self._reload_shortcuts()
 
     def _on_edit(self):
         cat_id, cat_name = self._selected_category()

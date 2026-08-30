@@ -181,3 +181,77 @@ def test_get_all_categories_ordered_by_name(db_session):
 
     cats = ProductService.get_all_categories(db_session)
     assert [c.name for c in cats] == ["Apple Cat", "Zebra Cat"]
+
+
+# ── Shortcuts ────────────────────────────────────────────────────────────
+
+def test_create_shortcut(db_session):
+    sc = ProductService.create_shortcut(db_session, "Lunch")
+    assert sc.id is not None
+    assert sc.name == "Lunch"
+    assert sc.product_ids == []
+
+
+def test_create_shortcut_rejects_blank_and_duplicate(db_session):
+    ProductService.create_shortcut(db_session, "Lunch")
+    assert ProductService.create_shortcut(db_session, "  ") is None
+    assert ProductService.create_shortcut(db_session, "lunch") is None  # case-insensitive
+
+
+def test_get_all_shortcuts_ordered_by_name(db_session):
+    ProductService.create_shortcut(db_session, "Zulu")
+    ProductService.create_shortcut(db_session, "Alpha")
+    assert [s.name for s in ProductService.get_all_shortcuts(db_session)] == ["Alpha", "Zulu"]
+
+
+def test_set_shortcut_items_orders_by_position(db_session):
+    a = _make_product(db_session, name="A")
+    b = _make_product(db_session, name="B")
+    c = _make_product(db_session, name="C")
+    sc = ProductService.create_shortcut(db_session, "S")
+
+    ProductService.set_shortcut_items(db_session, sc.id, [c.id, a.id, b.id])
+    assert ProductService.get_shortcut_product_ids(db_session, sc.id) == [c.id, a.id, b.id]
+
+
+def test_set_shortcut_items_dedupes_and_drops_unknown(db_session):
+    a = _make_product(db_session, name="A")
+    b = _make_product(db_session, name="B")
+    sc = ProductService.create_shortcut(db_session, "S")
+
+    ProductService.set_shortcut_items(db_session, sc.id, [a.id, b.id, a.id, 9999])
+    assert ProductService.get_shortcut_product_ids(db_session, sc.id) == [a.id, b.id]
+
+
+def test_set_shortcut_items_replaces_wholesale_incl_reorder_of_same_set(db_session):
+    a = _make_product(db_session, name="A")
+    b = _make_product(db_session, name="B")
+    sc = ProductService.create_shortcut(db_session, "S")
+
+    ProductService.set_shortcut_items(db_session, sc.id, [a.id, b.id])
+    # Re-adding a product already present must not trip the unique constraint.
+    ProductService.set_shortcut_items(db_session, sc.id, [b.id, a.id])
+    assert ProductService.get_shortcut_product_ids(db_session, sc.id) == [b.id, a.id]
+
+    ProductService.set_shortcut_items(db_session, sc.id, [])
+    assert ProductService.get_shortcut_product_ids(db_session, sc.id) == []
+
+
+def test_rename_shortcut_rejects_clash(db_session):
+    ProductService.create_shortcut(db_session, "Lunch")
+    dinner = ProductService.create_shortcut(db_session, "Dinner")
+
+    assert ProductService.rename_shortcut(db_session, dinner.id, "Lunch") is None
+    assert ProductService.rename_shortcut(db_session, dinner.id, "Brunch").name == "Brunch"
+
+
+def test_delete_shortcut_cascades_items(db_session):
+    from app.models.models import ShortcutItem
+
+    a = _make_product(db_session, name="A")
+    sc = ProductService.create_shortcut(db_session, "S")
+    ProductService.set_shortcut_items(db_session, sc.id, [a.id])
+
+    assert ProductService.delete_shortcut(db_session, sc.id) is True
+    assert db_session.query(ShortcutItem).count() == 0
+    assert ProductService.get_all_shortcuts(db_session) == []

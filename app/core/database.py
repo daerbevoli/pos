@@ -5,7 +5,7 @@ Handles SQLite connection, table creation, and provides session access.
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
-from app.models.models import Base, Settings, Category, Client, Invoice
+from app.models.models import Base, Settings, Category, Client, Invoice, Shortcut, ShortcutItem
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
@@ -91,6 +91,22 @@ def _run_migrations():
         z_report_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(z_reports)")}
         if z_report_cols and "category_breakdown" not in z_report_cols:
             conn.exec_driver_sql("ALTER TABLE z_reports ADD COLUMN category_breakdown TEXT")
+            conn.commit()
+
+        # POS shortcut pages (hand-picked product-slot lists). create_all() above
+        # already makes these on any DB that reaches here; this block is the
+        # explicit record of when they were introduced and a safety net if
+        # create_all() is ever skipped.
+        existing_tables = {
+            row[0] for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "shortcuts" not in existing_tables:
+            Shortcut.__table__.create(conn)
+            conn.commit()
+        if "shortcut_items" not in existing_tables:
+            ShortcutItem.__table__.create(conn)
             conn.commit()
 
 

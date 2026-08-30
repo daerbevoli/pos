@@ -5,7 +5,7 @@ All business logic for managing products and stock.
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from app.models.models import Product, Category, StockMovement
+from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem
 from app.core.database import get_session
 
 
@@ -199,3 +199,114 @@ class ProductService:
         session.delete(cat)
         session.commit()
         return True
+
+    @staticmethod
+    def get_all_shortcuts(session: Session) -> list[type[Shortcut]]:
+        return session.query(Shortcut).order_by(Shortcut.name).all()
+
+    @staticmethod
+    def _shortcut_by_name(session: Session, name: str) -> Shortcut | None:
+        """Case-insensitive lookup so 'Bakery' and 'bakery' are the same category."""
+        return (
+            session.query(Shortcut)
+            .filter(func.lower(Shortcut.name) == name.strip().lower())
+            .first()
+        )
+
+    @staticmethod
+    def create_shortcut(session: Session, name: str) -> Shortcut | None:
+        """Create a shortcut. Returns None if the name is blank or already taken."""
+        name = name.strip()
+        if not name or ProductService._shortcut_by_name(session, name):
+            return None
+        sc = Shortcut(name=name)
+        session.add(sc)
+        session.commit()
+        session.refresh(sc)
+        return sc
+
+    @staticmethod
+    def get_shortcut(session: Session, shortcut_id: int) -> Shortcut | None:
+        return session.query(Shortcut).filter_by(id=shortcut_id).first()
+
+    @staticmethod
+    def get_shortcut_product_ids(session: Session, shortcut_id: int) -> list[int]:
+        """Ordered product ids for a shortcut (position order). Empty if it doesn't exist."""
+        sc = session.query(Shortcut).filter_by(id=shortcut_id).first()
+        if not sc:
+            return []
+        return [item.product_id for item in sc.items]
+
+    @staticmethod
+    def rename_shortcut(session: Session, shortcut_id: int, new_name: str) -> Shortcut | None:
+        """
+        Rename an existing shortcut. Returns None if the shortcut doesn't exist,
+        the new name is blank, or the name is already used by another shortcut.
+        """
+        new_name = new_name.strip()
+        if not new_name:
+            return None
+        sc = session.query(Shortcut).filter_by(id=shortcut_id).first()
+        if not sc:
+            return None
+        clash = (
+            session.query(Shortcut)
+            .filter(
+                func.lower(Shortcut.name) == new_name.lower(),
+                Shortcut.id != shortcut_id,
+            )
+            .first()
+        )
+        if clash:
+            return None
+        sc.name = new_name
+        session.commit()
+        session.refresh(sc)
+        return sc
+
+    @staticmethod
+    def delete_shortcut(session: Session, shortcut_id: int) -> bool:
+        """Delete a shortcut and its items (cascade). Returns False if it doesn't exist."""
+        sc = session.query(Shortcut).filter_by(id=shortcut_id).first()
+        if not sc:
+            return False
+        session.delete(sc)
+        session.commit()
+        return True
+
+    @staticmethod
+    def set_shortcut_items(session: Session, shortcut_id: int, product_ids: list[int]) -> bool:
+        """
+        Replace a shortcut's item list wholesale with `product_ids`, in order.
+        Covers add / remove / reorder in one call. Ids that don't resolve to a
+        product (or repeats) are skipped. Returns False if the shortcut is gone.
+        """
+        sc = session.query(Shortcut).filter_by(id=shortcut_id).first()
+        if not sc:
+            return False
+
+        valid_ids = {
+            pid for (pid,) in session.query(Product.id).filter(Product.id.in_(product_ids or [])).all()
+        } if product_ids else set()
+
+        seen: set[int] = set()
+        ordered = []
+        for pid in product_ids or []:
+            if pid in valid_ids and pid not in seen:
+                seen.add(pid)
+                ordered.append(pid)
+
+        # Clear then re-add. The explicit flush() between the two makes the
+        # DELETEs land before the INSERTs, so re-adding a product that was
+        # already in the shortcut doesn't collide on the (shortcut_id,
+        # product_id) unique constraint mid-flush.
+        session.query(ShortcutItem).filter_by(shortcut_id=shortcut_id).delete(
+            synchronize_session="fetch"
+        )
+        session.flush()
+        for position, pid in enumerate(ordered):
+            session.add(ShortcutItem(shortcut_id=shortcut_id, product_id=pid, position=position))
+        session.commit()
+        return True
+
+

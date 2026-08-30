@@ -5,7 +5,7 @@ All tables are defined here using SQLAlchemy ORM.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
-    DateTime, ForeignKey, Text, Enum, Index, text
+    DateTime, ForeignKey, Text, Enum, Index, text, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, backref, DeclarativeBase
 
@@ -205,3 +205,49 @@ class Invoice(Base):
 
     sale   = relationship("Sale", backref=backref("invoice", uselist=False))
     client = relationship("Client", backref=backref("invoices", uselist=True))
+
+
+class Shortcut(Base):
+    """A named container of hand-picked products, shown as a product-slot page
+    on the POS screen. Independent of Product.category_id."""
+    __tablename__ = "shortcuts"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    name       = Column(String(100), nullable=False, unique=True)
+    position   = Column(Integer, nullable=False, default=0)   # order of the shortcut buttons
+    created_at = Column(DateTime, default=datetime.now)
+
+    items = relationship(
+        "ShortcutItem",
+        back_populates="shortcut",
+        cascade="all, delete-orphan",
+        order_by="ShortcutItem.position",
+    )
+
+    @property
+    def product_ids(self) -> list[int]:
+        return [item.product_id for item in self.items]
+
+    def __repr__(self):
+        return f"<Shortcut {self.name} ({len(self.items)} items)>"
+
+
+class ShortcutItem(Base):
+    """One product slot within a Shortcut. The ordered rows are the shortcut's
+    product list; `position` preserves slot order."""
+    __tablename__ = "shortcut_items"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    shortcut_id = Column(Integer, ForeignKey("shortcuts.id", ondelete="CASCADE"), nullable=False)
+    product_id  = Column(Integer, ForeignKey("products.id"), nullable=False)
+    position    = Column(Integer, nullable=False, default=0)   # slot order within the shortcut
+
+    shortcut = relationship("Shortcut", back_populates="items")
+    product  = relationship("Product")
+
+    __table_args__ = (
+        UniqueConstraint("shortcut_id", "product_id", name="uq_shortcut_item_product"),
+    )
+
+    def __repr__(self):
+        return f"<ShortcutItem s{self.shortcut_id} p{self.product_id} @{self.position}>"

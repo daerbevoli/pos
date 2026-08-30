@@ -368,41 +368,52 @@ class POSScreen(QWidget):
 
 
 
-    # ── Bottom: numpad + category/product grid ───────────────────────────
+    # ── Bottom: numpad + shortcut/product grid ───────────────────────────
+
+    SLOT_COUNT = 24  # rows 0-2 x 8 columns
 
     def _build_bottom_grid(self):
         row = QHBoxLayout()
         row.setSpacing(SPACING_XS)
 
-        self.category_grid = QGridLayout()
-        self.category_grid.setSpacing(SPACING_XS)
+        self.shortcut_grid = QGridLayout()
+        self.shortcut_grid.setSpacing(SPACING_XS)
 
-        self.category_buttons = []
-        labels_rows = [
-            (["", "", "", "", "", "", "", ""], "blankBtnLight"),
-            (["", "", "", "", "", "", "", ""], "blankBtnLight"),
-            (["", "", "", "", "", "", "", ""], "productBtn"),
-            (["General", "Vegetables", "Fruit", "Drinks", "Bakery", "Rice", "Asian food", ""], "categoryBtn"),
-            (["", "Seafood", "Takeaway food", "Takeaway item", "Trays", "Cooking item", "", "Checkout"], "categoryBtn"),
-        ]
-        for r, (labels, role) in enumerate(labels_rows):
-            for c, label in enumerate(labels):
-                role_use = role if label else ("blankBtnLight" if role == "categoryBtn" else role)
-                btn = CategoryButton(label, role_use)
-                if label == "General":
-                    btn.setObjectName("generalBtn")
-                elif label == "Checkout":
-                    btn.setObjectName("checkoutBtn")
-                    btn.clicked.connect(self._show_subtotal)
-                self.category_grid.addWidget(btn, r, c)
-                self.category_buttons.append(btn)
+        # Rows 0-2: product slots, filled from whichever shortcut is selected.
+        # Tapping a filled slot adds that product to the cart.
+        self.slot_buttons: list[CategoryButton] = []
+        self._slot_product_ids: list[int | None] = [None] * self.SLOT_COUNT
+        for r in range(3):
+            for c in range(8):
+                i = len(self.slot_buttons)
+                btn = CategoryButton("", "blankBtnLight")
+                btn.setEnabled(False)
+                btn.clicked.connect(lambda _, idx=i: self._on_slot_pressed(idx))
+                self.shortcut_grid.addWidget(btn, r, c)
+                self.slot_buttons.append(btn)
+
+        # Rows 3-4: shortcut selector buttons, populated from the DB.
+        # (4, 7) is reserved for the fixed Checkout key.
+        self.shortcut_buttons: list[CategoryButton] = []
+        self._shortcuts: list[tuple[int, str]] = []
+        self._active_shortcut_id: int | None = None
+        shortcut_cells = [(r, c) for r in (3, 4) for c in range(8) if (r, c) != (4, 7)]
+        for r, c in shortcut_cells:
+            i = len(self.shortcut_buttons)
+            btn = CategoryButton("", "blankBtnLight")
+            btn.setEnabled(False)
+            btn.clicked.connect(lambda _, idx=i: self._on_shortcut_pressed(idx))
+            self.shortcut_grid.addWidget(btn, r, c)
+            self.shortcut_buttons.append(btn)
 
         for c in range(8):
-            self.category_grid.setColumnStretch(c, 1)
+            self.shortcut_grid.setColumnStretch(c, 1)
         for r in range(5):
-            self.category_grid.setRowStretch(r, 1)
+            self.shortcut_grid.setRowStretch(r, 1)
 
-        row.addLayout(self.category_grid, stretch=4)
+        row.addLayout(self.shortcut_grid, stretch=4)
+
+        self.reload_shortcuts()
 
         numpad = QGridLayout()
         numpad.setSpacing(SPACING_XS)
@@ -428,6 +439,86 @@ class POSScreen(QWidget):
 
         row.addLayout(numpad, stretch=1)
         return row
+
+    # ── Shortcut / product slot grid ────────────────────────────────────
+
+    def reload_shortcuts(self):
+        """Refresh the selector buttons from the DB. Safe to call whenever
+        shortcuts may have changed (e.g. after leaving the settings screen)."""
+        with get_session() as session:
+            self._shortcuts = [
+                (sc.id, sc.name) for sc in ProductService.get_all_shortcuts(session)
+            ]
+
+        for i, btn in enumerate(self.shortcut_buttons):
+            if i < len(self._shortcuts):
+                btn.setText(self._shortcuts[i][1])
+                btn.setEnabled(True)
+                self._apply_button_role(btn, "categoryBtn")
+            else:
+                btn.setText("")
+                btn.setEnabled(False)
+                btn.setProperty("active", False)
+                self._apply_button_role(btn, "blankBtnLight")
+
+        # Keep the current selection if it still exists, otherwise blank the slots.
+        live_ids = {sid for sid, _ in self._shortcuts}
+        if self._active_shortcut_id in live_ids:
+            self._show_shortcut(self._active_shortcut_id)
+        else:
+            self._active_shortcut_id = None
+            self._clear_slots()
+            self._sync_active_shortcut_style()
+
+    def _on_shortcut_pressed(self, index: int):
+        if index >= len(self._shortcuts):
+            return
+        self._show_shortcut(self._shortcuts[index][0])
+
+    def _show_shortcut(self, shortcut_id: int):
+        with get_session() as session:
+            product_ids = ProductService.get_shortcut_product_ids(session, shortcut_id)
+            rows = []
+            for pid in product_ids:
+                product = ProductService.get_by_id(session, pid)
+                if product and product.is_active:
+                    rows.append((product.id, product.name, product.price))
+
+        self._active_shortcut_id = shortcut_id
+        self._clear_slots()
+        for i, (pid, name, price) in enumerate(rows[: self.SLOT_COUNT]):
+            btn = self.slot_buttons[i]
+            btn.setText(f"{name}\n{self.currency}{price:.2f}")
+            btn.setEnabled(True)
+            self._apply_button_role(btn, "productBtn")
+            self._slot_product_ids[i] = pid
+
+        self._sync_active_shortcut_style()
+
+    def _clear_slots(self):
+        for i, btn in enumerate(self.slot_buttons):
+            btn.setText("")
+            btn.setEnabled(False)
+            self._apply_button_role(btn, "blankBtnLight")
+            self._slot_product_ids[i] = None
+
+    def _on_slot_pressed(self, index: int):
+        if 0 <= index < len(self._slot_product_ids):
+            pid = self._slot_product_ids[index]
+            if pid is not None:
+                self.add_product_by_id(pid)
+
+    def _sync_active_shortcut_style(self):
+        for (sid, _), btn in zip(self._shortcuts, self.shortcut_buttons):
+            btn.setProperty("active", sid == self._active_shortcut_id)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def _apply_button_role(self, btn: CategoryButton, role: str):
+        if btn.objectName() != role:
+            btn.setObjectName(role)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
 
     # ── V-tab state management ───────────────────────────────────────────
 

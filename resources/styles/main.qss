@@ -348,6 +348,12 @@ QPushButton#categoryBtn:hover {
     background-color: #c65a69;
 }
 
+QPushButton#categoryBtn[active="true"] {
+    background-color: #a53443;
+    border: 2px solid #f0c25a;
+    color: #ffffff;
+}
+
 QPushButton#checkoutBtn {
     background-color: #d96b7a;
     border: 1px solid #b9505e;

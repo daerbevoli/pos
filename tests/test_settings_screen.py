@@ -115,3 +115,81 @@ def test_reload_after_save_reflects_persisted_values(screen, monkeypatch):
 
     screen._load()
     assert screen.store_address.text() == "123 Main St"
+
+
+# ── Shortcuts ────────────────────────────────────────────────────────────
+
+def _shortcut_rows(screen):
+    return [screen.shortcuts_list.item(i).text() for i in range(screen.shortcuts_list.count())]
+
+
+def test_add_shortcut_creates_and_lists_it(screen, monkeypatch):
+    from app.core.database import get_session
+    from app.core.product_service import ProductService
+
+    with get_session() as session:
+        pid = ProductService.create(session, name="Cola", price=1.0, tax=21).id
+
+    def fake_exec(self):
+        self.sc_name = "Lunch"
+        self.product_ids = [pid]
+        return True
+
+    monkeypatch.setattr("app.ui.settings_screen.ShortcutDialog.exec", fake_exec)
+    screen._on_add_sc()
+
+    assert "Lunch" in _shortcut_rows(screen)
+    with get_session() as session:
+        sc_id = ProductService.get_all_shortcuts(session)[0].id
+        assert ProductService.get_shortcut_product_ids(session, sc_id) == [pid]
+
+
+def test_edit_shortcut_renames_and_updates_items(screen, monkeypatch):
+    from app.core.database import get_session
+    from app.core.product_service import ProductService
+
+    with get_session() as session:
+        a = ProductService.create(session, name="A", price=1.0, tax=21).id
+        b = ProductService.create(session, name="B", price=1.0, tax=21).id
+        sc_id = ProductService.create_shortcut(session, "Old").id
+        ProductService.set_shortcut_items(session, sc_id, [a])
+    screen._reload_shortcuts()
+    screen.shortcuts_list.setCurrentRow(0)
+
+    def fake_exec(self):
+        self.sc_name = "New"
+        self.product_ids = [b, a]
+        return True
+
+    monkeypatch.setattr("app.ui.settings_screen.ShortcutDialog.exec", fake_exec)
+    screen._on_edit_sc()
+
+    assert _shortcut_rows(screen) == ["New"]
+    with get_session() as session:
+        assert ProductService.get_shortcut_product_ids(session, sc_id) == [b, a]
+
+
+def test_remove_shortcut_deletes_it(screen, monkeypatch):
+    from app.core.database import get_session
+    from app.core.product_service import ProductService
+
+    with get_session() as session:
+        ProductService.create_shortcut(session, "Doomed")
+    screen._reload_shortcuts()
+    screen.shortcuts_list.setCurrentRow(0)
+
+    monkeypatch.setattr(
+        "app.ui.settings_screen.QMessageBox.question",
+        lambda *a, **kw: __import__("PyQt6.QtWidgets", fromlist=["QMessageBox"]).QMessageBox.StandardButton.Yes,
+    )
+    screen._on_remove_sc()
+
+    assert _shortcut_rows(screen) == []
+
+
+def test_edit_shortcut_without_selection_warns(screen, monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.information", lambda *a, **kw: calls.append(a))
+    screen.shortcuts_list.setCurrentRow(-1)
+    screen._on_edit_sc()
+    assert len(calls) == 1

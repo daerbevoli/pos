@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
             lambda: self._set_store_label(self.store_label)
         )
         self.settings_screen.settings_saved.connect(self._refresh_salesperson)
+        self.settings_screen.settings_saved.connect(self.pos_screen.reload_shortcuts)
         self.pos_screen.navigate.connect(self._navigate)
         self.pos_screen.salesperson_changed.connect(self.salesperson_label.setText)
         self.pos_screen.tab_updated.connect(self._on_tab_updated)
