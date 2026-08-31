@@ -485,6 +485,7 @@ class ArticleDetailPanel(QFrame):
         else:
             if self.current_product_id:
                 self.parent_screen.selected_product.emit(self.current_product_id)
+            self.parent_screen.refresh()
             self.parent_screen.navigate.emit(0)
 
     def _on_cancel(self):

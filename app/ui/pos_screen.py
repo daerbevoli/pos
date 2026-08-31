@@ -59,9 +59,6 @@ class _TabState:
         self.frozen_change    = 0.0
         self.frozen_total     = 0.0
         self.sale_id          = None   # DB Sale.id this frozen ticket was saved as, if any
-        self.sale_ids         = []
-        self.sales            = -1
-
 
 class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
@@ -72,21 +69,38 @@ class POSScreen(QWidget):
 
     def __init__(self):
         super().__init__()
+        # id: V-tab slot (1-5) -> its saved _TabState snapshot; swapped in/out by
+        # _save_tab_state()/_load_tab_state() whenever set_active_tab() fires.
         self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, 6)}
-        self._active_tab = 1
-        self.cart             = self._tab_states[1].cart
-        self.sale_finished    = True
-        self.is_invoice       = False
-        self.client_id        = None
-        self._frozen_breakdown = []
-        self._frozen_change   = 0.0
-        self._frozen_total    = 0.0
+        self._active_tab = 1   # id: which V-tab slot (key into _tab_states) is currently on screen
+        self.cart             = self._tab_states[1].cart  # active tab's Cart; re-pointed on tab switch
+        self.sale_finished    = True   # whether the current ticket has been paid/frozen (vs. still being built)
+        self.is_invoice       = False  # whether the current sale is being issued as an invoice, not a receipt
+        self.client_id        = None   # id: DB Client.id attached to the current sale/invoice, set via _on_client_selected
+        self._frozen_breakdown = []    # cached payment split (cash/card/etc.) for the last finalized sale, for reprint/redisplay
+        self._frozen_change   = 0.0    # cached change-due amount for the last finalized sale
+        self._frozen_total    = 0.0    # cached grand total for the last finalized sale
         self._row_to_entry    = []     # cart_table row -> cart.entries index (None for divider/summary rows)
-        self._current_sale_id = None   # DB Sale.id this tab's frozen ticket was saved as, if any
-        self.sale_ids         = []     # all of today's completed sale ids, chronological, shared across tabs
+        self._current_sale_id = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
+        self.sale_ids         = []     # id: all of today's completed sale ids, chronological, shared across tabs
         self.sales            = -1     # index into sale_ids: browse cursor / index of most recent sale
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
         self._barcode_entry_quantity = None   # quantity typed before the Barcode button was pressed, if any
+
+        # Shortcut / product-slot grid state (buttons built in _build_bottom_grid(), see there).
+        self.slot_buttons: list[CategoryButton] = []       # the product-slot button widgets, index-aligned with _slot_product_ids
+        # id: slot index -> DB Product.id currently shown in that slot (None if blank).
+        # Set in _show_shortcut(), cleared in _clear_slots(), read in _on_slot_pressed()
+        # to call add_product_by_id() when a slot is tapped.
+        self._slot_product_ids: list[int | None] = [None] * self.SLOT_COUNT
+        self.shortcut_buttons: list[CategoryButton] = []   # the shortcut-selector button widgets, index-aligned with _shortcuts
+        # id: (DB Shortcut.id, name) pairs, one per button, in display order.
+        # Refetched in reload_shortcuts(); index paired positionally with shortcut_buttons.
+        self._shortcuts: list[tuple[int, str]] = []
+        # id: DB Shortcut.id of the currently selected shortcut button (None if none selected).
+        # Set in _show_shortcut(), read in reload_shortcuts() (to preserve selection across
+        # reloads) and _sync_active_shortcut_style() (to highlight the matching button).
+        self._active_shortcut_id: int | None = None
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -381,8 +395,7 @@ class POSScreen(QWidget):
 
         # Rows 0-2: product slots, filled from whichever shortcut is selected.
         # Tapping a filled slot adds that product to the cart.
-        self.slot_buttons: list[CategoryButton] = []
-        self._slot_product_ids: list[int | None] = [None] * self.SLOT_COUNT
+        # (self.slot_buttons / self._slot_product_ids are declared in __init__.)
         for r in range(3):
             for c in range(8):
                 i = len(self.slot_buttons)
@@ -393,11 +406,8 @@ class POSScreen(QWidget):
                 self.slot_buttons.append(btn)
 
         # Rows 3-4: shortcut selector buttons, populated from the DB.
-        # (4, 7) is reserved for the fixed Checkout key.
-        self.shortcut_buttons: list[CategoryButton] = []
-        self._shortcuts: list[tuple[int, str]] = []
-        self._active_shortcut_id: int | None = None
-        shortcut_cells = [(r, c) for r in (3, 4) for c in range(8) if (r, c) != (4, 7)]
+        # (self.shortcut_buttons / self._shortcuts / self._active_shortcut_id are declared in __init__.)
+        shortcut_cells = [(r, c) for r in (3, 4) for c in range(8)]
         for r, c in shortcut_cells:
             i = len(self.shortcut_buttons)
             btn = CategoryButton("", "blankBtnLight")
@@ -439,6 +449,72 @@ class POSScreen(QWidget):
 
         row.addLayout(numpad, stretch=1)
         return row
+
+    # ── V-tab state management ───────────────────────────────────────────
+
+    def set_active_tab(self, idx: int):
+        """Called by MainWindow when the user selects a different V tab."""
+        if idx == self._active_tab:
+            return
+        self._save_tab_state()
+        # combined_input / barcode-entry mode are transient scratch state, not tied
+        # to any particular tab's cart. Cancel them here so leftover typed digits or
+        # a pending barcode scan from the old tab don't bleed into the new one.
+        self._barcode_entry_mode     = False
+        self._barcode_entry_quantity = None
+        self.combined_input.clear()
+        self._active_tab = idx
+        self._load_tab_state(idx)
+
+    def _save_tab_state(self):
+        s = self._tab_states[self._active_tab]
+        s.cart             = self.cart
+        s.sale_finished    = self.sale_finished
+        s.is_invoice       = self.is_invoice
+        s.client_id        = self.client_id
+        s.client_name      = self.client_label.text() if self.client_label.isVisible() else ""
+        s.ticket_date_text = self.ticket_date.text() if self.sale_finished else ""
+        s.frozen_breakdown = self._frozen_breakdown
+        s.frozen_change    = self._frozen_change
+        s.frozen_total     = self._frozen_total
+        s.sale_id          = self._current_sale_id
+
+    def _load_tab_state(self, idx: int):
+        s = self._tab_states[idx]
+        self.cart          = s.cart
+        self.sale_finished = s.sale_finished
+        self.is_invoice    = s.is_invoice
+        self.client_id     = s.client_id
+        self._current_sale_id = s.sale_id
+
+        if s.client_name:
+            self.client_label.setText(s.client_name)
+            self.client_label.show()
+        else:
+            self.client_label.hide()
+
+        # Restore frozen / unfrozen visuals
+        self._frozen_breakdown = s.frozen_breakdown or []
+        self._frozen_change    = s.frozen_change or 0.0
+        self._frozen_total     = s.frozen_total
+        self._set_frozen_style(s.sale_finished or not self.cart_active)
+        if s.sale_finished:
+            self._update_payment_footer()
+            self.input_stack.setCurrentIndex(1)
+            if s.ticket_date_text:
+                self.ticket_date.setText(s.ticket_date_text)
+            else:
+                # Fresh/never-used tab: no frozen date was ever saved, so recompute
+                # now instead of leaving the previous tab's date on screen.
+                self._tick_time(override=True)
+        else:
+            self.input_stack.setCurrentIndex(0)
+            self._tick_time(override=True)
+
+        self.ticket_title.setText(f"V {idx}")
+        self._refresh_cart()
+        self.cart_table.setFocus()
+
 
     # ── Shortcut / product slot grid ────────────────────────────────────
 
@@ -519,60 +595,6 @@ class POSScreen(QWidget):
             btn.setObjectName(role)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
-
-    # ── V-tab state management ───────────────────────────────────────────
-
-    def set_active_tab(self, idx: int):
-        """Called by MainWindow when the user selects a different V tab."""
-        if idx == self._active_tab:
-            return
-        self._save_tab_state()
-        self._active_tab = idx
-        self._load_tab_state(idx)
-
-    def _save_tab_state(self):
-        s = self._tab_states[self._active_tab]
-        s.cart             = self.cart
-        s.sale_finished    = self.sale_finished
-        s.is_invoice       = self.is_invoice
-        s.client_id        = self.client_id
-        s.client_name      = self.client_label.text() if self.client_label.isVisible() else ""
-        s.ticket_date_text = self.ticket_date.text() if self.sale_finished else ""
-        s.frozen_breakdown = self._frozen_breakdown
-        s.frozen_change    = self._frozen_change
-        s.frozen_total     = self._frozen_total
-        s.sale_id          = self._current_sale_id
-
-    def _load_tab_state(self, idx: int):
-        s = self._tab_states[idx]
-        self.cart          = s.cart
-        self.sale_finished = s.sale_finished
-        self.is_invoice    = s.is_invoice
-        self.client_id     = s.client_id
-        self._current_sale_id = s.sale_id
-
-        if s.client_name:
-            self.client_label.setText(s.client_name)
-            self.client_label.show()
-        else:
-            self.client_label.hide()
-
-        # Restore frozen / unfrozen visuals
-        self._frozen_breakdown = s.frozen_breakdown or []
-        self._frozen_change    = s.frozen_change or 0.0
-        self._frozen_total     = s.frozen_total
-        self._set_frozen_style(s.sale_finished or not self.cart_active)
-        if s.sale_finished:
-            self._update_payment_footer()
-            self.input_stack.setCurrentIndex(1)
-            if s.ticket_date_text:
-                self.ticket_date.setText(s.ticket_date_text)
-        else:
-            self.input_stack.setCurrentIndex(0)
-
-        self.ticket_title.setText(f"V {idx}")
-        self._refresh_cart()
-        self.cart_table.setFocus()
 
     # ── Numpad / scan input helpers ──────────────────────────────────────
 
@@ -674,6 +696,7 @@ class POSScreen(QWidget):
         """Enter manual barcode-entry mode: whatever quantity was already
         typed into combined_input carries over and applies to the item once
         an exact barcode match is confirmed."""
+        self.combined_input.setPlaceholderText("Manual barcode")
         if self._handle_pending_or_guards():
             return
         prefix = self.combined_input.text().strip()
@@ -685,6 +708,7 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def _on_barcode_enter(self):
+        self.combined_input.setPlaceholderText("")
         if self._handle_pending_or_guards():
             return
 
@@ -727,6 +751,7 @@ class POSScreen(QWidget):
             self.is_invoice = False
             self._current_sale_id = None
             self._set_frozen_style(True)
+            self._clear_slots()
             self._refresh_cart()
             self._tick_time(override=True)
             self.sale_finished = True
