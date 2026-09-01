@@ -191,10 +191,10 @@ class ArticleDetailPanel(QFrame):
         self.btn_print_label = FunctionButton("Print\nlabel", "secFunc")
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
-        self.btn_up = FunctionButton("Up", "SecFunc")
+        self.btn_up = FunctionButton("↑", "SecFunc")
         self.btn_export = FunctionButton("Export\narticles", "secFunc")
         self.btn_import = FunctionButton("Import\narticles", "secFunc")
-        self.btn_down = FunctionButton("Down", "SecFunc")
+        self.btn_down = FunctionButton("↓", "SecFunc")
 
         self.btn_search_key = FunctionButton("Search by\nkey", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
