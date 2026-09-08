@@ -12,13 +12,14 @@ from app.core.sales_service import (
 
 
 class _FakeProduct:
-    def __init__(self, id, name="Item", barcode="123", price=1.0, unit="pcs", tax=21):
+    def __init__(self, id, name="Item", barcode="123", price=1.0, unit="pcs", tax=21, is_open_price=False):
         self.id = id
         self.name = name
         self.barcode = barcode
         self.price = price
         self.unit = unit
         self.tax = tax
+        self.is_open_price = is_open_price
 
 
 # ── CartItem.line_total ──────────────────────────────────────────────────
@@ -119,6 +120,25 @@ def test_add_product_creates_new_entry():
     assert entry.quantity == 2
     assert entry.unit_price == 0.5
     assert entry.tax_rate == 21
+
+
+def test_add_product_open_price_starts_pending():
+    """An open-price product (price is always 0.0 on the product itself)
+    is added as a pending line, like a weight item awaiting its quantity —
+    except it's unit_price that's missing, not quantity."""
+    cart = Cart()
+    product = _FakeProduct(id=1, name="Loose Snacks", price=0.0, is_open_price=True)
+    cart.add_product(product, quantity=1)
+
+    entry = cart.entries[0]
+    assert entry.is_open_price is True
+    assert entry.unit_price == 0.0
+    assert entry.pending is True
+    assert entry.line_total == 0.0
+
+    entry.unit_price = 3.25
+    assert entry.pending is False
+    assert entry.line_total == 3.25
 
 
 def test_add_product_same_product_creates_separate_rows():

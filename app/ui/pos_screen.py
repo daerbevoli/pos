@@ -45,6 +45,8 @@ from datetime import date
 ADMIN_CODE = "2060"
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
+TABS = 8
+
 
 class _TabState:
     """Snapshot of one V-tab slot's POS state."""
@@ -71,19 +73,19 @@ class POSScreen(QWidget):
         super().__init__()
         # id: V-tab slot (1-5) -> its saved _TabState snapshot; swapped in/out by
         # _save_tab_state()/_load_tab_state() whenever set_active_tab() fires.
-        self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, 6)}
-        self._active_tab = 1   # id: which V-tab slot (key into _tab_states) is currently on screen
-        self.cart             = self._tab_states[1].cart  # active tab's Cart; re-pointed on tab switch
-        self.sale_finished    = True   # whether the current ticket has been paid/frozen (vs. still being built)
-        self.is_invoice       = False  # whether the current sale is being issued as an invoice, not a receipt
-        self.client_id        = None   # id: DB Client.id attached to the current sale/invoice, set via _on_client_selected
-        self._frozen_breakdown = []    # cached payment split (cash/card/etc.) for the last finalized sale, for reprint/redisplay
-        self._frozen_change   = 0.0    # cached change-due amount for the last finalized sale
-        self._frozen_total    = 0.0    # cached grand total for the last finalized sale
-        self._row_to_entry    = []     # cart_table row -> cart.entries index (None for divider/summary rows)
-        self._current_sale_id = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
-        self.sale_ids         = []     # id: all of today's completed sale ids, chronological, shared across tabs
-        self.sales            = -1     # index into sale_ids: browse cursor / index of most recent sale
+        self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, TABS)}
+        self._active_tab        = 1   # id: which V-tab slot (key into _tab_states) is currently on screen
+        self.cart               = self._tab_states[1].cart  # active tab's Cart; re-pointed on tab switch
+        self.sale_finished      = True   # whether the current ticket has been paid/frozen (vs. still being built)
+        self.is_invoice         = False  # whether the current sale is being issued as an invoice, not a receipt
+        self.client_id          = None   # id: DB Client.id attached to the current sale/invoice, set via _on_client_selected
+        self._frozen_breakdown  = []    # cached payment split (cash/card/etc.) for the last finalized sale, for reprint/redisplay
+        self._frozen_change     = 0.0    # cached change-due amount for the last finalized sale
+        self._frozen_total      = 0.0    # cached grand total for the last finalized sale
+        self._row_to_entry      = []     # cart_table row -> cart.entries index (None for divider/summary rows)
+        self._current_sale_id   = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
+        self.sale_ids           = []     # id: all of today's completed sale ids, chronological, shared across tabs
+        self.sales              = -1     # index into sale_ids: browse cursor / index of most recent sale
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
         self._barcode_entry_quantity = None   # quantity typed before the Barcode button was pressed, if any
 
@@ -558,13 +560,13 @@ class POSScreen(QWidget):
             for pid in product_ids:
                 product = ProductService.get_by_id(session, pid)
                 if product and product.is_active:
-                    rows.append((product.id, product.name, product.price))
+                    rows.append((product.id, product.name, product.price, product.is_open_price))
 
         self._active_shortcut_id = shortcut_id
         self._clear_slots()
-        for i, (pid, name, price) in enumerate(rows[: self.SLOT_COUNT]):
+        for i, (pid, name, price, is_open_price) in enumerate(rows[: self.SLOT_COUNT]):
             btn = self.slot_buttons[i]
-            btn.setText(f"{name}\n{self.currency}{price:.2f}")
+            btn.setText(f"{name}")
             btn.setEnabled(True)
             self._apply_button_role(btn, "productBtn")
             self._slot_product_ids[i] = pid
@@ -621,24 +623,26 @@ class POSScreen(QWidget):
         self.combined_input.insert(text)
 
     def _selected_pending_item(self):
-        """The selected CartItem if it's a weight/volume item still awaiting
-        its amount (quantity is None), otherwise None."""
+        """The selected CartItem if it's still awaiting an amount — a
+        weight/volume item awaiting its quantity, or an open-price item
+        awaiting its price — otherwise None."""
         idx = self._get_selected_entry_index()
         if idx is None:
             return None
         entry = self.cart.entries[idx]
-        if isinstance(entry, CartItem) and entry.quantity is None:
+        if isinstance(entry, CartItem) and entry.pending:
             return entry
         return None
 
 
     def _handle_pending_or_guards(self) -> bool:
         """Shared entry point for barcode input: unfreezes a finished sale,
-        blocks while a partial payment is outstanding, and if a weight/volume
-        item is awaiting its amount, consumes combined_input as that amount
-        instead of a new scan. Returns True if the caller should return
-        immediately (blocked, or handled as a pending amount); False if it
-        should continue resolving a new barcode."""
+        blocks while a partial payment is outstanding, and if the selected
+        item is still awaiting an amount (a weight/volume item's quantity,
+        or an open-price item's price), consumes combined_input as that
+        amount instead of a new scan. Returns True if the caller should
+        return immediately (blocked, or handled as a pending amount); False
+        if it should continue resolving a new barcode."""
         if self.sale_finished:
             self._unfreeze_ticket()
         if self._guard_payment_in_progress():
@@ -658,7 +662,10 @@ class POSScreen(QWidget):
             if amount is None or amount <= 0:
                 self._show_overlay("Enter an valid amount", kind="info")
                 return True
-            pending_entry.quantity = amount
+            if pending_entry.quantity is None:
+                pending_entry.quantity = amount
+            else:
+                pending_entry.unit_price = amount
             self.combined_input.clear()
             self._refresh_cart(select_last=True)
             return True
@@ -971,7 +978,7 @@ class POSScreen(QWidget):
                 r = self.cart_table.rowCount()
                 self.cart_table.insertRow(r)
                 self._row_to_entry.append(i)
-                pending = entry.quantity is None
+                pending = entry.pending
                 is_weight = entry.unit in WEIGHT_UNITS
                 if is_weight:
                     qty_text = "?" if pending else ("-1" if entry.quantity < 0 else "1")
@@ -980,6 +987,11 @@ class POSScreen(QWidget):
                     price_text = f"{entry.unit_price:.2f}/{entry.unit}"
                     # A weight article is one line item, not `quantity` kg of them.
                     count_contribution = 0 if pending else (-1 if entry.quantity < 0 else 1)
+                elif entry.is_open_price:
+                    qty_text = f"{entry.quantity:g}"
+                    name_text = entry.product_name
+                    price_text = "?" if pending else f"{entry.unit_price:.2f}"
+                    count_contribution = entry.quantity or 0
                 else:
                     qty_text = "?" if pending else f"{entry.quantity:g}"
                     name_text = entry.product_name
@@ -1113,7 +1125,7 @@ class POSScreen(QWidget):
         if not any(isinstance(e, CartItem) for e in self.cart.entries):
             self._show_overlay("Add items before payment", kind="error")
             return
-        if any(isinstance(e, CartItem) and e.quantity is None for e in self.cart.entries):
+        if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
             self._show_overlay("Fill in the amount for pending items first", kind="error")
             return
 

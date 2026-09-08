@@ -63,6 +63,11 @@ def _run_migrations():
             conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_amount REAL DEFAULT 0.0")
             conn.commit()
 
+        product_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(products)")}
+        if product_cols and "is_open_price" not in product_cols:  # empty means the table doesn't exist yet
+            conn.exec_driver_sql("ALTER TABLE products ADD COLUMN is_open_price BOOLEAN NOT NULL DEFAULT 0")
+            conn.commit()
+
         client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
         if "ux_clients_name_active" not in client_indexes:
             _migrate_clients_to_partial_unique(conn)

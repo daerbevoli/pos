@@ -35,7 +35,8 @@ class Product(Base):
     barcode = Column(String(50), unique=True, nullable=True, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    price = Column(Float, nullable=False)
+    price = Column(Float, nullable=False)                # Ignored at sale time when is_open_price is set
+    is_open_price = Column(Boolean, nullable=False, default=False)  # True = price is typed in per sale (loose food, cigarettes, ...)
     stock_quantity = Column(Integer, default=0)           # Float to support weight-based items
     min_stock_level = Column(Integer, default=5)          # Alert threshold
     unit = Column(String(20), default="pcs")            # pcs, kg, liter, etc.

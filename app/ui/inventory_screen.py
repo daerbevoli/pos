@@ -40,7 +40,7 @@ from app.constants import (
 )
 
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
-ARTICLE_CSV_FIELDS = ["barcode", "name", "price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
+ARTICLE_CSV_FIELDS = ["barcode", "name", "price", "is_open_price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
 
 
 class ArticleDetailPanel(QFrame):
@@ -64,6 +64,7 @@ class ArticleDetailPanel(QFrame):
         self._category_id = None
         self._category_name = "— No Category —"
         self._categories: list[tuple[str, int]] = []
+        self._is_open_price = False
 
         self._active_row: FieldRow | None = None
         self._active_picker: str | None = None
@@ -118,6 +119,8 @@ class ArticleDetailPanel(QFrame):
         self.price.setDecimals(2)
         self.price.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
+        self.price_mode_display = PickerDisplay("Fixed price")
+
         self.tax_display = PickerDisplay(f"{self._tax_val} %")
 
         self.stock = QDoubleSpinBox()
@@ -140,6 +143,7 @@ class ArticleDetailPanel(QFrame):
             ("Barcode",          self.barcode,          None),
             ("Name *",           self.name,             None),
             ("Selling Price *",  self.price,            None),
+            ("Price Mode",       self.price_mode_display, "price_mode"),
             ("Tax *",              self.tax_display,    "tax"),
             ("Stock Quantity",   self.stock,            None),
             ("Min Stock Level",  self.min_stock,        None),
@@ -288,7 +292,7 @@ class ArticleDetailPanel(QFrame):
             self._picker_title.setText("")
             return
 
-        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category"}
+        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category", "price_mode": "Price Mode"}
         self._picker_title.setText(titles[picker_key])
 
         if picker_key == "tax":
@@ -299,6 +303,10 @@ class ArticleDetailPanel(QFrame):
             options = [(v, v) for v in ["pcs", "kg", "g", "liter", "ml", "pack", "box"]]
             current = self._unit_val
             cols = 4
+        elif picker_key == "price_mode":
+            options = [("Fixed price", False), ("Open (enter at sale)", True)]
+            current = self._is_open_price
+            cols = 2
         else:  # category
             options = [("— None —", None)] + [(name, cid) for name, cid in self._categories]
             current = self._category_id
@@ -325,6 +333,10 @@ class ArticleDetailPanel(QFrame):
             self._category_id = value
             self._category_name = label
             self.category_display.setText(label)
+        elif self._active_picker == "price_mode":
+            self._is_open_price = value
+            self.price_mode_display.setText(label)
+            self._sync_price_enabled()
         self._refresh_picker(self._active_picker)
 
     # ── Mode switching ───────────────────────────────────────────────────
@@ -346,6 +358,14 @@ class ArticleDetailPanel(QFrame):
                 self._active_row.set_active(False)
                 self._active_row = None
             self.parent_screen._show_table_page()
+        self._edit_enabled = enabled
+        self._sync_price_enabled()
+
+    def _sync_price_enabled(self):
+        """Price is meaningless (and left at 0) for an open-price product —
+        it's typed in per sale instead, so the field is locked while
+        editing one."""
+        self.price.setEnabled(self._edit_enabled and not self._is_open_price)
 
     def _reset_fields_to_placeholder(self):
         self.barcode.clear()
@@ -362,6 +382,8 @@ class ArticleDetailPanel(QFrame):
         self._category_id = None
         self._category_name = "—"
         self.category_display.setText(self._category_name)
+        self._is_open_price = False
+        self.price_mode_display.setText("Fixed price")
 
     def _populate_fields(self, product):
         self.barcode.setText(product.barcode or "")
@@ -369,6 +391,9 @@ class ArticleDetailPanel(QFrame):
         self.price.setValue(product.price)
         self.stock.setValue(product.stock_quantity)
         self.min_stock.setValue(product.min_stock_level)
+
+        self._is_open_price = getattr(product, "is_open_price", False)
+        self.price_mode_display.setText("Open (enter at sale)" if self._is_open_price else "Fixed price")
 
         self._tax_val = str(product.tax)
         self.tax_display.setText(f"{product.tax} %")
@@ -438,7 +463,7 @@ class ArticleDetailPanel(QFrame):
         if not self.name.text().strip():
             self._show_overlay("Product name is required.")
             return False
-        if self.price.value() <= 0:
+        if not self._is_open_price and self.price.value() <= 0:
             self._show_overlay("Price must be greater than 0.")
             return False
         return True
@@ -447,7 +472,8 @@ class ArticleDetailPanel(QFrame):
         return {
             "barcode": self.barcode.text().strip() or None,
             "name": self.name.text().strip(),
-            "price": self.price.value(),
+            "price": 0.0 if self._is_open_price else self.price.value(),
+            "is_open_price": self._is_open_price,
             "tax": int(self._tax_val),
             "stock_quantity": self.stock.value(),
             "min_stock_level": self.min_stock.value(),
@@ -518,12 +544,15 @@ class ArticleDetailPanel(QFrame):
         with get_session() as session:
             product = ProductService.get_by_id(session, self.current_product_id)
             if not product:
-                self._show_overlay("Product not found.", title="Print label failed", kind="error")
+                self._show_overlay("Product not found.", kind="error")
+                return
+            if product.is_open_price:
+                self._show_overlay("Open-price products have no fixed price to print.", kind="error")
                 return
             try:
                 LabelPrinterService.print_product_label(session, product)
             except PrinterError as e:
-                self._show_overlay(str(e), title="Print label failed", kind="error")
+                self._show_overlay(str(e), kind="error")
                 return
 
     def _on_search_key(self):
@@ -545,6 +574,7 @@ class ArticleDetailPanel(QFrame):
                         "barcode": p.barcode or "",
                         "name": p.name,
                         "price": p.price,
+                        "is_open_price": "1" if p.is_open_price else "0",
                         "tax": p.tax,
                         "unit": p.unit,
                         "stock_quantity": p.stock_quantity,
@@ -552,7 +582,7 @@ class ArticleDetailPanel(QFrame):
                         "category": p.category.name if p.category else "",
                     })
 
-        self._show_overlay(f"Exported {len(products)} article(s).", title="Export complete")
+        self._show_overlay(f"Exported {len(products)} article(s).")
 
     def _on_import(self):
         path = ""
@@ -562,7 +592,7 @@ class ArticleDetailPanel(QFrame):
         if not path:
             return
         if not path.endswith((".csv", ".txt")):
-            self._show_overlay("Only csv and txt files allowed to import", title="Import failed", kind="error")
+            self._show_overlay("Only csv and txt files allowed to import", kind="error")
             return
         try:
             with open(path, "r", newline="", encoding="utf-8") as f:
@@ -570,11 +600,11 @@ class ArticleDetailPanel(QFrame):
         except UnicodeDecodeError:
             self._show_overlay(
                 "This file isn't valid UTF-8 text. Re-save it as UTF-8 CSV and try again.",
-                title="Import failed", kind="error",
+                kind="error"
             )
             return
         except (OSError, csv.Error) as e:
-            self._show_overlay(f"Couldn't read file: {e}", title="Import failed", kind="error")
+            self._show_overlay(f"Couldn't read file: {e}", kind="error")
             return
 
         self._load_categories()
@@ -600,6 +630,9 @@ class ArticleDetailPanel(QFrame):
                         price = float(row.get("price") or 0)
                     except ValueError:
                         price = 0.0
+                    is_open_price = (row.get("is_open_price") or "").strip().lower() in ("1", "true", "yes")
+                    if is_open_price:
+                        price = 0.0
                     try:
                         tax = int(float(row.get("tax") or 0))
                     except (ValueError, OverflowError):
@@ -617,6 +650,7 @@ class ArticleDetailPanel(QFrame):
                         barcode=barcode,
                         name=name,
                         price=price,
+                        is_open_price=is_open_price,
                         tax=tax,
                         unit=(row.get("unit") or "pcs").strip(),
                         stock_quantity=stock_quantity,
@@ -636,8 +670,8 @@ class ArticleDetailPanel(QFrame):
         self.parent_screen.refresh()
         self._show_overlay(f"{added} added, {skipped} skipped.", title="Import complete")
 
-    def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
-        self.overlay.show_message(message, title=title, kind=kind)
+    def _show_overlay(self, message: str, kind: str = "info"):
+        self.overlay.show_message(message, kind=kind)
 
 
 class InventoryScreen(QWidget):
@@ -768,7 +802,8 @@ class InventoryScreen(QWidget):
             self.table.setItem(row, 1, QTableWidgetItem(p.name))
             cat_name = p.category.name if p.category else "—"
             self.table.setItem(row, 2, QTableWidgetItem(cat_name))
-            self.table.setItem(row, 3, QTableWidgetItem(f"€{p.price:.2f}"))
+            price_text = "Open price" if p.is_open_price else f"€{p.price:.2f}"
+            self.table.setItem(row, 3, QTableWidgetItem(price_text))
             self.table.setItem(row, 4, QTableWidgetItem(f"{p.tax}"))
             stock_item = QTableWidgetItem(f"{p.stock_quantity:.1f}")
             if p.is_low_stock:

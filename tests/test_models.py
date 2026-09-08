@@ -44,6 +44,16 @@ def test_product_defaults(db_session):
     assert p.tax == 21
     assert p.is_active is True
     assert p.barcode is None
+    assert p.is_open_price is False
+
+
+def test_product_open_price(db_session):
+    p = Product(name="Loose Snacks", price=0.0, is_open_price=True)
+    db_session.add(p)
+    db_session.commit()
+
+    assert p.is_open_price is True
+    assert p.price == 0.0
 
 
 @pytest.mark.parametrize(

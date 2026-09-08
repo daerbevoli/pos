@@ -28,6 +28,14 @@ class CartItem(ReceiptEntry):
     is_reversal: bool = False  # True for a line that reverses an earlier line on a reopened sale
     has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
     reversal_of: "CartItem | None" = None  # the original line this reverses; live-session only, not persisted
+    is_open_price: bool = False  # True = unit_price is typed in per sale rather than fixed on the product
+
+    @property
+    def pending(self) -> bool:
+        """True while this line still needs an amount typed in before it can
+        be paid: a weight/volume item awaiting its quantity, or an
+        open-price item awaiting its price."""
+        return self.quantity is None or (self.is_open_price and self.unit_price == 0.0)
 
     @property
     def line_total(self):
@@ -95,6 +103,9 @@ class Cart:
         )
 
     def add_product(self, product, quantity: float | None = 1):
+        # product.price is 0.0 for an open-price product — the CartItem
+        # starts pending (see CartItem.pending) and unit_price is filled in
+        # later the same way a weight item's quantity is.
         # Pending (amount not yet entered) items always get their own row —
         # merging would leave a stale value once the amount is filled in.
         if quantity is not None:
@@ -116,6 +127,7 @@ class Cart:
                 quantity=quantity,
                 unit=product.unit,
                 tax_rate=product.tax,
+                is_open_price=product.is_open_price,
             )
         )
 
@@ -155,6 +167,7 @@ class Cart:
                     "discount": entry.discount,
                     "is_reversal": entry.is_reversal,
                     "has_reversal": entry.has_reversal,
+                    "is_open_price": entry.is_open_price,
                 })
             elif isinstance(entry, DiscountEntry):
                 data.append({"type": "discount", "amount": entry.amount, "label": entry.label})
@@ -180,6 +193,7 @@ class Cart:
                     discount=raw.get("discount", 0.0),
                     is_reversal=raw.get("is_reversal", False),
                     has_reversal=raw.get("has_reversal", False),
+                    is_open_price=raw.get("is_open_price", False),
                 ))
             elif kind == "discount":
                 entries.append(DiscountEntry(amount=raw["amount"], label=raw["label"]))
