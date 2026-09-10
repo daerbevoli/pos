@@ -139,6 +139,7 @@ class MainWindow(QMainWindow):
 
         self.client_screen.selected_client.connect(self.pos_screen.set_client)
         self.inventory_screen.selected_product.connect(self.pos_screen.add_product_by_id)
+        self.reports_screen.sale_selected.connect(self.pos_screen.show_sale)
 
         root.addWidget(self.stack, stretch=1)
 

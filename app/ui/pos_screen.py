@@ -84,8 +84,7 @@ class POSScreen(QWidget):
         self._frozen_total      = 0.0    # cached grand total for the last finalized sale
         self._row_to_entry      = []     # cart_table row -> cart.entries index (None for divider/summary rows)
         self._current_sale_id   = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
-        self.sale_ids           = []     # id: all of today's completed sale ids, chronological, shared across tabs
-        self.sales              = -1     # index into sale_ids: browse cursor / index of most recent sale
+        self.sale_ids           = []     # id: all of today's completed sale ids, chronological, shared across tabs — see _browse_index()
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
         self._barcode_entry_quantity = None   # quantity typed before the Barcode button was pressed, if any
 
@@ -146,7 +145,6 @@ class POSScreen(QWidget):
             settings = SettingsService.get_all(session)
             sales = SalesService.get_sales_for_date(session, date.today())
             self.sale_ids = [sale.id for sale in reversed(sales)]  # oldest first
-            self.sales = len(self.sale_ids) - 1  # cursor starts on the most recent sale
         self.currency     = settings.get("currency_symbol", "€")
         self.cashier_name = settings.get("cashier_name", "Cashier")
 
@@ -283,7 +281,7 @@ class POSScreen(QWidget):
         self.btn_right         = FunctionButton("→", "navBtn")
         self.btn_reopen        = FunctionButton("Reopen\nticket", "secFunc")
         self.btn_print_ticket  = FunctionButton("Print\nticket", "secFunc")
-        self.btn_print_invoice = FunctionButton("Print\ninvoice", "secFunc")
+        self.btn_send_invoice  = FunctionButton("Send\ninvoice", "secFunc")
         self.btn_error         = FunctionButton("Error", "errorBtn")
 
         self.btn_up    = FunctionButton("↑", "navBtn")
@@ -309,7 +307,7 @@ class POSScreen(QWidget):
         layout_map = [
             (self.btn_left, 0, 0, 1, 1), (self.btn_right, 0, 1, 1, 1),
             (self.btn_reopen, 0, 2, 1, 1), (self.btn_print_ticket, 0, 3, 1, 1),
-            (self.btn_print_invoice, 0, 4, 1, 1), (self.btn_error, 0, 5, 1, 1),
+            (self.btn_send_invoice, 0, 4, 1, 1), (self.btn_error, 0, 5, 1, 1),
 
             (self.btn_up, 1, 0, 1, 1), (self.btn_plus, 1, 1, 1, 1),
             (self.btn_clear, 1, 5, 1, 1),
@@ -375,7 +373,7 @@ class POSScreen(QWidget):
         self.btn_right.clicked.connect(self._next_sale)
 
         self.btn_print_ticket.clicked.connect(self._print_ticket)
-        self.btn_print_invoice.clicked.connect(self._print_invoice)
+        self.btn_send_invoice.clicked.connect(self._send_invoice)
         self.btn_drawer.clicked.connect(self._open_drawer)
 
         self.btn_barcode.clicked.connect(self._open_barcode)
@@ -762,7 +760,6 @@ class POSScreen(QWidget):
             self._refresh_cart()
             self._tick_time(override=True)
             self.sale_finished = True
-            self.sales = len(self.sale_ids)
         self.cart_table.setFocus()
 
     def _remove_selected(self):
@@ -1199,7 +1196,6 @@ class POSScreen(QWidget):
                 )
                 self._current_sale_id = invoice.sale_id
                 self.sale_ids.append(invoice.sale_id)
-                self.sales = len(self.sale_ids) - 1
             else:
                 sale = SalesService.finalize_sale(
                     session,
@@ -1210,7 +1206,6 @@ class POSScreen(QWidget):
                 )
                 self._current_sale_id = sale.id
                 self.sale_ids.append(sale.id)
-                self.sales = len(self.sale_ids) - 1
         change = max(0.0, total_tendered - total)
         self._freeze_ticket(breakdown, change)
 
@@ -1253,7 +1248,8 @@ class POSScreen(QWidget):
         self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
         self._refresh_cart()
-        self.ticket_total_lbl.setVisible(True)
+        self.ticket_total_lbl.show()
+        self.client_label.hide()
         self.cart_table.setFocus()
 
     def _reopen_ticket(self):
@@ -1265,9 +1261,9 @@ class POSScreen(QWidget):
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
-            if sale.invoice is not None:
+            if sale.invoice is not None and sale.invoice.sent_at is not None:
                 self._show_overlay(
-                    "This sale has already been invoiced and can't be edited.\n"
+                    "This invoice has already been sent and can't be edited.\n"
                     "Issue a credit note for corrections instead", kind="error",
                 )
                 return
@@ -1284,6 +1280,15 @@ class POSScreen(QWidget):
         self.ticket_total_lbl.setVisible(True)
         self.cart_table.setFocus()
 
+    def _browse_index(self) -> int:
+        """This tab's position within today's sale_ids (oldest-first), for
+        _previous_sale()/_next_sale() to step by ±1. len(sale_ids) — one
+        past the end — if the currently shown sale isn't in today's list:
+        a blank/new ticket, or a sale from a previous day."""
+        if self._current_sale_id in self.sale_ids:
+            return self.sale_ids.index(self._current_sale_id)
+        return len(self.sale_ids)
+
     def _previous_sale(self):
         if self.cart_active and not self.sale_finished:
             self._show_overlay("Sale active", kind="info")
@@ -1291,10 +1296,11 @@ class POSScreen(QWidget):
         if not self.sale_ids:
             self._show_overlay("No earlier sales", kind="info")
             return
-        if self.sales <= 0:
+        idx = self._browse_index()
+        if idx <= 0:
             self._show_overlay("No earlier sales", kind="info")
             return
-        self._show_sale_at(self.sales - 1)
+        self._show_sale_at(self.sale_ids[idx - 1])
         self.cart_table.setFocus()
 
     def _next_sale(self):
@@ -1304,15 +1310,18 @@ class POSScreen(QWidget):
         if not self.sale_finished:
             self._show_overlay("No later sales", kind="info")
             return
-        if self.sales >= len(self.sale_ids) - 1:
+        idx = self._browse_index()
+        if idx >= len(self.sale_ids) - 1:
             self._show_overlay("No later sales", kind="info")
             return
-        self._show_sale_at(self.sales + 1)
+        self._show_sale_at(self.sale_ids[idx + 1])
         self.cart_table.setFocus()
 
-    def _show_sale_at(self, index: int):
-        self.sales = index
-        self._current_sale_id = self.sale_ids[self.sales]
+    def _show_sale_at(self, sale_id: int):
+        """Loads the given Sale (by id, not position) into the ticket view —
+        used both by prev/next browsing and by anything jumping straight to
+        a specific sale (e.g. ReportsScreen.sale_selected -> show_sale())."""
+        self._current_sale_id = sale_id
 
         with get_session() as session:
             sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
@@ -1354,19 +1363,32 @@ class POSScreen(QWidget):
             except PrinterError as e:
                 self._show_overlay(str(e), kind="error")
 
-    def _print_invoice(self):
+    def _send_invoice(self):
+        """Transmits the invoice (Peppol) and locks it: SalesService.update_sale()
+        refuses to touch a sale once its invoice.sent_at is set, so this is the
+        point of no return — corrections after this go through a credit note."""
         if self._current_sale_id is None:
-            self._show_overlay("No ticket to print", kind="error")
+            self._show_overlay("No ticket to send", kind="error")
             return
         with get_session() as session:
             sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
             if not sale or not sale.invoice:
                 self._show_overlay("This sale has no invoice", kind="error")
                 return
-            try:
-                ReceiptService.print_invoice(session, sale.invoice)
-            except PrinterError as e:
-                self._show_overlay(str(e), kind="error")
+            if sale.invoice.sent_at is not None:
+                sent_str = sale.invoice.sent_at.strftime("%d-%m-%Y %H:%M")
+                self._show_overlay(f"Already sent {sent_str}", kind="info")
+                return
+            if QMessageBox.question(
+                self, "Send invoice",
+                "Send this invoice? It can no longer be edited afterward — "
+                "corrections need a credit note.",
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            # TODO: transmit sale.invoice through the Peppol access point here.
+            # mark_invoice_sent() only records that it went out; it doesn't send it.
+            SalesService.mark_invoice_sent(session, self._current_sale_id)
+        self._show_overlay("Invoice sent", kind="info")
 
     def _open_drawer(self):
         with get_session() as session:
@@ -1481,3 +1503,6 @@ class POSScreen(QWidget):
             self._show_overlay("Only Admin", kind="error")
             return
         self.navigate.emit(signal)
+
+    def show_sale(self, sale_id: int):
+        self._show_sale_at(sale_id)

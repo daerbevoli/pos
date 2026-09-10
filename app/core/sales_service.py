@@ -3,7 +3,7 @@ Sales Service
 Handles checkout, sale creation, and sales history.
 """
 import json
-from datetime import date
+from datetime import date, datetime
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -313,6 +313,8 @@ class SalesService:
         sale = session.query(Sale).filter_by(id=sale_id).first()
         if not sale:
             raise ValueError(f"Sale {sale_id} not found.")
+        if sale.invoice is not None and sale.invoice.sent_at is not None:
+            raise ValueError("This invoice has already been sent and can no longer be edited.")
 
         # Restore stock from the old line items before replacing them.
         for old_item in sale.items:
@@ -371,9 +373,34 @@ class SalesService:
             )
 
         sale.tax_amount = round(total_tax, 2)
+
+        # Not-yet-sent invoice: keep its frozen snapshot in step with the
+        # edit instead of letting it go stale (see the comment on
+        # Invoice.issued_at) — a sent one was already rejected above.
+        if sale.invoice is not None:
+            sale.invoice.total_amount = sale.total_amount
+            sale.invoice.tax_amount = sale.tax_amount
+            sale.invoice.final_amount = sale.final_amount
+            sale.invoice.line_items_snapshot = cart.to_snapshot()
+
         session.commit()
         session.refresh(sale)
         return sale
+
+    @staticmethod
+    def mark_invoice_sent(session: Session, sale_id: int) -> Invoice:
+        """Locks an invoice once it's been transmitted: after this, the
+        sale can no longer be reopened/edited (see update_sale above) and
+        corrections must go through a credit note instead."""
+        sale = session.query(Sale).filter_by(id=sale_id).first()
+        if not sale or not sale.invoice:
+            raise ValueError(f"Sale {sale_id} has no invoice.")
+        if sale.invoice.sent_at is not None:
+            return sale.invoice
+        sale.invoice.sent_at = datetime.now()
+        session.commit()
+        session.refresh(sale.invoice)
+        return sale.invoice
 
     @staticmethod
     def void_sale(session: Session, sale_id: int, notes: str = None) -> bool:

@@ -528,9 +528,10 @@ def test_reopen_ticket_noop_when_not_finished(screen):
     assert screen._current_sale_id is None
 
 
-def test_reopen_ticket_blocked_once_invoiced(screen):
-    """An issued invoice must stay immutable — reopening the sale it came
-    from (to overwrite its line items via update_sale) has to be refused."""
+def test_reopen_ticket_allowed_when_invoice_not_sent(screen):
+    """An invoice is editable right up until it's actually sent — reopening
+    the sale it came from must be allowed while invoice.sent_at is still
+    None (see SalesService.mark_invoice_sent)."""
     with get_session() as session:
         client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
         client_id = client.id
@@ -540,7 +541,33 @@ def test_reopen_ticket_blocked_once_invoiced(screen):
     _scan(screen, barcode)
     screen._open_payment("cash")
     sale_id = screen._current_sale_id
+
+    screen._reopen_ticket()
+
+    assert screen.sale_finished is False  # reopened successfully
+    assert screen._current_sale_id == sale_id
+    with get_session() as session:
+        sale = session.query(Sale).filter_by(id=sale_id).first()
+        assert sale.invoice is not None
+        assert sale.invoice.sent_at is None
+
+
+def test_reopen_ticket_blocked_once_invoice_sent(screen):
+    """Once SalesService.mark_invoice_sent() has locked the invoice, the
+    sale it came from must stay immutable — reopening is refused."""
+    with get_session() as session:
+        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
+        client_id = client.id
+    pid, barcode, _ = _add_product(barcode="reopen4", price=5.0)
+
+    screen.set_client(client_id, "Acme")
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    sale_id = screen._current_sale_id
     assert screen.sale_finished is True
+
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, sale_id)
 
     screen._reopen_ticket()
 
@@ -550,6 +577,7 @@ def test_reopen_ticket_blocked_once_invoiced(screen):
     with get_session() as session:
         sale = session.query(Sale).filter_by(id=sale_id).first()
         assert sale.invoice is not None
+        assert sale.invoice.sent_at is not None
         assert sale.status == "completed"  # untouched by the refused reopen
 
 
@@ -701,6 +729,46 @@ def test_previous_sale_loads_earlier_sale(screen):
 
     assert screen._current_sale_id == first_sale_id
     assert screen.cart.entries[0].product_barcode == "nav2"
+
+
+def test_previous_then_next_returns_to_the_same_sale(screen):
+    """_browse_index() derives position from _current_sale_id on demand
+    rather than a maintained cursor — stepping back and forth must still
+    land on the sale you started from."""
+    pid, barcode, _ = _add_product(barcode="nav5", price=5.0)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+
+    screen._clear_cart(override=True)
+    pid2, barcode2, _ = _add_product(barcode="nav5b", price=6.0)
+    _scan(screen, barcode2)
+    screen._open_payment("cash")
+    second_sale_id = screen._current_sale_id
+
+    screen._previous_sale()  # steps to the first of the two sales above
+    screen._next_sale()      # and back
+
+    assert screen._current_sale_id == second_sale_id
+
+
+def test_show_sale_jumps_directly_to_sale_by_id(screen):
+    """show_sale() takes a Sale.id (e.g. from ReportsScreen.sale_selected),
+    not a table row or list position — it must load exactly that sale
+    regardless of where it sits in sale_ids."""
+    pid, barcode, _ = _add_product(barcode="nav6", price=5.0)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    target_sale_id = screen._current_sale_id
+
+    screen._clear_cart(override=True)
+    pid2, barcode2, _ = _add_product(barcode="nav7", price=9.0)
+    _scan(screen, barcode2)
+    screen._open_payment("cash")
+
+    screen.show_sale(target_sale_id)
+
+    assert screen._current_sale_id == target_sale_id
+    assert screen.cart.entries[0].product_barcode == "nav6"
 
 
 def test_browsing_blocked_while_sale_active(screen):

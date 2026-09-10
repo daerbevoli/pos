@@ -220,3 +220,25 @@ def test_confirm_emits_navigate_signal(screen, qtbot):
     assert blocker.args == [0]
 
 
+def test_display_sale_emits_the_row_actual_sale_id(screen, qtbot):
+    """sale_selected must carry the double-clicked row's own Sale.id, not
+    the row's table position — regression test for a bug where the POS
+    side reinterpreted a row index as a position in a different, oldest-
+    first, today-only list."""
+    with get_session() as session:
+        product = _make_product(session, price=10.0)
+    older = _finalize_sale(product, quantity=1)
+    newer = _finalize_sale(product, quantity=1)
+
+    screen._load_report()
+    assert screen.sales_table.rowCount() == 2
+
+    for row, expected_id in screen._sales_row_ids.items():
+        screen.sales_table.setCurrentCell(row, 0)
+        with qtbot.waitSignal(screen.sale_selected, timeout=1000) as blocker:
+            screen._display_sale()
+        assert blocker.args == [expected_id]
+
+    assert {older.id, newer.id} == set(screen._sales_row_ids.values())
+
+

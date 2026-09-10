@@ -80,6 +80,7 @@ def _run_migrations():
         if invoice_cols:  # empty means the table doesn't exist yet — create_all() will make it current
             new_invoice_columns = {
                 "issued_at": "DATETIME",
+                "sent_at": "DATETIME",
                 "client_name": "TEXT",
                 "client_vat_number": "TEXT",
                 "client_address": "TEXT",

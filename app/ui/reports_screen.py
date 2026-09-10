@@ -25,6 +25,7 @@ class ReportsScreen(QWidget):
 
 
     navigate = pyqtSignal(int)
+    sale_selected = pyqtSignal(int)  # emits the DB Sale.id of the double-clicked row, not its table position
 
     def __init__(self):
         super().__init__()
@@ -120,6 +121,7 @@ class ReportsScreen(QWidget):
         layout.addWidget(cards_group)
 
         # ── Sales table ───────────────────────────────────────────────────────
+        self._sales_row_ids: dict[int, int] = {}  # table row -> DB Sale.id, rebuilt each _load_report()
         self.sales_table = QTableWidget(0, 7)
         self.sales_table.setObjectName("reportTable")
         self.sales_table.setHorizontalHeaderLabels([
@@ -135,6 +137,9 @@ class ReportsScreen(QWidget):
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.sales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        self.sales_table.itemDoubleClicked.connect(lambda _: self._display_sale())
+
 
         layout.addWidget(self.sales_table, stretch=1)
 
@@ -227,10 +232,12 @@ class ReportsScreen(QWidget):
             self.card_card._value_label.setText(f"{payment_totals.get('card', 0.0):.2f}")
 
             self.sales_table.setRowCount(0)
+            self._sales_row_ids = {}
 
             for sale in sales:
                 row = self.sales_table.rowCount()
                 self.sales_table.insertRow(row)
+                self._sales_row_ids[row] = sale.id
                 display_number = sale.invoice.invoice_number if sale.invoice else sale.sale_number
                 self.sales_table.setItem(row, 0, QTableWidgetItem(display_number))
                 self.sales_table.setItem(row, 1, QTableWidgetItem(
@@ -316,4 +323,11 @@ class ReportsScreen(QWidget):
                 table_item.show()
             else:
                 table_item.hide()
+
+    def _display_sale(self):
+        row = self.sales_table.currentRow()
+        sale_id = self._sales_row_ids.get(row)
+        if sale_id is not None:
+            self.sale_selected.emit(sale_id)
+        self.navigate.emit(0)
 

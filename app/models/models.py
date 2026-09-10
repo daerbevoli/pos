@@ -66,7 +66,7 @@ class Sale(Base):
     total_amount = Column(Float, nullable=False)
     tax_amount = Column(Float, default=0.0)
     final_amount = Column(Float, nullable=False)
-    payment_method = Column(Enum("cash", "card", name="payment_method"), default="cash")
+    payment_method = Column(String(20), default="cash")
     amount_tendered = Column(Float, nullable=True)     # Cash given by customer
     change_given = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
@@ -190,12 +190,15 @@ class Invoice(Base):
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     invoice_number = Column(String, unique=True)
 
-    # Snapshot of billing-relevant data as of the moment the invoice was
-    # issued. Deliberately duplicated from Client/Sale rather than read live
-    # through the relationships below, so the legal document this row
-    # represents can never change after the fact — even if the client is
-    # later renamed/deactivated or the underlying sale is edited/reopened.
+    # Snapshot of billing-relevant data, duplicated from Client/Sale rather
+    # than read live through the relationships below. Kept in sync by
+    # SalesService.update_sale() while the invoice is still editable
+    # (sent_at is None) — reopening the ticket and re-paying it re-derives
+    # these; see POSScreen._reopen_ticket(). Once sent_at is set the
+    # document is transmitted (Peppol) and must never change again — that's
+    # the point of freezing it here instead of deriving it live.
     issued_at = Column(DateTime, default=datetime.now)
+    sent_at = Column(DateTime, nullable=True)  # None = still editable; set once transmitted, after which it's locked
     client_name = Column(String, nullable=False)
     client_vat_number = Column(String, nullable=False)
     client_address = Column(String, nullable=False)

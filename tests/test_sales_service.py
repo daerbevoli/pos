@@ -281,6 +281,82 @@ def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
     assert invoice.client_vat_number == "V-ORIG"
 
 
+# ── Invoice send/lock lifecycle ──────────────────────────────────────────
+
+def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
+    """An invoice is editable until it's sent: reopening/overwriting the
+    sale (update_sale) must re-derive the invoice's frozen snapshot fields
+    rather than leave them stale."""
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    product = _make_product(db_session, price=10.0, tax=21)
+
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+    sale_id = invoice.sale_id
+
+    SalesService.update_sale(db_session, sale_id, _cart_with(_item_for(product, quantity=3)))
+
+    db_session.refresh(invoice)
+    assert invoice.total_amount == 30.0
+    assert invoice.final_amount == 30.0
+    snapshot = json.loads(invoice.line_items_snapshot)
+    assert snapshot[0]["quantity"] == 3
+
+
+def test_mark_invoice_sent_sets_timestamp(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    product = _make_product(db_session)
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+    assert invoice.sent_at is None
+
+    sent = SalesService.mark_invoice_sent(db_session, invoice.sale_id)
+
+    assert sent.sent_at is not None
+
+
+def test_mark_invoice_sent_is_idempotent(db_session):
+    """Calling it again after the invoice is already sent must not re-stamp
+    (and, once real Peppol transmission is wired in, must not re-send)."""
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    product = _make_product(db_session)
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+
+    first = SalesService.mark_invoice_sent(db_session, invoice.sale_id)
+    second = SalesService.mark_invoice_sent(db_session, invoice.sale_id)
+
+    assert second.sent_at == first.sent_at
+
+
+def test_mark_invoice_sent_missing_invoice_raises(db_session):
+    product = _make_product(db_session)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    with pytest.raises(ValueError):
+        SalesService.mark_invoice_sent(db_session, sale.id)
+
+
+def test_update_sale_refuses_once_invoice_sent(db_session):
+    """The hard lock: update_sale() must reject edits once mark_invoice_sent()
+    has been called, even if a caller bypasses the UI's own reopen guard."""
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    product = _make_product(db_session)
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+    SalesService.mark_invoice_sent(db_session, invoice.sale_id)
+
+    with pytest.raises(ValueError):
+        SalesService.update_sale(db_session, invoice.sale_id, _cart_with(_item_for(product, quantity=2)))
+
+
 # ── Reports / queries ────────────────────────────────────────────────────
 
 def test_get_sales_for_date_filters_by_date_and_status(db_session):
