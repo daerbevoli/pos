@@ -20,7 +20,7 @@ BUTTON_HEIGHT_XL = 54
 
 # Table row heights
 ROW_HEIGHT_COMPACT = 30
-ROW_HEIGHT = 44
+ROW_HEIGHT = 30
 ROW_HEIGHT_LARGE = 50
 
 # Main window chrome

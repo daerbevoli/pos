@@ -234,6 +234,9 @@ class ReportsScreen(QWidget):
             self.sales_table.setRowCount(0)
             self._sales_row_ids = {}
 
+            inv_sent_font = QFont()
+            inv_sent_font.setBold(True)
+
             for sale in sales:
                 row = self.sales_table.rowCount()
                 self.sales_table.insertRow(row)
@@ -254,6 +257,11 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
                 self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
                 self.sales_table.setItem(row, 6, QTableWidgetItem(f"{sale.final_amount:.2f}"))
+
+                if sale.invoice is not None and sale.invoice.sent_at is not None:
+                    for col in range(self.sales_table.columnCount()):
+                        self.sales_table.item(row, col).setFont(inv_sent_font)
+
                 self.sales_table.setRowHeight(row, ROW_HEIGHT)
 
             self.vat_table.setRowCount(0)

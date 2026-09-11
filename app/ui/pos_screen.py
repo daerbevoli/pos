@@ -1263,8 +1263,7 @@ class POSScreen(QWidget):
                 return
             if sale.invoice is not None and sale.invoice.sent_at is not None:
                 self._show_overlay(
-                    "This invoice has already been sent and can't be edited.\n"
-                    "Issue a credit note for corrections instead", kind="error",
+                    "This invoice had alreasy been sent", kind="error",
                 )
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
@@ -1318,9 +1317,9 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def _show_sale_at(self, sale_id: int):
-        """Loads the given Sale (by id, not position) into the ticket view —
+        """Loads the given Sale by id into the ticket view —
         used both by prev/next browsing and by anything jumping straight to
-        a specific sale (e.g. ReportsScreen.sale_selected -> show_sale())."""
+        a specific sale"""
         self._current_sale_id = sale_id
 
         with get_session() as session:
@@ -1381,8 +1380,7 @@ class POSScreen(QWidget):
                 return
             if QMessageBox.question(
                 self, "Send invoice",
-                "Send this invoice? It can no longer be edited afterward — "
-                "corrections need a credit note.",
+                "Send this invoice?",
             ) != QMessageBox.StandardButton.Yes:
                 return
             # TODO: transmit sale.invoice through the Peppol access point here.
