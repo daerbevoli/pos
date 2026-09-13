@@ -3,7 +3,6 @@ Supermarket POS - Entry Point
 """
 import sys
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
 from app.core.database import init_db
 from app.ui.main_window import MainWindow
 from app.utils.error_handling import setup_logging, install_excepthook

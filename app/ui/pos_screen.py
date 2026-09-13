@@ -1182,6 +1182,7 @@ class POSScreen(QWidget):
                     payment_method=final_method,
                     amount_tendered=total_tendered,
                     payment_breakdown=breakdown,
+
                 )
                 self._current_sale_id = sale.id
             elif self.is_invoice:
@@ -1383,8 +1384,7 @@ class POSScreen(QWidget):
                 "Send this invoice?",
             ) != QMessageBox.StandardButton.Yes:
                 return
-            # TODO: transmit sale.invoice through the Peppol access point here.
-            # mark_invoice_sent() only records that it went out; it doesn't send it.
+            # TODO: transmit sale.invoice through the Peppol
             SalesService.mark_invoice_sent(session, self._current_sale_id)
         self._show_overlay("Invoice sent", kind="info")
 

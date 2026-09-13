@@ -55,6 +55,10 @@ def _run_migrations():
             conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN payment_breakdown TEXT")
             conn.commit()
 
+        if "updated_at" not in sales_cols:
+            conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN updated_at DATETIME")
+            conn.commit()
+
         sale_item_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sale_items)")}
         if "tax_rate" not in sale_item_cols:
             conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_rate INTEGER DEFAULT 0")
@@ -81,6 +85,7 @@ def _run_migrations():
             new_invoice_columns = {
                 "issued_at": "DATETIME",
                 "sent_at": "DATETIME",
+                "updated_at": "DATETIME",
                 "client_name": "TEXT",
                 "client_vat_number": "TEXT",
                 "client_address": "TEXT",

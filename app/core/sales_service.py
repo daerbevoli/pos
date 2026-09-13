@@ -300,6 +300,7 @@ class SalesService:
         amount_tendered: float = None,
         notes: str = None,
         payment_breakdown: list[dict] = None,
+        update_time: datetime = None,
     ) -> Sale:
         """
         Overwrite an existing completed sale with an edited cart, in place.
@@ -373,6 +374,8 @@ class SalesService:
             )
 
         sale.tax_amount = round(total_tax, 2)
+        sale.updated_at = datetime.now()
+        print(sale.updated_at.strftime("%d/%m/%Y %H:%M"))
 
         # Not-yet-sent invoice: keep its frozen snapshot in step with the
         # edit instead of letting it go stale (see the comment on

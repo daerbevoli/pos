@@ -122,10 +122,10 @@ class ReportsScreen(QWidget):
 
         # ── Sales table ───────────────────────────────────────────────────────
         self._sales_row_ids: dict[int, int] = {}  # table row -> DB Sale.id, rebuilt each _load_report()
-        self.sales_table = QTableWidget(0, 7)
+        self.sales_table = QTableWidget(0, 8)
         self.sales_table.setObjectName("reportTable")
         self.sales_table.setHorizontalHeaderLabels([
-            "Sale #", "Date & Time", "Client name", "VAT number", "Items", "Payment", "Total"
+            "Sale #", "Date & Time", "Client name", "VAT number", "Items", "Payment", "Total", "Updated"
         ])
         self.sales_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -134,6 +134,7 @@ class ReportsScreen(QWidget):
         self.sales_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.sales_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.verticalHeader().setVisible(False)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.sales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -257,6 +258,9 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
                 self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
                 self.sales_table.setItem(row, 6, QTableWidgetItem(f"{sale.final_amount:.2f}"))
+                print(sale.sale_number, sale.updated_at)
+                updated_at = "/" if sale.updated_at is None else sale.updated_at.strftime("%d/%m/%Y %H:%M")
+                self.sales_table.setItem(row, 7, QTableWidgetItem(updated_at))
 
                 if sale.invoice is not None and sale.invoice.sent_at is not None:
                     for col in range(self.sales_table.columnCount()):
