@@ -1,5 +1,6 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget
+from sqlalchemy.orm import Session
 
 from app.constants import (
     BUTTON_HEIGHT,
@@ -9,6 +10,7 @@ from app.constants import (
     MARGIN_NONE,
     SPACING_MD,
 )
+from app.core.settings_service import SettingsService
 
 
 class TicketTable(QTableWidget):

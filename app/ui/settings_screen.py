@@ -4,7 +4,7 @@ Store info, receipt printer, label printer configuration.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog, QGridLayout,
+    QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog,
     QListWidget, QListWidgetItem
 )
 from PyQt6.QtGui import QPixmap
@@ -13,7 +13,6 @@ from app.core.database import get_session
 from app.core.label_service import LabelPrinterService
 from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
-from app.core.sales_service import SalesService
 from app.core.settings_service import SettingsService
 from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
 from app.ui.dialogs.category_dialog import CategoryDialog
@@ -51,8 +50,9 @@ class SettingsScreen(QWidget):
 
         self.store_name = QLineEdit()
         self.store_address = QLineEdit()
+        self.store_vat = QLineEdit()
         self.store_phone = QLineEdit()
-        self.vat_number = QLineEdit()
+        self.store_email = QLineEdit()
         self.currency = QLineEdit()
         self.currency.setPlaceholderText("e.g. €")
         self.receipt_footer = QLineEdit()
@@ -72,7 +72,8 @@ class SettingsScreen(QWidget):
         store_form.addRow("Store Name:", self.store_name)
         store_form.addRow("Address:", self.store_address)
         store_form.addRow("Phone:", self.store_phone)
-        store_form.addRow("Vat Number:", self.vat_number)
+        store_form.addRow("Vat Number:", self.store_vat)
+        store_form.addRow("Email: ", self.store_email)
         store_form.addRow("Currency Symbol:", self.currency)
         store_form.addRow("Receipt Footer:", self.receipt_footer)
         store_form.addRow("Logo:", logo_row)
@@ -194,8 +195,9 @@ class SettingsScreen(QWidget):
             s = SettingsService.get_all(session)
         self.store_name.setText(s.get("store_name", ""))
         self.store_address.setText(s.get("store_address", ""))
+        self.store_vat.setText(s.get("store_vat", ""))
         self.store_phone.setText(s.get("store_phone", ""))
-        self.vat_number.setText(s.get("vat_number", ""))
+        self.store_email.setText(s.get("store_email", ""))
         self.currency.setText(s.get("currency_symbol", "€"))
         self.receipt_footer.setText(s.get("receipt_footer", ""))
         self.receipt_vendor.setText(s.get("receipt_printer_vendor_id", ""))
@@ -341,7 +343,8 @@ class SettingsScreen(QWidget):
             SettingsService.set(session, "store_name", self.store_name.text())
             SettingsService.set(session, "store_address", self.store_address.text())
             SettingsService.set(session, "store_phone", self.store_phone.text())
-            SettingsService.set(session, "vat_number", self.vat_number.text())
+            SettingsService.set(session, "store_vat", self.store_vat.text())
+            SettingsService.set(session, "store_email", self.store_email.text())
             SettingsService.set(session, "currency_symbol", self.currency.text())
             SettingsService.set(session, "receipt_footer", self.receipt_footer.text())
             SettingsService.set(session, "receipt_printer_vendor_id", self.receipt_vendor.text())

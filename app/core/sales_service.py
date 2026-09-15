@@ -3,12 +3,19 @@ Sales Service
 Handles checkout, sale creation, and sales history.
 """
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from dataclasses import dataclass, field
+
+from _pytest._py import path
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+
+from app.core.settings_service import SettingsService
 from app.models.models import Sale, SaleItem, Product, Invoice, Client
 from app.core.product_service import ProductService
+from app.core.settings_service import get_store_data
+from app.utils import utils
+
 
 @dataclass
 class ReceiptEntry:
@@ -209,6 +216,45 @@ def calc_tax(line_total: float, tax_rate: int) -> float:
     return round(line_total - line_total / (1 + tax_rate / 100), 2)
 
 
+def invoice_lines(invoice: Invoice):
+    cart = Cart.from_snapshot(invoice.line_items_snapshot)
+    lines = []
+    for entry in cart.entries:
+        if not isinstance(entry, CartItem) or entry.quantity is None:
+            continue
+        tax = calc_tax(entry.line_total, entry.tax_rate)
+        lines.append((entry.product_name, entry.quantity,
+                      # TODO: show unit price correctly
+                      str(entry.unit_price) + "/" + entry.unit, entry.tax_rate,
+                      entry.line_total, round(entry.line_total - tax, 2)))
+    return lines
+
+
+def generate_invoice(session: Session, invoice: Invoice) -> dict:
+    invoice_data = {
+        "inv_num": invoice.invoice_number,
+        "inv_date": invoice.issued_at.strftime("%Y-%m-%d"),
+        "due_date": (invoice.issued_at + timedelta(weeks=1)).strftime("%Y-%m-%d")
+    }
+    sender = get_store_data(session)
+    invoice_data["from"] = sender
+    receiver = {
+        "name": invoice.client_name,
+        "address": invoice.client_address,
+        "vat": invoice.client_vat_number,
+        "phone": invoice.client.phone,
+        "email": invoice.client.email
+    }
+    invoice_data["to"] = receiver
+    items = invoice_lines(invoice)
+    invoice_data["items"] = items
+    invoice_data["notes"] =  "Payment due within 30 days. Late payments subject to 1.5% monthly interest."
+
+    return invoice_data
+
+    # ── Reports / Queries ─────────────────────────────────────────────────────
+
+
 class SalesService:
 
     @staticmethod
@@ -300,7 +346,6 @@ class SalesService:
         amount_tendered: float = None,
         notes: str = None,
         payment_breakdown: list[dict] = None,
-        update_time: datetime = None,
     ) -> Sale:
         """
         Overwrite an existing completed sale with an edited cart, in place.
@@ -515,8 +560,6 @@ class SalesService:
         session.refresh(sale)
         session.refresh(invoice)
         return invoice
-
-    # ── Reports / Queries ─────────────────────────────────────────────────────
 
     @staticmethod
     def get_sales_for_date(session: Session, target_date: date) -> list[Sale]:

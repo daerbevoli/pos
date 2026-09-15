@@ -28,3 +28,13 @@ class SettingsService:
     def get_all(session: Session) -> dict:
         rows = session.query(Settings).all()
         return {r.key: r.value for r in rows}
+
+def get_store_data(session: Session):
+    settings = SettingsService.get_all(session)
+    return {
+        "name": settings.get("store_name"),
+        "address": settings.get("store_address"),
+        "vat": settings.get("store_vat"),
+        "phone": settings.get("store_phone"),
+        "email": settings.get("store_email")
+    }

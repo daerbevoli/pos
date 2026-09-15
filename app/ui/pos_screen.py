@@ -18,7 +18,7 @@ from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService
+from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, generate_invoice
 from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService
 from app.core.receipt_service import PrinterError, ReceiptService
@@ -750,6 +750,7 @@ class POSScreen(QWidget):
             self.input_stack.setCurrentIndex(0)
             self.ticket_total_lbl.setVisible(False)
             self.cart.clear()
+            self.combined_input.setPlaceholderText("")
             self.combined_input.clear()
             self.client_label.setVisible(False)
             self.client_id = None
@@ -1363,6 +1364,7 @@ class POSScreen(QWidget):
             except PrinterError as e:
                 self._show_overlay(str(e), kind="error")
 
+
     def _send_invoice(self):
         """Transmits the invoice (Peppol) and locks it: SalesService.update_sale()
         refuses to touch a sale once its invoice.sent_at is set, so this is the
@@ -1370,22 +1372,31 @@ class POSScreen(QWidget):
         if self._current_sale_id is None:
             self._show_overlay("No ticket to send", kind="error")
             return
+
+
         with get_session() as session:
-            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
-            if not sale or not sale.invoice:
+            invoice = session.query(Invoice).filter_by(
+                sale_id=self._current_sale_id
+            ).first()
+
+            if not invoice:
                 self._show_overlay("This sale has no invoice", kind="error")
                 return
-            if sale.invoice.sent_at is not None:
-                sent_str = sale.invoice.sent_at.strftime("%d-%m-%Y %H:%M")
-                self._show_overlay(f"Already sent {sent_str}", kind="info")
+
+            if invoice.sent_at is not None:
+                sent_str = invoice.sent_at.strftime("%d-%m-%Y %H:%M")
+                self._show_overlay(f"Already sent at {sent_str}", kind="info")
                 return
+
             if QMessageBox.question(
                 self, "Send invoice",
                 "Send this invoice?",
             ) != QMessageBox.StandardButton.Yes:
                 return
-            # TODO: transmit sale.invoice through the Peppol
-            SalesService.mark_invoice_sent(session, self._current_sale_id)
+
+            invoice_data = generate_invoice(session=session, invoice=invoice)
+            print(invoice_data)
+            # SalesService.mark_invoice_sent(session, self._current_sale_id)
         self._show_overlay("Invoice sent", kind="info")
 
     def _open_drawer(self):
