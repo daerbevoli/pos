@@ -5,17 +5,12 @@ Handles checkout, sale creation, and sales history.
 import json
 from datetime import date, datetime, timedelta
 from dataclasses import dataclass, field
-
-from _pytest._py import path
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.core.settings_service import SettingsService
-from app.models.models import Sale, SaleItem, Product, Invoice, Client
+from app.models.models import Sale, SaleItem, Invoice, Client
 from app.core.product_service import ProductService
 from app.core.settings_service import get_store_data
-from app.utils import utils
-
 
 @dataclass
 class ReceiptEntry:
@@ -223,9 +218,10 @@ def invoice_lines(invoice: Invoice):
         if not isinstance(entry, CartItem) or entry.quantity is None:
             continue
         tax = calc_tax(entry.line_total, entry.tax_rate)
+        unit_price_inv = str(entry.unit_price) + " / " + entry.unit if entry.unit in {"kg", "g"} else entry.unit_price
         lines.append((entry.product_name, entry.quantity,
                       # TODO: show unit price correctly
-                      str(entry.unit_price) + "/" + entry.unit, entry.tax_rate,
+                      unit_price_inv, entry.tax_rate,
                       entry.line_total, round(entry.line_total - tax, 2)))
     return lines
 

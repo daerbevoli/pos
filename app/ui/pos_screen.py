@@ -1394,7 +1394,7 @@ class POSScreen(QWidget):
             ) != QMessageBox.StandardButton.Yes:
                 return
 
-            invoice_data = generate_invoice(session=session, invoice=invoice)
+            invoice_data = generate_invoice_data(session=session, invoice=invoice)
             print(invoice_data)
             # SalesService.mark_invoice_sent(session, self._current_sale_id)
         self._show_overlay("Invoice sent", kind="info")
