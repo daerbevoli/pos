@@ -5,7 +5,7 @@ All business logic for managing products and stock.
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem
+from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo
 from app.core.database import get_session
 
 
@@ -197,6 +197,80 @@ class ProductService:
             {Product.category_id: None}, synchronize_session=False
         )
         session.delete(cat)
+        session.commit()
+        return True
+
+    # ── Promos ────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def get_all_promos(session: Session) -> list[type[Promo]]:
+        return session.query(Promo).order_by(Promo.name).all()
+
+    @staticmethod
+    def _promo_by_name(session: Session, name: str) -> Promo | None:
+        """Case-insensitive lookup so 'New Year Promo' and 'new year promo' are the same promo."""
+        return (
+            session.query(Promo)
+            .filter(func.lower(Promo.name) == name.strip().lower())
+            .first()
+        )
+
+    @staticmethod
+    def create_promo(
+        session: Session, name: str, discount_type: str = "percent",
+        discount_value: float = 0.0, is_active: bool = True,
+    ) -> Promo | None:
+        """Create a promo. Returns None if the name is blank or already taken."""
+        name = name.strip()
+        if not name or ProductService._promo_by_name(session, name):
+            return None
+        promo = Promo(name=name, discount_type=discount_type, discount_value=discount_value, is_active=is_active)
+        session.add(promo)
+        session.commit()
+        session.refresh(promo)
+        return promo
+
+    @staticmethod
+    def update_promo(
+        session: Session, promo_id: int, name: str, discount_type: str,
+        discount_value: float, is_active: bool,
+    ) -> Promo | None:
+        """
+        Update an existing promo. Returns None if it doesn't exist, the new
+        name is blank, or the name is already used by another promo.
+        """
+        name = name.strip()
+        if not name:
+            return None
+        promo = session.query(Promo).filter_by(id=promo_id).first()
+        if not promo:
+            return None
+        clash = (
+            session.query(Promo)
+            .filter(func.lower(Promo.name) == name.lower(), Promo.id != promo_id)
+            .first()
+        )
+        if clash:
+            return None
+        promo.name = name
+        promo.discount_type = discount_type
+        promo.discount_value = discount_value
+        promo.is_active = is_active
+        session.commit()
+        session.refresh(promo)
+        return promo
+
+    @staticmethod
+    def delete_promo(session: Session, promo_id: int) -> bool:
+        """Delete a promo. Any products using it are left without a promo
+        (promo_id set to NULL). Returns False if it doesn't exist."""
+        promo = session.query(Promo).filter_by(id=promo_id).first()
+        if not promo:
+            return False
+        session.query(Product).filter_by(promo_id=promo_id).update(
+            {Product.promo_id: None}, synchronize_session=False
+        )
+        session.delete(promo)
         session.commit()
         return True
 
