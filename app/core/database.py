@@ -71,6 +71,9 @@ def _run_migrations():
         if product_cols and "is_open_price" not in product_cols:  # empty means the table doesn't exist yet
             conn.exec_driver_sql("ALTER TABLE products ADD COLUMN is_open_price BOOLEAN NOT NULL DEFAULT 0")
             conn.commit()
+        if product_cols and "promo_id" not in product_cols:
+            conn.exec_driver_sql("ALTER TABLE products ADD COLUMN promo_id INTEGER REFERENCES promos(id)")
+            conn.commit()
 
         client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
         if "ux_clients_name_active" not in client_indexes:

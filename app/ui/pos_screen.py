@@ -18,7 +18,8 @@ from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, generate_invoice
+from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, \
+    generate_invoice_data
 from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService
 from app.core.receipt_service import PrinterError, ReceiptService
@@ -664,6 +665,7 @@ class POSScreen(QWidget):
                 pending_entry.quantity = amount
             else:
                 pending_entry.unit_price = amount
+            self.cart.sync_promo_discounts()
             self.combined_input.clear()
             self._refresh_cart(select_last=True)
             return True
@@ -776,6 +778,14 @@ class POSScreen(QWidget):
         if idx is None:
             return
         entry = self.cart.entries[idx]
+        if isinstance(entry, DiscountEntry) and entry.is_promo:
+            # A promo's discount line is a child of the product line right
+            # before it (Cart.sync_promo_discounts() always places it there)
+            # — deleting the discount removes the product it belongs to,
+            # not just the discount on its own. Retarget and fall through to
+            # the same (reversal-aware) removal logic below.
+            idx -= 1
+            entry = self.cart.entries[idx]
         if self.payment_in_progress and not isinstance(entry, PaymentEntry):
             self._show_overlay("Finish or remove the pending payment first", kind="error")
             return
@@ -804,13 +814,20 @@ class POSScreen(QWidget):
                 discount=-entry.discount,
                 is_reversal=True,
                 reversal_of=entry,
+                # promo fields deliberately not copied — the reversal line
+                # doesn't need its own promo discount; sync_promo_discounts()
+                # drops the original line's discount now that has_reversal
+                # is set, so the promo line disappears rather than getting an
+                # offsetting entry next to it.
             ))
+            self.cart.sync_promo_discounts()
         else:
             if isinstance(entry, CartItem) and entry.is_reversal and entry.reversal_of is not None:
                 # Removing the reversal itself un-caps the original line
                 # so it can be reversed again.
                 entry.reversal_of.has_reversal = False
             self.cart.entries.pop(idx)
+            self.cart.sync_promo_discounts()
         self._refresh_cart(select_last=needs_reversal)
         self.cart_table.setFocus()
 
@@ -1019,7 +1036,7 @@ class POSScreen(QWidget):
                     QTableWidgetItem(""),
                     QTableWidgetItem(f"DISCOUNT  {entry.label}"),
                     QTableWidgetItem(""),
-                    QTableWidgetItem(f"-{entry.amount:.2f}"),
+                    QTableWidgetItem(f"{entry.line_total:.2f}"),
                 ]
                 for c, cell in enumerate(cells):
                     cell.setFont(font_bold)
@@ -1027,6 +1044,7 @@ class POSScreen(QWidget):
                     self.cart_table.setItem(r, c, cell)
                 self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
                 section_total += entry.line_total   # negative
+
             elif isinstance(entry, SubtotalMarker):
                 # Discount-only section: show net against the previous subtotal
                 display_total = section_total if section_has_items else prev_subtotal + section_total
@@ -1434,6 +1452,7 @@ class POSScreen(QWidget):
             if entry.unit in WEIGHT_UNITS:
                 return
             entry.quantity += 1
+            self.cart.sync_promo_discounts()
             self._refresh_cart()
 
     def _decrease_product(self):
@@ -1447,6 +1466,7 @@ class POSScreen(QWidget):
             if entry.unit in WEIGHT_UNITS:
                 return
             entry.quantity -= 1
+            self.cart.sync_promo_discounts()
             self._refresh_cart()
 
     def _read_amount_input(self) -> float | None:

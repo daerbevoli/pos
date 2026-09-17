@@ -31,6 +31,9 @@ class CartItem(ReceiptEntry):
     has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
     reversal_of: "CartItem | None" = None  # the original line this reverses; live-session only, not persisted
     is_open_price: bool = False  # True = unit_price is typed in per sale rather than fixed on the product
+    promo_name: str | None = None    # label of the Promo attached to the product when this line was added, if any
+    promo_type: str | None = None    # "percent" | "fixed" | None — copied from Promo.discount_type
+    promo_value: float = 0.0         # copied from Promo.discount_value
 
     @property
     def pending(self) -> bool:
@@ -40,13 +43,29 @@ class CartItem(ReceiptEntry):
         return self.quantity is None or (self.is_open_price and self.unit_price == 0.0)
 
     @property
+    def promo_discount(self) -> float:
+        """Discount contributed by the attached promo, recomputed live off the
+        current quantity/unit_price so it stays correct even for a pending
+        weight/open-price item whose amount is filled in after this line
+        already exists. Materialized into a real DiscountEntry by
+        Cart.sync_promo_discounts() — not folded into line_total, so the
+        item's own row keeps showing its full, undiscounted price and the
+        promo shows up as its own labeled line, same as a manual discount.
+        Sign-aware so a reversal line (negative quantity) yields a negative
+        discount that exactly undoes the original line's."""
+        if self.promo_type is None or self.quantity is None:
+            return 0.0
+        raw = self.unit_price * self.quantity
+        if self.promo_type == "percent":
+            return round(raw * self.promo_value / 100, 2)
+        fixed = self.promo_value * self.quantity
+        return round(min(fixed, raw), 2) if raw >= 0 else round(max(fixed, raw), 2)
+
+    @property
     def line_total(self):
         if self.quantity is None:
             return 0.0
         return round((self.unit_price * self.quantity) - self.discount, 2)
-
-
-
 
 @dataclass
 class SubtotalMarker(ReceiptEntry):
@@ -55,8 +74,9 @@ class SubtotalMarker(ReceiptEntry):
 
 @dataclass
 class DiscountEntry(ReceiptEntry):
-    amount: float   # always positive; the actual currency value deducted
-    label: str      # display string, e.g. "10%" or "€5.00"
+    amount: float   # positive = deducts; negative only for a promo entry undoing a reversed line's discount
+    label: str      # display string, e.g. "10%" or "€5.00" or a promo's name
+    is_promo: bool = False  # True = synthesized by Cart.sync_promo_discounts(), safe to drop and regenerate
 
     @property
     def line_total(self) -> float:
@@ -120,6 +140,7 @@ class Cart:
                     break
 
         # No matching item in the current section.
+        promo = product.promo if product.promo and product.promo.is_active else None
         self.entries.append(
             CartItem(
                 product_id=product.id,
@@ -130,9 +151,34 @@ class Cart:
                 unit=product.unit,
                 tax_rate=product.tax,
                 is_open_price=product.is_open_price,
+                promo_name=promo.name if promo else None,
+                promo_type=promo.discount_type if promo else None,
+                promo_value=promo.discount_value if promo else 0.0,
             )
         )
+        self.sync_promo_discounts()
 
+    def sync_promo_discounts(self):
+        """Rebuild every promo-driven DiscountEntry from scratch off each
+        CartItem's *current* promo_discount. Call this after anything that
+        could change a promo'd line's amount: add_product() already does,
+        but also after +/- quantity, filling in a pending weight/open-price
+        item's amount, reversing a line, or removing one — see callers in
+        pos_screen.py. Safe to call repeatedly: it drops every existing
+        is_promo entry first, so it never drifts or duplicates.
+
+        A line with has_reversal set is skipped — once a reopened ticket's
+        line has been voided by an (appended, negative-quantity) reversal,
+        its promo discount line disappears rather than getting a second,
+        offsetting entry next to it. The reversal line itself never carries
+        promo fields, so it wouldn't generate one anyway."""
+        self.entries = [e for e in self.entries if not (isinstance(e, DiscountEntry) and e.is_promo)]
+        result = []
+        for entry in self.entries:
+            result.append(entry)
+            if isinstance(entry, CartItem) and not entry.has_reversal and entry.promo_discount != 0:
+                result.append(DiscountEntry(amount=entry.promo_discount, label=entry.promo_name, is_promo=True))
+        self.entries = result
 
     def add_subtotal(self):
         self.entries.append(SubtotalMarker())
@@ -147,6 +193,7 @@ class Cart:
         for i, entry in enumerate(self.entries):
             if isinstance(entry, CartItem) and entry.product_id == product_id:
                 self.entries.pop(i)
+                self.sync_promo_discounts()
                 return
 
     def clear(self):
@@ -170,9 +217,15 @@ class Cart:
                     "is_reversal": entry.is_reversal,
                     "has_reversal": entry.has_reversal,
                     "is_open_price": entry.is_open_price,
+                    "promo_name": entry.promo_name,
+                    "promo_type": entry.promo_type,
+                    "promo_value": entry.promo_value,
                 })
             elif isinstance(entry, DiscountEntry):
-                data.append({"type": "discount", "amount": entry.amount, "label": entry.label})
+                data.append({
+                    "type": "discount", "amount": entry.amount, "label": entry.label,
+                    "is_promo": entry.is_promo,
+                })
             elif isinstance(entry, SubtotalMarker):
                 data.append({"type": "subtotal"})
         return json.dumps(data)
@@ -196,9 +249,14 @@ class Cart:
                     is_reversal=raw.get("is_reversal", False),
                     has_reversal=raw.get("has_reversal", False),
                     is_open_price=raw.get("is_open_price", False),
+                    promo_name=raw.get("promo_name"),
+                    promo_type=raw.get("promo_type"),
+                    promo_value=raw.get("promo_value", 0.0),
                 ))
             elif kind == "discount":
-                entries.append(DiscountEntry(amount=raw["amount"], label=raw["label"]))
+                entries.append(DiscountEntry(
+                    amount=raw["amount"], label=raw["label"], is_promo=raw.get("is_promo", False),
+                ))
             elif kind == "subtotal":
                 entries.append(SubtotalMarker())
         return cls(entries=entries)
@@ -211,22 +269,36 @@ def calc_tax(line_total: float, tax_rate: int) -> float:
     return round(line_total - line_total / (1 + tax_rate / 100), 2)
 
 
-def invoice_lines(invoice: Invoice):
+@dataclass
+class InvoiceLine:
+    product_name: str
+    quantity: float
+    unit_price: float
+    unit: str
+    tax_rate: int
+    line_total: float
+    line_total_excl_tax: float
+
+def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
     cart = Cart.from_snapshot(invoice.line_items_snapshot)
     lines = []
     for entry in cart.entries:
         if not isinstance(entry, CartItem) or entry.quantity is None:
             continue
         tax = calc_tax(entry.line_total, entry.tax_rate)
-        unit_price_inv = str(entry.unit_price) + " / " + entry.unit if entry.unit in {"kg", "g"} else entry.unit_price
-        lines.append((entry.product_name, entry.quantity,
-                      # TODO: show unit price correctly
-                      unit_price_inv, entry.tax_rate,
-                      entry.line_total, round(entry.line_total - tax, 2)))
+        lines.append(InvoiceLine(
+            product_name=entry.product_name,
+            quantity=entry.quantity,
+            unit_price=entry.unit_price,
+            unit=entry.unit,
+            tax_rate=entry.tax_rate,
+            line_total=entry.line_total,
+            line_total_excl_tax=round(entry.line_total - tax, 2),
+        ))
     return lines
 
 
-def generate_invoice(session: Session, invoice: Invoice) -> dict:
+def generate_invoice_data(session: Session, invoice: Invoice) -> dict:
     invoice_data = {
         "inv_num": invoice.invoice_number,
         "inv_date": invoice.issued_at.strftime("%Y-%m-%d"),
@@ -244,12 +316,11 @@ def generate_invoice(session: Session, invoice: Invoice) -> dict:
     invoice_data["to"] = receiver
     items = invoice_lines(invoice)
     invoice_data["items"] = items
-    invoice_data["notes"] =  "Payment due within 30 days. Late payments subject to 1.5% monthly interest."
+    invoice_data["notes"] = "Payment due within 30 days. Late payments subject to 1.5% monthly interest."
 
     return invoice_data
 
     # ── Reports / Queries ─────────────────────────────────────────────────────
-
 
 class SalesService:
 

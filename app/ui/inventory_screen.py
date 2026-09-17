@@ -64,6 +64,9 @@ class ArticleDetailPanel(QFrame):
         self._category_id = None
         self._category_name = "— No Category —"
         self._categories: list[tuple[str, int]] = []
+        self._promo_id = None
+        self._promo_name = "— No Promo —"
+        self._promos: list[tuple[str, int]] = []
         self._is_open_price = False
 
         self._active_row: FieldRow | None = None
@@ -73,6 +76,7 @@ class ArticleDetailPanel(QFrame):
 
         self.setObjectName("articleDetailPanel")
         self._load_categories()
+        self._load_promos()
         self._build_ui()
 
     # ── Setup ────────────────────────────────────────────────────────────
@@ -81,6 +85,21 @@ class ArticleDetailPanel(QFrame):
         with get_session() as session:
             cats = ProductService.get_all_categories(session)
             self._categories = [(c.name, c.id) for c in cats]
+
+    def _load_promos(self):
+        """Loads every promo (not just active ones) so a product already
+        assigned an inactive promo still shows/looks it up correctly — only
+        active ones are offered as new choices in the picker, see
+        _refresh_picker()."""
+        with get_session() as session:
+            promos = ProductService.get_all_promos(session)
+            self._promos = [(self._promo_label(p), p.id, p.is_active) for p in promos]
+
+    @staticmethod
+    def _promo_label(promo) -> str:
+        unit = "%" if promo.discount_type == "percent" else "€"
+        label = f"{promo.name} ({promo.discount_value:g}{unit})"
+        return label if promo.is_active else label + " (inactive)"
 
     def _build_ui(self):
         outer = QHBoxLayout(self)
@@ -138,6 +157,7 @@ class ArticleDetailPanel(QFrame):
 
         self.unit_display = PickerDisplay(self._unit_val)
         self.category_display = PickerDisplay(self._category_name)
+        self.promo_display = PickerDisplay(self._promo_name)
 
         rows_spec = [
             ("Barcode",          self.barcode,          None),
@@ -149,6 +169,7 @@ class ArticleDetailPanel(QFrame):
             ("Min Stock Level",  self.min_stock,        None),
             ("Unit *",             self.unit_display,   "unit"),
             ("Category",         self.category_display, "category"),
+            ("Promo",            self.promo_display,    "promo"),
         ]
 
         self._fields = []
@@ -292,7 +313,7 @@ class ArticleDetailPanel(QFrame):
             self._picker_title.setText("")
             return
 
-        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category", "price_mode": "Price Mode"}
+        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category", "price_mode": "Price Mode", "promo": "Promo"}
         self._picker_title.setText(titles[picker_key])
 
         if picker_key == "tax":
@@ -307,9 +328,19 @@ class ArticleDetailPanel(QFrame):
             options = [("Fixed price", False), ("Open (enter at sale)", True)]
             current = self._is_open_price
             cols = 2
-        else:  # category
+        elif picker_key == "category":
             options = [("— None —", None)] + [(name, cid) for name, cid in self._categories]
             current = self._category_id
+            cols = 3
+        else:  # promo
+            # Active promos are selectable; an already-assigned inactive one
+            # stays in the list (so it still shows as picked) but nothing
+            # inactive can be newly chosen.
+            options = [("— None —", None)] + [
+                (label, pid) for label, pid, active in self._promos
+                if active or pid == self._promo_id
+            ]
+            current = self._promo_id
             cols = 3
 
         for i, (label, value) in enumerate(options):
@@ -333,6 +364,10 @@ class ArticleDetailPanel(QFrame):
             self._category_id = value
             self._category_name = label
             self.category_display.setText(label)
+        elif self._active_picker == "promo":
+            self._promo_id = value
+            self._promo_name = label
+            self.promo_display.setText(label)
         elif self._active_picker == "price_mode":
             self._is_open_price = value
             self.price_mode_display.setText(label)
@@ -382,6 +417,9 @@ class ArticleDetailPanel(QFrame):
         self._category_id = None
         self._category_name = "—"
         self.category_display.setText(self._category_name)
+        self._promo_id = None
+        self._promo_name = "— No Promo —"
+        self.promo_display.setText(self._promo_name)
         self._is_open_price = False
         self.price_mode_display.setText("Fixed price")
 
@@ -410,6 +448,15 @@ class ArticleDetailPanel(QFrame):
                     break
         self.category_display.setText(self._category_name)
 
+        self._promo_id = product.promo_id
+        self._promo_name = "— No Promo —"
+        if product.promo_id:
+            for label, pid, _active in self._promos:
+                if pid == product.promo_id:
+                    self._promo_name = label
+                    break
+        self.promo_display.setText(self._promo_name)
+
         is_active = getattr(product, "is_active", True)
         self._active_status_label.setText("Active" if is_active else "Inactive")
 
@@ -437,6 +484,7 @@ class ArticleDetailPanel(QFrame):
         if self._mode != "display":
             return
         self._load_categories()
+        self._load_promos()
         self.current_product_id = None
         self._mode = "new"
         self._reset_fields_to_placeholder()
@@ -449,6 +497,7 @@ class ArticleDetailPanel(QFrame):
         if self.current_product_id is None or self._mode != "display":
             return
         self._load_categories()
+        self._load_promos()
         with get_session() as session:
             product = ProductService.get_by_id(session, self.current_product_id)
         if not product:
@@ -479,6 +528,7 @@ class ArticleDetailPanel(QFrame):
             "min_stock_level": self.min_stock.value(),
             "unit": self._unit_val,
             "category_id": self._category_id,
+            "promo_id": self._promo_id,
         }
 
     def _on_ok(self):

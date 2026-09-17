@@ -599,6 +599,49 @@ def test_removing_item_after_reopen_appends_reversal_line(screen):
     assert reversal.quantity == -1
 
 
+def test_remove_selected_on_promo_discount_removes_the_product_line(screen):
+    """Selecting the promo's DiscountEntry row (not the product row) and
+    deleting it removes the product line too — the discount isn't a
+    standalone thing you can drop while keeping the item."""
+    with get_session() as session:
+        promo = ProductService.create_promo(session, "New Year Promo", "percent", 15.0, True)
+        promo_id = promo.id
+    pid, barcode, _ = _add_product(barcode="promo1", price=10.0, promo_id=promo_id)
+    _scan(screen, barcode)
+    assert len(screen.cart.entries) == 2  # CartItem + its promo DiscountEntry
+
+    discount_idx = 1
+    screen.cart_table.selectRow(screen._row_to_entry.index(discount_idx))
+    screen._remove_selected()
+
+    assert screen.cart.entries == []
+
+
+def test_remove_selected_on_promo_discount_after_reopen_reverses_the_product_line(screen):
+    """Same, but on a reopened (already-paid) ticket: deleting the promo
+    discount row reverses the underlying product line, same as deleting the
+    product row itself would — and the discount line disappears rather than
+    getting an offsetting entry."""
+    with get_session() as session:
+        promo = ProductService.create_promo(session, "New Year Promo", "percent", 15.0, True)
+        promo_id = promo.id
+    pid, barcode, _ = _add_product(barcode="promo2", price=10.0, stock_quantity=50, promo_id=promo_id)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+    assert len(screen.cart.entries) == 2  # CartItem + its promo DiscountEntry
+
+    discount_idx = 1
+    screen.cart_table.selectRow(screen._row_to_entry.index(discount_idx))
+    screen._remove_selected()
+
+    assert len(screen.cart.entries) == 2  # original (voided) + reversal line — discount gone
+    original, reversal = screen.cart.entries
+    assert isinstance(original, CartItem) and original.has_reversal is True
+    assert isinstance(reversal, CartItem) and reversal.is_reversal is True
+    assert screen.cart.subtotal == 0.0
+
+
 def test_reversal_capped_at_one_per_line(screen):
     pid, barcode, _ = _add_product(barcode="rev2", price=5.0, stock_quantity=50)
     _scan(screen, barcode)

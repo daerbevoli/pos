@@ -28,6 +28,21 @@ class Category(Base):
         return f"<Category {self.name}>"
 
 
+class Promo(Base):
+    __tablename__ = "promos"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # shown as the discount label, e.g. "New Year Promo"
+    discount_type = Column(Enum("percent", "fixed", name="promo_discount_type"), default="percent", nullable=False)
+    discount_value = Column(Float, nullable=False)   # 15 for 15%, or a euro amount for "fixed"
+    is_active = Column(Boolean, default=True)
+
+    products = relationship("Product", back_populates="promo")
+
+    def __repr__(self):
+        return f"<Promo {self.name}>"
+
+
 class Product(Base):
     __tablename__ = "products"
 
@@ -42,11 +57,13 @@ class Product(Base):
     unit = Column(String(20), default="pcs")            # pcs, kg, liter, etc.
     tax = Column(Integer, nullable=False, default=21)    # 0, 6, 21 %
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    promo_id = Column(Integer, ForeignKey("promos.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     category = relationship("Category", back_populates="products")
+    promo = relationship("Promo", back_populates="products")
     sale_items = relationship("SaleItem", back_populates="product")
     stock_movements = relationship("StockMovement", back_populates="product")
 

@@ -12,7 +12,7 @@ from app.core.sales_service import (
 
 
 class _FakeProduct:
-    def __init__(self, id, name="Item", barcode="123", price=1.0, unit="pcs", tax=21, is_open_price=False):
+    def __init__(self, id, name="Item", barcode="123", price=1.0, unit="pcs", tax=21, is_open_price=False, promo=None):
         self.id = id
         self.name = name
         self.barcode = barcode
@@ -20,6 +20,15 @@ class _FakeProduct:
         self.unit = unit
         self.tax = tax
         self.is_open_price = is_open_price
+        self.promo = promo
+
+
+class _FakePromo:
+    def __init__(self, name="Promo", discount_type="percent", discount_value=10.0, is_active=True):
+        self.name = name
+        self.discount_type = discount_type
+        self.discount_value = discount_value
+        self.is_active = is_active
 
 
 # ── CartItem.line_total ──────────────────────────────────────────────────
@@ -42,6 +51,71 @@ def test_cart_item_line_total_none_quantity_is_zero():
 def test_cart_item_line_total_rounds_to_2dp():
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=0.1, quantity=3)
     assert item.line_total == 0.3
+
+
+# ── CartItem.promo_discount ──────────────────────────────────────────────
+
+def test_promo_discount_percent():
+    """promo_discount is no longer folded into line_total — it's
+    materialized as its own DiscountEntry by sync_promo_discounts(), so the
+    item's own line_total stays the full, undiscounted price."""
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=2,
+                     promo_type="percent", promo_value=15.0)
+    assert item.promo_discount == 3.0
+    assert item.line_total == 20.0
+
+
+def test_promo_discount_fixed():
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=2,
+                     promo_type="fixed", promo_value=1.5)
+    assert item.promo_discount == 3.0
+    assert item.line_total == 20.0
+
+
+def test_promo_discount_fixed_never_exceeds_line_total():
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=1.0, quantity=1,
+                     promo_type="fixed", promo_value=99.0)
+    assert item.promo_discount == 1.0
+    assert item.line_total == 1.0
+
+
+def test_promo_discount_fixed_reversal_line_is_sign_aware():
+    """A reversal line (negative quantity) with the same promo fields copied
+    onto it must produce a negative discount capped at the same magnitude,
+    so its DiscountEntry exactly undoes the original line's."""
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=1.0, quantity=-1,
+                     promo_type="fixed", promo_value=99.0)
+    assert item.promo_discount == -1.0
+
+
+def test_promo_discount_percent_reversal_line_is_negative():
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=-2,
+                     promo_type="percent", promo_value=15.0)
+    assert item.promo_discount == -3.0
+
+
+def test_promo_discount_none_when_no_promo():
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=2)
+    assert item.promo_discount == 0.0
+
+
+def test_promo_discount_zero_for_pending_item():
+    """A pending weight item has no quantity yet, so the promo can't be
+    priced until the amount is filled in — same as line_total."""
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=None,
+                     promo_type="percent", promo_value=15.0)
+    assert item.promo_discount == 0.0
+
+
+def test_promo_discount_recomputes_after_pending_quantity_is_filled_in():
+    """Regression guard: promo terms are set once at add_product() time, but
+    the discount itself must stay live off quantity so a pending weight item
+    still gets priced correctly once its amount is entered."""
+    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=None,
+                     promo_type="percent", promo_value=15.0)
+    item.quantity = 2
+    assert item.promo_discount == 3.0
+    assert item.line_total == 20.0
 
 
 # ── DiscountEntry ─────────────────────────────────────────────────────────
@@ -206,6 +280,167 @@ def test_add_product_different_products_do_not_merge():
     assert len(cart.entries) == 2
 
 
+def test_add_product_copies_active_promo_onto_the_line():
+    """add_product() copies the promo terms onto the CartItem AND — via
+    sync_promo_discounts() — materializes a labeled DiscountEntry right
+    after it, same as a manual discount."""
+    cart = Cart()
+    promo = _FakePromo(name="New Year Promo", discount_type="percent", discount_value=15.0)
+    product = _FakeProduct(id=1, name="Apple", price=10.0, promo=promo)
+    cart.add_product(product, quantity=2)
+
+    assert len(cart.entries) == 2
+    entry, discount = cart.entries
+    assert entry.promo_name == "New Year Promo"
+    assert entry.promo_type == "percent"
+    assert entry.promo_value == 15.0
+    assert entry.promo_discount == 3.0
+    assert entry.line_total == 20.0  # full price — the promo is the separate line below
+
+    assert isinstance(discount, DiscountEntry)
+    assert discount.is_promo is True
+    assert discount.label == "New Year Promo"
+    assert discount.amount == 3.0
+    assert discount.line_total == -3.0
+
+    assert cart.subtotal == 17.0  # 20.0 gross - 3.0 promo
+
+
+def test_add_product_ignores_inactive_promo():
+    cart = Cart()
+    promo = _FakePromo(is_active=False)
+    product = _FakeProduct(id=1, price=10.0, promo=promo)
+    cart.add_product(product, quantity=1)
+
+    assert len(cart.entries) == 1  # no DiscountEntry synthesized
+    entry = cart.entries[0]
+    assert entry.promo_name is None
+    assert entry.promo_discount == 0.0
+
+
+def test_add_product_no_promo_leaves_fields_unset():
+    cart = Cart()
+    product = _FakeProduct(id=1, price=10.0)
+    cart.add_product(product, quantity=1)
+
+    entry = cart.entries[0]
+    assert entry.promo_name is None
+    assert entry.promo_type is None
+    assert entry.promo_value == 0.0
+
+
+# ── Cart.sync_promo_discounts ────────────────────────────────────────────
+
+def test_sync_promo_discounts_scales_with_quantity_after_pending_fill_in():
+    """The exact scenario asked for: a promo'd weight item starts pending
+    (quantity unknown, so no discount yet), then once the amount is typed
+    in and sync_promo_discounts() is called, the DiscountEntry appears
+    with the correctly scaled amount."""
+    cart = Cart()
+    promo = _FakePromo(name="New Year Promo", discount_type="percent", discount_value=15.0)
+    product = _FakeProduct(id=1, unit="kg", price=10.0, promo=promo)
+    cart.add_product(product, quantity=None)
+
+    assert len(cart.entries) == 1  # pending — no discount amount to show yet
+
+    cart.entries[0].quantity = 2
+    cart.sync_promo_discounts()
+
+    assert len(cart.entries) == 2
+    item, discount = cart.entries
+    assert discount.amount == 3.0
+
+    # Bump the quantity again — the discount must scale up with it.
+    item.quantity = 4
+    cart.sync_promo_discounts()
+    assert len(cart.entries) == 2
+    assert cart.entries[1].amount == 6.0
+
+
+def test_sync_promo_discounts_does_not_duplicate_on_repeated_calls():
+    cart = Cart()
+    promo = _FakePromo(discount_type="percent", discount_value=10.0)
+    product = _FakeProduct(id=1, price=10.0, promo=promo)
+    cart.add_product(product, quantity=1)  # add_product() already syncs once
+
+    cart.sync_promo_discounts()
+    cart.sync_promo_discounts()
+
+    discounts = [e for e in cart.entries if isinstance(e, DiscountEntry)]
+    assert len(discounts) == 1
+
+
+def test_sync_promo_discounts_leaves_manual_discounts_alone():
+    cart = Cart()
+    promo = _FakePromo(discount_type="percent", discount_value=10.0)
+    product = _FakeProduct(id=1, price=10.0, promo=promo)
+    cart.add_product(product, quantity=1)
+    cart.entries.append(DiscountEntry(amount=1.0, label="Loyalty card"))
+
+    cart.sync_promo_discounts()
+
+    manual = [e for e in cart.entries if isinstance(e, DiscountEntry) and not e.is_promo]
+    promo_driven = [e for e in cart.entries if isinstance(e, DiscountEntry) and e.is_promo]
+    assert len(manual) == 1 and manual[0].label == "Loyalty card"
+    assert len(promo_driven) == 1
+
+
+def test_remove_item_drops_its_promo_discount_too():
+    cart = Cart()
+    promo = _FakePromo(discount_type="percent", discount_value=10.0)
+    product = _FakeProduct(id=1, price=10.0, promo=promo)
+    cart.add_product(product, quantity=1)
+    assert len(cart.entries) == 2
+
+    cart.remove_item(1)
+
+    assert cart.entries == []
+
+
+def test_sync_promo_discounts_scales_with_quantity_stepper():
+    """Mirrors pos_screen.py's +/- quantity stepper: quantity is mutated
+    directly on the existing CartItem (not through a pending fill-in),
+    followed by sync_promo_discounts()."""
+    cart = Cart()
+    promo = _FakePromo(discount_type="percent", discount_value=10.0)
+    product = _FakeProduct(id=1, price=10.0, promo=promo)
+    cart.add_product(product, quantity=1)
+    assert cart.entries[1].amount == 1.0
+
+    cart.entries[0].quantity += 1
+    cart.sync_promo_discounts()
+    assert cart.entries[1].amount == 2.0
+
+    cart.entries[0].quantity -= 1
+    cart.sync_promo_discounts()
+    assert cart.entries[1].amount == 1.0
+
+
+def test_sync_promo_discounts_drops_entry_for_a_reversed_line():
+    """Mirrors pos_screen.py's reversal flow on a reopened ticket: the
+    original line is flagged has_reversal and a negative-quantity reversal
+    line (without promo fields — it doesn't need its own) is appended.
+    The original's promo discount line should disappear rather than get an
+    offsetting entry next to it."""
+    cart = Cart()
+    promo = _FakePromo(discount_type="percent", discount_value=10.0)
+    product = _FakeProduct(id=1, price=10.0, promo=promo)
+    cart.add_product(product, quantity=2)
+    original = cart.entries[0]
+    assert len([e for e in cart.entries if isinstance(e, DiscountEntry)]) == 1
+
+    original.has_reversal = True
+    cart.entries.append(CartItem(
+        product_id=original.product_id, product_name=original.product_name,
+        product_barcode=original.product_barcode, unit_price=original.unit_price,
+        quantity=-original.quantity, unit=original.unit, is_reversal=True, reversal_of=original,
+    ))
+    cart.sync_promo_discounts()
+
+    assert [type(e).__name__ for e in cart.entries] == ["CartItem", "CartItem"]
+    assert cart.subtotal == 0.0  # gross fully cancels, no leftover discount
+
+
 # ── Subtotal markers ─────────────────────────────────────────────────────
 
 def test_add_subtotal_appends_marker():
@@ -268,8 +503,10 @@ def test_snapshot_round_trip_preserves_all_entry_types():
             product_id=1, product_name="Bread", product_barcode="111",
             unit_price=2.5, quantity=2, unit="pcs", tax_rate=6,
             discount=0.5, is_reversal=False, has_reversal=True,
+            promo_name="New Year Promo", promo_type="percent", promo_value=15.0,
         ),
         DiscountEntry(amount=1.0, label="1.00"),
+        DiscountEntry(amount=0.375, label="New Year Promo", is_promo=True),
         SubtotalMarker(),
     ])
 
@@ -277,7 +514,7 @@ def test_snapshot_round_trip_preserves_all_entry_types():
     assert isinstance(snapshot, str)
     restored = Cart.from_snapshot(snapshot)
 
-    assert len(restored.entries) == 3
+    assert len(restored.entries) == 4
     item = restored.entries[0]
     assert isinstance(item, CartItem)
     assert item.product_id == 1
@@ -287,13 +524,23 @@ def test_snapshot_round_trip_preserves_all_entry_types():
     assert item.tax_rate == 6
     assert item.discount == 0.5
     assert item.has_reversal is True
+    assert item.promo_name == "New Year Promo"
+    assert item.promo_type == "percent"
+    assert item.promo_value == 15.0
 
     discount = restored.entries[1]
     assert isinstance(discount, DiscountEntry)
     assert discount.amount == 1.0
     assert discount.label == "1.00"
+    assert discount.is_promo is False
 
-    assert isinstance(restored.entries[2], SubtotalMarker)
+    promo_discount = restored.entries[2]
+    assert isinstance(promo_discount, DiscountEntry)
+    assert promo_discount.amount == 0.375
+    assert promo_discount.label == "New Year Promo"
+    assert promo_discount.is_promo is True
+
+    assert isinstance(restored.entries[3], SubtotalMarker)
 
 
 def test_snapshot_round_trip_preserves_pending_quantity():

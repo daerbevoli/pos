@@ -177,9 +177,13 @@ def _print_line_items(printer, cart: Cart, currency: str):
         elif isinstance(entry, DiscountEntry):
             running_total += entry.line_total
             label_lines = _wrap_name(f"Discount {entry.label}")
+            # amount is usually positive (deducts); a promo entry undoing a
+            # reversed line's discount is negative (adds back) — sign comes
+            # from amount itself rather than a hardcoded "-" so both print right.
+            sign = "-" if entry.amount >= 0 else "+"
             printer.text(
                 f"{'':<{QTY_COL-1}} {label_lines[0]:<{NAME_COL}}{'':>{UNIT_COL}}"
-                f"{'-' + _money(currency, entry.amount):>{TOTAL_COL}}\n"
+                f"{sign + _money(currency, abs(entry.amount)):>{TOTAL_COL}}\n"
             )
             for extra in label_lines[1:]:
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")

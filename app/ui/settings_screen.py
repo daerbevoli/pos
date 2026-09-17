@@ -16,6 +16,7 @@ from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.settings_service import SettingsService
 from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
 from app.ui.dialogs.category_dialog import CategoryDialog
+from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
 from app.utils.utils import FunctionButton
 
@@ -154,6 +155,27 @@ class SettingsScreen(QWidget):
         cats_btn_layout.addWidget(btn_remove)
         right_col.addLayout(cats_btn_layout)
 
+        # ── Promos ─────────────────────────────────────────────────
+        promos_group = QGroupBox("Promos")
+        promos_layout = QVBoxLayout(promos_group)
+        self.promos_list = QListWidget()
+        self.promos_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
+        self.promos_list.itemDoubleClicked.connect(lambda _: self._on_edit_promo())
+        promos_layout.addWidget(self.promos_list)
+        right_col.addWidget(promos_group)
+        self._reload_promos()
+        btn_add_promo = FunctionButton("Add")
+        btn_add_promo.clicked.connect(self._on_add_promo)
+        btn_edit_promo = FunctionButton("Edit")
+        btn_edit_promo.clicked.connect(self._on_edit_promo)
+        btn_remove_promo = FunctionButton("Remove")
+        btn_remove_promo.clicked.connect(self._on_remove_promo)
+        promos_btn_layout = QHBoxLayout()
+        promos_btn_layout.addWidget(btn_add_promo)
+        promos_btn_layout.addWidget(btn_edit_promo)
+        promos_btn_layout.addWidget(btn_remove_promo)
+        right_col.addLayout(promos_btn_layout)
+
 
         # # ── Save ──────────────────────────────────────────────────────────────
         # save_btn = QPushButton("Save Information")
@@ -217,6 +239,19 @@ class SettingsScreen(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, cat.id)
                 self.categories_list.addItem(item)
 
+    def _reload_promos(self):
+        """Repopulate the list from the DB, stashing each promo id on its item."""
+        self.promos_list.clear()
+        with get_session() as session:
+            for promo in ProductService.get_all_promos(session):
+                unit = "%" if promo.discount_type == "percent" else "€"
+                label = f"{promo.name} — {promo.discount_value:g}{unit} off"
+                if not promo.is_active:
+                    label += " (inactive)"
+                item = QListWidgetItem(label)
+                item.setData(Qt.ItemDataRole.UserRole, promo.id)
+                self.promos_list.addItem(item)
+
     def _reload_shortcuts(self):
         """Repopulate the list from the DB, stashing each shortcut id on its item."""
         self.shortcuts_list.clear()
@@ -235,6 +270,18 @@ class SettingsScreen(QWidget):
 
     def _category_names(self):
         return [self.categories_list.item(i).text() for i in range(self.categories_list.count())]
+
+    def _selected_promo_id(self):
+        item = self.promos_list.currentItem()
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _promo_names(self, exclude_id=None):
+        """Raw promo names for uniqueness checks — the list widget shows a
+        formatted label (with discount/active info), not the bare name."""
+        with get_session() as session:
+            return [p.name for p in ProductService.get_all_promos(session) if p.id != exclude_id]
 
     def _shortcut_names(self):
         return [self.shortcuts_list.item(i).text() for i in range(self.shortcuts_list.count())]
@@ -337,6 +384,60 @@ class SettingsScreen(QWidget):
         with get_session() as session:
             ProductService.delete_category(session, cat_id)
         self._reload_categories()
+
+    def _on_add_promo(self):
+        dialog = PromoDialog(parent=self, existing_names=self._promo_names())
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            created = ProductService.create_promo(
+                session, dialog.promo_name, dialog.discount_type,
+                dialog.discount_value, dialog.is_active,
+            )
+        if created is None:
+            QMessageBox.warning(self, "Promo", "Could not add promo — that name is already in use.")
+        self._reload_promos()
+
+    def _on_edit_promo(self):
+        promo_id = self._selected_promo_id()
+        if promo_id is None:
+            QMessageBox.information(self, "Promo", "Select a promo to edit.")
+            return
+        with get_session() as session:
+            promo = next((p for p in ProductService.get_all_promos(session) if p.id == promo_id), None)
+        if not promo:
+            return
+        dialog = PromoDialog(
+            parent=self, promo_name=promo.name, discount_type=promo.discount_type,
+            discount_value=promo.discount_value, is_active=promo.is_active,
+            existing_names=self._promo_names(exclude_id=promo_id),
+        )
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            updated = ProductService.update_promo(
+                session, promo_id, dialog.promo_name, dialog.discount_type,
+                dialog.discount_value, dialog.is_active,
+            )
+        if updated is None:
+            QMessageBox.warning(self, "Promo", "Could not update promo — that name is already in use.")
+        self._reload_promos()
+
+    def _on_remove_promo(self):
+        promo_id = self._selected_promo_id()
+        if promo_id is None:
+            QMessageBox.information(self, "Promo", "Select a promo to remove.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Remove Promo",
+            "Remove this promo?\nProducts using it will no longer have a promo attached.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        with get_session() as session:
+            ProductService.delete_promo(session, promo_id)
+        self._reload_promos()
 
     def _save(self):
         with get_session() as session:
