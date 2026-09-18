@@ -140,7 +140,7 @@ class Cart:
                     break
 
         # No matching item in the current section.
-        promo = product.promo if product.promo and product.promo.is_active else None
+        promo_item = product.active_promo_item
         self.entries.append(
             CartItem(
                 product_id=product.id,
@@ -151,9 +151,9 @@ class Cart:
                 unit=product.unit,
                 tax_rate=product.tax,
                 is_open_price=product.is_open_price,
-                promo_name=promo.name if promo else None,
-                promo_type=promo.discount_type if promo else None,
-                promo_value=promo.discount_value if promo else 0.0,
+                promo_name=promo_item.promo.name if promo_item else None,
+                promo_type=promo_item.discount_type if promo_item else None,
+                promo_value=promo_item.discount_value if promo_item else 0.0,
             )
         )
         self.sync_promo_discounts()

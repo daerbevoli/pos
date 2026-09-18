@@ -20,7 +20,16 @@ class _FakeProduct:
         self.unit = unit
         self.tax = tax
         self.is_open_price = is_open_price
-        self.promo = promo
+        self._promo = promo
+
+    @property
+    def active_promo_item(self):
+        """Mirrors Product.active_promo_item. The fake _FakePromo doubles
+        as its own PromoItem here (it has discount_type/discount_value and
+        a self-referential .promo), which is enough for Cart.add_product."""
+        if self._promo and self._promo.is_active:
+            return self._promo
+        return None
 
 
 class _FakePromo:
@@ -29,6 +38,7 @@ class _FakePromo:
         self.discount_type = discount_type
         self.discount_value = discount_value
         self.is_active = is_active
+        self.promo = self  # so promo_item.promo.name resolves, like the real PromoItem.promo relationship
 
 
 # ── CartItem.line_total ──────────────────────────────────────────────────

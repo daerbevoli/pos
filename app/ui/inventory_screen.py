@@ -9,15 +9,14 @@ Tax/Unit/Category field is focused, the product table is swapped out for a
 choice-button grid in the same spot.
 """
 import csv
-import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QComboBox, QFrame, QSizePolicy,
-    QDoubleSpinBox, QStackedWidget, QFileDialog
+    QHeaderView, QMessageBox, QComboBox, QFrame,
+    QDoubleSpinBox, QAbstractSpinBox, QStackedWidget, QFileDialog
 )
-from PyQt6.QtCore import Qt, QEvent, QLocale, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QLocale, QTimer, pyqtSignal
 
 from app.core.database import get_session
 from app.core.label_service import LabelPrinterService
@@ -30,11 +29,8 @@ from app.ui.dialogs.file_dialog import FileDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
     BUTTON_HEIGHT_XS,
-    ICON_BUTTON_SIZE,
     INPUT_HEIGHT,
     INPUT_HEIGHT_COMPACT,
-    MARGIN_COMPACT,
-    ROW_HEIGHT_LARGE,
     SPACING_MD,
     SPACING_XS,
 )
@@ -64,9 +60,7 @@ class ArticleDetailPanel(QFrame):
         self._category_id = None
         self._category_name = "— No Category —"
         self._categories: list[tuple[str, int]] = []
-        self._promo_id = None
-        self._promo_name = "— No Promo —"
-        self._promos: list[tuple[str, int]] = []
+        self._promo_name = "— No Promo —"  # read-only display; assigned via Settings > Promos
         self._is_open_price = False
 
         self._active_row: FieldRow | None = None
@@ -76,7 +70,6 @@ class ArticleDetailPanel(QFrame):
 
         self.setObjectName("articleDetailPanel")
         self._load_categories()
-        self._load_promos()
         self._build_ui()
 
     # ── Setup ────────────────────────────────────────────────────────────
@@ -86,20 +79,15 @@ class ArticleDetailPanel(QFrame):
             cats = ProductService.get_all_categories(session)
             self._categories = [(c.name, c.id) for c in cats]
 
-    def _load_promos(self):
-        """Loads every promo (not just active ones) so a product already
-        assigned an inactive promo still shows/looks it up correctly — only
-        active ones are offered as new choices in the picker, see
-        _refresh_picker()."""
-        with get_session() as session:
-            promos = ProductService.get_all_promos(session)
-            self._promos = [(self._promo_label(p), p.id, p.is_active) for p in promos]
-
     @staticmethod
-    def _promo_label(promo) -> str:
-        unit = "%" if promo.discount_type == "percent" else "€"
-        label = f"{promo.name} ({promo.discount_value:g}{unit})"
-        return label if promo.is_active else label + " (inactive)"
+    def _promo_display_label(item) -> str:
+        """Formats a PromoItem (or None) for the read-only Promo field.
+        Membership + per-product discount is managed from Settings > Promos
+        (PromoDialog), not here."""
+        if not item or not item.promo.is_current:
+            return "— No Promo —"
+        unit = "%" if item.discount_type == "percent" else "€"
+        return f"{item.promo.name} ({item.discount_value:g}{unit} off)"
 
     def _build_ui(self):
         outer = QHBoxLayout(self)
@@ -133,10 +121,10 @@ class ArticleDetailPanel(QFrame):
 
         self.price = QDoubleSpinBox()
         self.price.setLocale(QLocale.c())
-        self.price.setPrefix("€ ")
         self.price.setMaximum(99999.99)
         self.price.setDecimals(2)
         self.price.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.price.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.price_mode_display = PickerDisplay("Fixed price")
 
@@ -147,6 +135,7 @@ class ArticleDetailPanel(QFrame):
         self.stock.setMaximum(999999)
         self.stock.setDecimals(2)
         self.stock.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.min_stock = QDoubleSpinBox()
         self.min_stock.setLocale(QLocale.c())
@@ -154,6 +143,7 @@ class ArticleDetailPanel(QFrame):
         self.min_stock.setDecimals(2)
         self.min_stock.setValue(5)
         self.min_stock.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.min_stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.unit_display = PickerDisplay(self._unit_val)
         self.category_display = PickerDisplay(self._category_name)
@@ -169,7 +159,7 @@ class ArticleDetailPanel(QFrame):
             ("Min Stock Level",  self.min_stock,        None),
             ("Unit *",             self.unit_display,   "unit"),
             ("Category",         self.category_display, "category"),
-            ("Promo",            self.promo_display,    "promo"),
+            ("Promo",            self.promo_display,    None),
         ]
 
         self._fields = []
@@ -187,6 +177,9 @@ class ArticleDetailPanel(QFrame):
 
         field_col.addStretch()
         outer.addWidget(field_frame, stretch=3)
+
+        self.blank_page = QFrame()
+        self.blank_page.setObjectName("pickerPanel")
 
         # ── Picker page (placed by InventoryScreen in its table stack) ───
         self.picker_page = QFrame()
@@ -276,8 +269,19 @@ class ArticleDetailPanel(QFrame):
             self._refresh_picker(picker_key)
             if picker_key and self._mode in ("new", "edit"):
                 self.parent_screen._show_picker_page()
+            elif self._mode in ("new", "edit"):
+                self.parent_screen._show_blank_page()
             else:
                 self.parent_screen._show_table_page()
+
+            # Select the field's whole value on focus so typing (or a single
+            # Backspace) replaces it outright, instead of editing in place.
+            # Deferred one tick — a mouse click's own cursor placement lands
+            # right after FocusIn and would otherwise collapse the selection.
+            if isinstance(obj, QLineEdit) and self._mode in ("new", "edit"):
+                QTimer.singleShot(0, obj.selectAll)
+            elif isinstance(obj, QDoubleSpinBox) and self._mode in ("new", "edit"):
+                QTimer.singleShot(0, obj.selectAll)
 
         elif event.type() == QEvent.Type.KeyPress:
             key = event.key()
@@ -313,7 +317,7 @@ class ArticleDetailPanel(QFrame):
             self._picker_title.setText("")
             return
 
-        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category", "price_mode": "Price Mode", "promo": "Promo"}
+        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category", "price_mode": "Price Mode"}
         self._picker_title.setText(titles[picker_key])
 
         if picker_key == "tax":
@@ -328,19 +332,9 @@ class ArticleDetailPanel(QFrame):
             options = [("Fixed price", False), ("Open (enter at sale)", True)]
             current = self._is_open_price
             cols = 2
-        elif picker_key == "category":
+        else:  # category
             options = [("— None —", None)] + [(name, cid) for name, cid in self._categories]
             current = self._category_id
-            cols = 3
-        else:  # promo
-            # Active promos are selectable; an already-assigned inactive one
-            # stays in the list (so it still shows as picked) but nothing
-            # inactive can be newly chosen.
-            options = [("— None —", None)] + [
-                (label, pid) for label, pid, active in self._promos
-                if active or pid == self._promo_id
-            ]
-            current = self._promo_id
             cols = 3
 
         for i, (label, value) in enumerate(options):
@@ -364,10 +358,6 @@ class ArticleDetailPanel(QFrame):
             self._category_id = value
             self._category_name = label
             self.category_display.setText(label)
-        elif self._active_picker == "promo":
-            self._promo_id = value
-            self._promo_name = label
-            self.promo_display.setText(label)
         elif self._active_picker == "price_mode":
             self._is_open_price = value
             self.price_mode_display.setText(label)
@@ -417,11 +407,19 @@ class ArticleDetailPanel(QFrame):
         self._category_id = None
         self._category_name = "—"
         self.category_display.setText(self._category_name)
-        self._promo_id = None
         self._promo_name = "— No Promo —"
         self.promo_display.setText(self._promo_name)
         self._is_open_price = False
         self.price_mode_display.setText("Fixed price")
+
+    def _refresh_promo_display(self, product_id: int):
+        """Re-queried by product id (rather than relying on a passed-in
+        product's own session state) since this can be called on a detached
+        instance — see _on_barcode_scan()."""
+        with get_session() as session:
+            item = ProductService.get_promo_item_for_product(session, product_id)
+            self._promo_name = self._promo_display_label(item)
+        self.promo_display.setText(self._promo_name)
 
     def _populate_fields(self, product):
         self.barcode.setText(product.barcode or "")
@@ -448,14 +446,7 @@ class ArticleDetailPanel(QFrame):
                     break
         self.category_display.setText(self._category_name)
 
-        self._promo_id = product.promo_id
-        self._promo_name = "— No Promo —"
-        if product.promo_id:
-            for label, pid, _active in self._promos:
-                if pid == product.promo_id:
-                    self._promo_name = label
-                    break
-        self.promo_display.setText(self._promo_name)
+        self._refresh_promo_display(product.id)
 
         is_active = getattr(product, "is_active", True)
         self._active_status_label.setText("Active" if is_active else "Inactive")
@@ -484,7 +475,6 @@ class ArticleDetailPanel(QFrame):
         if self._mode != "display":
             return
         self._load_categories()
-        self._load_promos()
         self.current_product_id = None
         self._mode = "new"
         self._reset_fields_to_placeholder()
@@ -497,7 +487,6 @@ class ArticleDetailPanel(QFrame):
         if self.current_product_id is None or self._mode != "display":
             return
         self._load_categories()
-        self._load_promos()
         with get_session() as session:
             product = ProductService.get_by_id(session, self.current_product_id)
         if not product:
@@ -528,7 +517,6 @@ class ArticleDetailPanel(QFrame):
             "min_stock_level": self.min_stock.value(),
             "unit": self._unit_val,
             "category_id": self._category_id,
-            "promo_id": self._promo_id,
         }
 
     def _on_ok(self):
@@ -786,6 +774,7 @@ class InventoryScreen(QWidget):
         self.table_stack = QStackedWidget()
         self.table_stack.addWidget(self.table)
         self.table_stack.addWidget(self.detail_panel.picker_page)
+        self.table_stack.addWidget(self.detail_panel.blank_page)
         layout.addWidget(self.table_stack, stretch=1)
 
         # ── Summary row ───────────────────────────────────────────────────────
@@ -801,6 +790,14 @@ class InventoryScreen(QWidget):
     def _show_table_page(self):
         if hasattr(self, "table_stack"):
             self.table_stack.setCurrentWidget(self.table)
+
+    def _show_blank_page(self):
+        if hasattr(self, "table_stack"):
+            self.table_stack.setCurrentWidget(self.detail_panel.blank_page)
+            if hasattr(self, "search_input"):
+                self.search_input.setVisible(False)
+                self.category_filter.setVisible(False)
+                self.low_stock_btn.setVisible(False)
 
     def refresh(self):
         with get_session() as session:

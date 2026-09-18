@@ -6,7 +6,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QDateEdit, QGroupBox, QGridLayout, QSizePolicy
+    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 
@@ -54,11 +54,18 @@ class ReportsScreen(QWidget):
         self.date_to.setFixedHeight(BUTTON_HEIGHT)
         controls.addWidget(self.date_to)
 
-        # Quick range presets
+        # Quick range presets — mutually exclusive, like the Sales/VAT/
+        # Categories trio below: only one is ever "pressed" at a time.
+        self._range_group = QButtonGroup(self)
+        self._range_group.setExclusive(True)
         for label, days in [("Today", 0), ("Last 7 days", 7), ("Last 30 days", 30)]:
             btn = QPushButton(label)
+            btn.setObjectName("salesBtn")
+            btn.setCheckable(True)
+            btn.setChecked(days == 0)
             btn.setFixedHeight(BUTTON_HEIGHT)
             btn.clicked.connect(lambda _, d=days: self._set_range(d))
+            self._range_group.addButton(btn)
             controls.addWidget(btn)
 
         load_btn = QPushButton("Load Report")
@@ -67,28 +74,41 @@ class ReportsScreen(QWidget):
         load_btn.clicked.connect(self._load_report)
         controls.addWidget(load_btn)
 
+        # Sales/VAT/Categories are a tab-like, mutually exclusive trio — only
+        # one is ever "pressed" (highlighted) at a time. Invoices is a
+        # separate on/off filter, so it toggles independently of those three.
         sales_btn = FunctionButton("Sales", "salesBtn")
         sales_btn.setFixedHeight(BUTTON_HEIGHT)
+        sales_btn.setCheckable(True)
+        sales_btn.setChecked(True)
         controls.addWidget(sales_btn)
 
-        vat_btn = FunctionButton("VAT breakdown", "InvBtn")
+        vat_btn = FunctionButton("VAT breakdown", "salesBtn")
         vat_btn.setFixedHeight(BUTTON_HEIGHT)
+        vat_btn.setCheckable(True)
         controls.addWidget(vat_btn)
 
-        cats_btn = FunctionButton("Categories", "InvBtn")
+        cats_btn = FunctionButton("Categories", "salesBtn")
         cats_btn.setFixedHeight(BUTTON_HEIGHT)
+        cats_btn.setCheckable(True)
         controls.addWidget(cats_btn)
+
+        self._view_group = QButtonGroup(self)
+        self._view_group.setExclusive(True)
+        for btn in (sales_btn, vat_btn, cats_btn):
+            self._view_group.addButton(btn)
 
         invoices_btn = FunctionButton("Invoices", "InvBtn")
         invoices_btn.setFixedHeight(BUTTON_HEIGHT)
+        invoices_btn.setCheckable(True)
         controls.addWidget(invoices_btn)
 
-        x_report_btn = FunctionButton("X Report", "InvBtn")
+        x_report_btn = FunctionButton("X Report", "XRBtn")
         x_report_btn.setFixedHeight(BUTTON_HEIGHT)
         x_report_btn.clicked.connect(self._print_x_report)
         controls.addWidget(x_report_btn)
 
-        z_report_btn = FunctionButton("Z Report", "InvBtn")
+        z_report_btn = FunctionButton("Z Report", "ZRBtn")
         z_report_btn.setFixedHeight(BUTTON_HEIGHT)
         z_report_btn.clicked.connect(self._print_z_report)
         controls.addWidget(z_report_btn)
@@ -272,7 +292,7 @@ class ReportsScreen(QWidget):
             for rate, amounts in totals["vat_breakdown"].items():
                 row = self.vat_table.rowCount()
                 self.vat_table.insertRow(row)
-                self.vat_table.setItem(row, 0, QTableWidgetItem(f"{rate}%"))
+                self.vat_table.setItem(row, 0, QTableWidgetItem(f"{rate} %"))
                 self.vat_table.setItem(row, 1, QTableWidgetItem(f"{amounts['base']:.2f}"))
                 self.vat_table.setItem(row, 2, QTableWidgetItem(f"{amounts['tax']:.2f}"))
                 self.vat_table.setItem(row, 3, QTableWidgetItem(f"{amounts['total']:.2f}"))

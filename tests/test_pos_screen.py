@@ -603,10 +603,12 @@ def test_remove_selected_on_promo_discount_removes_the_product_line(screen):
     """Selecting the promo's DiscountEntry row (not the product row) and
     deleting it removes the product line too — the discount isn't a
     standalone thing you can drop while keeping the item."""
+    pid, barcode, _ = _add_product(barcode="promo1", price=10.0)
     with get_session() as session:
-        promo = ProductService.create_promo(session, "New Year Promo", "percent", 15.0, True)
-        promo_id = promo.id
-    pid, barcode, _ = _add_product(barcode="promo1", price=10.0, promo_id=promo_id)
+        promo = ProductService.create_promo(session, "New Year Promo")
+        ProductService.set_promo_items(
+            session, promo.id, [{"product_id": pid, "discount_type": "percent", "discount_value": 15.0}]
+        )
     _scan(screen, barcode)
     assert len(screen.cart.entries) == 2  # CartItem + its promo DiscountEntry
 
@@ -622,10 +624,12 @@ def test_remove_selected_on_promo_discount_after_reopen_reverses_the_product_lin
     discount row reverses the underlying product line, same as deleting the
     product row itself would — and the discount line disappears rather than
     getting an offsetting entry."""
+    pid, barcode, _ = _add_product(barcode="promo2", price=10.0, stock_quantity=50)
     with get_session() as session:
-        promo = ProductService.create_promo(session, "New Year Promo", "percent", 15.0, True)
-        promo_id = promo.id
-    pid, barcode, _ = _add_product(barcode="promo2", price=10.0, stock_quantity=50, promo_id=promo_id)
+        promo = ProductService.create_promo(session, "New Year Promo")
+        ProductService.set_promo_items(
+            session, promo.id, [{"product_id": pid, "discount_type": "percent", "discount_value": 15.0}]
+        )
     _scan(screen, barcode)
     screen._open_payment("cash")
     screen._reopen_ticket()

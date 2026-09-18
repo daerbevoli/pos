@@ -172,6 +172,29 @@ QPushButton:pressed {
     background-color: #aeb7c5;
 }
 
+/* ── Reports screen: view-switch / filter toggle buttons ─── */
+QPushButton#salesBtn:checked {
+    background-color: #D4C607;
+    border: 1px solid #d8cc2f;
+    color: #2a2410;
+}
+
+QPushButton#InvBtn:checked {
+    background-color: #87845A;
+    border: 1px solid #d8cc2f;
+    color: #2a2410;
+}
+
+QPushButton#XRBtn {
+    background-color: #EEE9A0;
+    color: #2a2410;
+}
+
+QPushButton#ZRBtn {
+    background-color: #A53338;
+    color: #2a2410;
+}
+
 QPushButton#navBtn {
     background-color: #8fd4d0;
     border: 1px solid #5fb7b2;
@@ -458,6 +481,22 @@ QFrame#articleFieldFrame {
     background-color: #ffffff;
     border: 1px solid #c3cbd6;
     border-radius: 4px;
+}
+
+/* Plain (non-picker) inputs — barcode, name, price, stock, min stock —
+   matched to QLabel#pickerField's look so every field row reads the same. */
+QFrame#articleFieldFrame QLineEdit,
+QFrame#articleFieldFrame QDoubleSpinBox {
+    background-color: #ffffff;
+    border: 1px solid #c3cbd6;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 12px;
+}
+
+QFrame#articleFieldFrame QLineEdit:focus,
+QFrame#articleFieldFrame QDoubleSpinBox:focus {
+    border-color: #4a90d9;
 }
 
 QLabel#articleDetailTitle {

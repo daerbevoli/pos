@@ -5,7 +5,7 @@ Handles SQLite connection, table creation, and provides session access.
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
-from app.models.models import Base, Settings, Category, Client, Invoice, Shortcut, ShortcutItem
+from app.models.models import Base, Settings, Category, Client, Invoice, Shortcut, ShortcutItem, Promo, PromoItem
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
@@ -71,9 +71,8 @@ def _run_migrations():
         if product_cols and "is_open_price" not in product_cols:  # empty means the table doesn't exist yet
             conn.exec_driver_sql("ALTER TABLE products ADD COLUMN is_open_price BOOLEAN NOT NULL DEFAULT 0")
             conn.commit()
-        if product_cols and "promo_id" not in product_cols:
-            conn.exec_driver_sql("ALTER TABLE products ADD COLUMN promo_id INTEGER REFERENCES promos(id)")
-            conn.commit()
+
+        _migrate_promo_schema(conn)
 
         client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
         if "ux_clients_name_active" not in client_indexes:
@@ -122,6 +121,64 @@ def _run_migrations():
         if "shortcut_items" not in existing_tables:
             ShortcutItem.__table__.create(conn)
             conn.commit()
+
+
+def _migrate_promo_schema(conn):
+    """Promos moved from one whole-promo discount to a per-product discount
+    on a new promo_items table, and gained start_date/end_date. Handles three
+    states: no promos table yet (create_all() above already made the current
+    schema — nothing to do), an already-current promos table (just backfill
+    promo_items if that table is somehow missing), or the old schema (has
+    discount_type/discount_value) that needs migrating in place.
+    """
+    existing_tables = {
+        row[0] for row in conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "promos" not in existing_tables:
+        return  # create_all() already built the current schema
+
+    promo_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(promos)")}
+    is_old_schema = "discount_type" in promo_cols
+
+    if "promo_items" not in existing_tables:
+        PromoItem.__table__.create(conn)
+        conn.commit()
+
+    if is_old_schema:
+        product_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(products)")}
+        if "promo_id" in product_cols:
+            conn.exec_driver_sql(
+                "INSERT INTO promo_items (promo_id, product_id, discount_type, discount_value) "
+                "SELECT p.promo_id, p.id, pr.discount_type, pr.discount_value "
+                "FROM products p JOIN promos pr ON pr.id = p.promo_id "
+                "WHERE p.promo_id IS NOT NULL"
+            )
+            conn.commit()
+            conn.exec_driver_sql("ALTER TABLE products DROP COLUMN promo_id")
+            conn.commit()
+
+        conn.exec_driver_sql("ALTER TABLE promos DROP COLUMN discount_type")
+        conn.exec_driver_sql("ALTER TABLE promos DROP COLUMN discount_value")
+        conn.commit()
+        promo_cols.discard("discount_type")
+        promo_cols.discard("discount_value")
+
+    if "start_date" not in promo_cols:
+        conn.exec_driver_sql("ALTER TABLE promos ADD COLUMN start_date DATE")
+        conn.commit()
+    if "end_date" not in promo_cols:
+        conn.exec_driver_sql("ALTER TABLE promos ADD COLUMN end_date DATE")
+        conn.commit()
+
+    # Old schema also predates products.promo_id being dropped above when
+    # there was no old-schema promo data to migrate but the column still
+    # lingers (e.g. it was added but never used).
+    product_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(products)")}
+    if "promo_id" in product_cols:
+        conn.exec_driver_sql("ALTER TABLE products DROP COLUMN promo_id")
+        conn.commit()
 
 
 def _migrate_clients_to_partial_unique(conn):

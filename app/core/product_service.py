@@ -5,7 +5,7 @@ All business logic for managing products and stock.
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo
+from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo, PromoItem
 from app.core.database import get_session
 
 
@@ -217,14 +217,13 @@ class ProductService:
 
     @staticmethod
     def create_promo(
-        session: Session, name: str, discount_type: str = "percent",
-        discount_value: float = 0.0, is_active: bool = True,
+        session: Session, name: str, start_date=None, end_date=None, is_active: bool = True,
     ) -> Promo | None:
         """Create a promo. Returns None if the name is blank or already taken."""
         name = name.strip()
         if not name or ProductService._promo_by_name(session, name):
             return None
-        promo = Promo(name=name, discount_type=discount_type, discount_value=discount_value, is_active=is_active)
+        promo = Promo(name=name, start_date=start_date, end_date=end_date, is_active=is_active)
         session.add(promo)
         session.commit()
         session.refresh(promo)
@@ -232,8 +231,7 @@ class ProductService:
 
     @staticmethod
     def update_promo(
-        session: Session, promo_id: int, name: str, discount_type: str,
-        discount_value: float, is_active: bool,
+        session: Session, promo_id: int, name: str, start_date=None, end_date=None, is_active: bool = True,
     ) -> Promo | None:
         """
         Update an existing promo. Returns None if it doesn't exist, the new
@@ -253,8 +251,8 @@ class ProductService:
         if clash:
             return None
         promo.name = name
-        promo.discount_type = discount_type
-        promo.discount_value = discount_value
+        promo.start_date = start_date
+        promo.end_date = end_date
         promo.is_active = is_active
         session.commit()
         session.refresh(promo)
@@ -262,17 +260,63 @@ class ProductService:
 
     @staticmethod
     def delete_promo(session: Session, promo_id: int) -> bool:
-        """Delete a promo. Any products using it are left without a promo
-        (promo_id set to NULL). Returns False if it doesn't exist."""
+        """Delete a promo and its per-product discounts (promo_items cascades).
+        Returns False if it doesn't exist."""
         promo = session.query(Promo).filter_by(id=promo_id).first()
         if not promo:
             return False
-        session.query(Product).filter_by(promo_id=promo_id).update(
-            {Product.promo_id: None}, synchronize_session=False
-        )
         session.delete(promo)
         session.commit()
         return True
+
+    @staticmethod
+    def get_promo_item_for_product(session: Session, product_id: int) -> PromoItem | None:
+        return session.query(PromoItem).filter_by(product_id=product_id).first()
+
+    @staticmethod
+    def get_promo_items(session: Session, promo_id: int) -> list[type[PromoItem]]:
+        """This promo's per-product discounts, with each item's product
+        eagerly usable (same session) and ordered by product name."""
+        return (
+            session.query(PromoItem)
+            .join(Product)
+            .filter(PromoItem.promo_id == promo_id)
+            .order_by(Product.name)
+            .all()
+        )
+
+    @staticmethod
+    def set_promo_items(session: Session, promo_id: int, items: list[dict]) -> None:
+        """Replace a promo's whole product list in one shot.
+        `items` = [{"product_id": int, "discount_type": "percent"|"fixed", "discount_value": float}, ...].
+        A product belongs to at most one promo at a time, so adding it here
+        drops it from whatever other promo it was attached to."""
+        wanted_ids = {it["product_id"] for it in items}
+
+        if wanted_ids:
+            session.query(PromoItem).filter(
+                PromoItem.product_id.in_(wanted_ids), PromoItem.promo_id != promo_id
+            ).delete(synchronize_session=False)
+
+        session.query(PromoItem).filter(
+            PromoItem.promo_id == promo_id, ~PromoItem.product_id.in_(wanted_ids)
+        ).delete(synchronize_session=False)
+
+        existing = {
+            pi.product_id: pi
+            for pi in session.query(PromoItem).filter_by(promo_id=promo_id).all()
+        }
+        for it in items:
+            pid = it["product_id"]
+            if pid in existing:
+                existing[pid].discount_type = it["discount_type"]
+                existing[pid].discount_value = it["discount_value"]
+            else:
+                session.add(PromoItem(
+                    promo_id=promo_id, product_id=pid,
+                    discount_type=it["discount_type"], discount_value=it["discount_value"],
+                ))
+        session.commit()
 
     @staticmethod
     def get_all_shortcuts(session: Session) -> list[type[Shortcut]]:

@@ -85,7 +85,6 @@ class SettingsScreen(QWidget):
         sc_layout = QVBoxLayout(sc_group)
         self.shortcuts_list = QListWidget()
         self.shortcuts_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
-        self.shortcuts_list.itemDoubleClicked.connect(lambda _: self._on_edit_sc())
         sc_layout.addWidget(self.shortcuts_list)
         left_col.addWidget(sc_group)
         self._reload_shortcuts()
@@ -160,7 +159,6 @@ class SettingsScreen(QWidget):
         promos_layout = QVBoxLayout(promos_group)
         self.promos_list = QListWidget()
         self.promos_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
-        self.promos_list.itemDoubleClicked.connect(lambda _: self._on_edit_promo())
         promos_layout.addWidget(self.promos_list)
         right_col.addWidget(promos_group)
         self._reload_promos()
@@ -244,10 +242,14 @@ class SettingsScreen(QWidget):
         self.promos_list.clear()
         with get_session() as session:
             for promo in ProductService.get_all_promos(session):
-                unit = "%" if promo.discount_type == "percent" else "€"
-                label = f"{promo.name} — {promo.discount_value:g}{unit} off"
+                count = len(ProductService.get_promo_items(session, promo.id))
+                products_text = f"{count} product{'s' if count != 1 else ''}"
+                dates_text = f"{promo.start_date } → {promo.end_date}" if promo.end_date else "Indefinite"
+                label = f"{promo.name} — {products_text} — {dates_text}"
                 if not promo.is_active:
                     label += " (inactive)"
+                elif not promo.is_current:
+                    label += " (finished)"
                 item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, promo.id)
                 self.promos_list.addItem(item)
@@ -391,11 +393,13 @@ class SettingsScreen(QWidget):
             return
         with get_session() as session:
             created = ProductService.create_promo(
-                session, dialog.promo_name, dialog.discount_type,
-                dialog.discount_value, dialog.is_active,
+                session, dialog.promo_name, dialog.start_date,
+                dialog.end_date, dialog.is_active,
             )
-        if created is None:
-            QMessageBox.warning(self, "Promo", "Could not add promo — that name is already in use.")
+            if created is None:
+                QMessageBox.warning(self, "Promo", "Could not add promo — that name is already in use.")
+            else:
+                ProductService.set_promo_items(session, created.id, dialog.items)
         self._reload_promos()
 
     def _on_edit_promo(self):
@@ -405,22 +409,35 @@ class SettingsScreen(QWidget):
             return
         with get_session() as session:
             promo = next((p for p in ProductService.get_all_promos(session) if p.id == promo_id), None)
-        if not promo:
-            return
+            if not promo:
+                return
+            items = [
+                {
+                    "product_id": pi.product_id,
+                    "discount_type": pi.discount_type,
+                    "discount_value": pi.discount_value,
+                }
+                for pi in ProductService.get_promo_items(session, promo_id)
+            ]
+            promo_name, start_date, end_date, is_active = (
+                promo.name, promo.start_date, promo.end_date, promo.is_active,
+            )
         dialog = PromoDialog(
-            parent=self, promo_name=promo.name, discount_type=promo.discount_type,
-            discount_value=promo.discount_value, is_active=promo.is_active,
-            existing_names=self._promo_names(exclude_id=promo_id),
+            parent=self, promo_name=promo_name, start_date=start_date,
+            end_date=end_date, is_active=is_active,
+            existing_names=self._promo_names(exclude_id=promo_id), items=items,
         )
         if not dialog.exec():
             return
         with get_session() as session:
             updated = ProductService.update_promo(
-                session, promo_id, dialog.promo_name, dialog.discount_type,
-                dialog.discount_value, dialog.is_active,
+                session, promo_id, dialog.promo_name, dialog.start_date,
+                dialog.end_date, dialog.is_active,
             )
-        if updated is None:
-            QMessageBox.warning(self, "Promo", "Could not update promo — that name is already in use.")
+            if updated is None:
+                QMessageBox.warning(self, "Promo", "Could not update promo — that name is already in use.")
+            else:
+                ProductService.set_promo_items(session, promo_id, dialog.items)
         self._reload_promos()
 
     def _on_remove_promo(self):
@@ -431,7 +448,7 @@ class SettingsScreen(QWidget):
         confirm = QMessageBox.question(
             self,
             "Remove Promo",
-            "Remove this promo?\nProducts using it will no longer have a promo attached.",
+            "Remove this promo?",
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return

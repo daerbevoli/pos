@@ -2,10 +2,10 @@
 Database Models
 All tables are defined here using SQLAlchemy ORM.
 """
-from datetime import datetime
+from datetime import date, datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
-    DateTime, ForeignKey, Text, Enum, Index, text, UniqueConstraint
+    DateTime, Date, ForeignKey, Text, Enum, Index, text, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, backref, DeclarativeBase
 
@@ -29,18 +29,58 @@ class Category(Base):
 
 
 class Promo(Base):
+    """A named, dated promotion (e.g. "New Year Promo"). Its discount is
+    per product — see PromoItem — rather than one value applied uniformly
+    to every product attached to it."""
     __tablename__ = "promos"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)  # shown as the discount label, e.g. "New Year Promo"
-    discount_type = Column(Enum("percent", "fixed", name="promo_discount_type"), default="percent", nullable=False)
-    discount_value = Column(Float, nullable=False)   # 15 for 15%, or a euro amount for "fixed"
+    start_date = Column(Date, nullable=True)   # None = no lower bound
+    end_date = Column(Date, nullable=True)     # None = no upper bound
     is_active = Column(Boolean, default=True)
 
-    products = relationship("Product", back_populates="promo")
+    items = relationship("PromoItem", back_populates="promo", cascade="all, delete-orphan")
+
+    @property
+    def is_current(self) -> bool:
+        """is_active and today falls within [start_date, end_date]
+        (either bound is optional)."""
+        if not self.is_active:
+            return False
+        today = date.today()
+        if self.start_date and today < self.start_date:
+            return False
+        if self.end_date and today > self.end_date:
+            return False
+        return True
 
     def __repr__(self):
         return f"<Promo {self.name}>"
+
+
+class PromoItem(Base):
+    """One product's discount within a Promo. discount_type/discount_value
+    live here (not on Promo) so the same promo can take, say, €1 off one
+    product and 20% off another. A product belongs to at most one promo at
+    a time (see uq_promo_item_product)."""
+    __tablename__ = "promo_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    promo_id = Column(Integer, ForeignKey("promos.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    discount_type = Column(Enum("percent", "fixed", name="promo_discount_type"), default="percent", nullable=False)
+    discount_value = Column(Float, nullable=False)   # 15 for 15%, or a euro amount for "fixed"
+
+    promo = relationship("Promo", back_populates="items")
+    product = relationship("Product", back_populates="promo_item")
+
+    __table_args__ = (
+        UniqueConstraint("product_id", name="uq_promo_item_product"),
+    )
+
+    def __repr__(self):
+        return f"<PromoItem promo={self.promo_id} product={self.product_id}>"
 
 
 class Product(Base):
@@ -57,19 +97,26 @@ class Product(Base):
     unit = Column(String(20), default="pcs")            # pcs, kg, liter, etc.
     tax = Column(Integer, nullable=False, default=21)    # 0, 6, 21 %
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
-    promo_id = Column(Integer, ForeignKey("promos.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     category = relationship("Category", back_populates="products")
-    promo = relationship("Promo", back_populates="products")
+    promo_item = relationship("PromoItem", back_populates="product", uselist=False)
     sale_items = relationship("SaleItem", back_populates="product")
     stock_movements = relationship("StockMovement", back_populates="product")
 
     @property
     def is_low_stock(self):
         return self.stock_quantity <= self.min_stock_level
+
+    @property
+    def active_promo_item(self) -> "PromoItem | None":
+        """This product's PromoItem if it's attached to one and that
+        promo is currently running (active + within its date range)."""
+        if self.promo_item and self.promo_item.promo.is_current:
+            return self.promo_item
+        return None
 
     def __repr__(self):
         return f"<Product {self.name} ({self.barcode})>"
