@@ -3,9 +3,11 @@ Database Setup & Session Management
 Handles SQLite connection, table creation, and provides session access.
 """
 import os
+from typing import NamedTuple
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from app.models.models import Base, Settings, Category, Client, Invoice, Shortcut, ShortcutItem, Promo, PromoItem
+from app.constants.countries import BELGIUM
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
@@ -44,98 +46,141 @@ def init_db():
     _seed_defaults()
 
 
+class _ColumnMigration(NamedTuple):
+    """One column that create_all() won't add to an already-existing table.
+    `why` is kept right next to the column it explains instead of scattered
+    in comments, as a lightweight in-code changelog of the schema."""
+    table: str
+    column: str
+    sql_type: str
+    why: str
+
+
+_INVOICE_SNAPSHOT_WHY = (
+    "An invoice used to be a thin pointer to its Sale/Client; once it had "
+    "to stay correct even after the client or sale later changed, it "
+    "needed its own frozen snapshot of the client and amounts as of when "
+    "it was issued (feat: invoice independent of sale and immutable)."
+)
+
+# Every plain "add a column" migration, in the order they were introduced.
+# Anything that renames/rebuilds a table or moves data between tables is a
+# bigger step than one column — those get their own function below instead.
+_COLUMN_MIGRATIONS = [
+    _ColumnMigration(
+        "sales", "cart_snapshot", "TEXT",
+        "Reopening a held/completed ticket needs to replay the exact cart "
+        "contents (line items, discounts, subtotals), not just its totals "
+        "(feat: reopen ticket)."
+    ),
+    _ColumnMigration(
+        "sales", "payment_breakdown", "TEXT",
+        "A sale can be paid with a mix of tenders (split cash/card), so "
+        "the single payment_method column alone can't reconstruct a "
+        "receipt (feat: multi payment)."
+    ),
+    _ColumnMigration(
+        "sales", "updated_at", "DATETIME",
+        "A reopened/edited completed sale needed its own last-modified "
+        "timestamp, separate from created_at."
+    ),
+    _ColumnMigration(
+        "sale_items", "tax_rate", "INTEGER DEFAULT 0",
+        "VAT reporting (reports, invoices) needs each line's tax rate "
+        "frozen at sale time, independent of the product's tax rate "
+        "possibly changing later (feat: VAT separation in reports/invoices)."
+    ),
+    _ColumnMigration(
+        "sale_items", "tax_amount", "REAL DEFAULT 0.0",
+        "The computed VAT portion of each line, frozen alongside tax_rate "
+        "for the same reason."
+    ),
+    _ColumnMigration(
+        "products", "is_open_price", "BOOLEAN NOT NULL DEFAULT 0",
+        "Loose/bulk items (deli counter, bakery) need their price typed "
+        "in per sale rather than fixed on the product (feat: open-price "
+        "items)."
+    ),
+    _ColumnMigration(
+        "clients", "country", f"TEXT NOT NULL DEFAULT '{BELGIUM}'",
+        "Invoicing needs a client's country to apply the right VAT "
+        "treatment (domestic / EU reverse-charge / non-EU export) — this "
+        "POS was Belgium-only before, so existing clients backfill as "
+        "domestic."
+    ),
+    _ColumnMigration("invoices", "issued_at", "DATETIME", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "client_name", "TEXT", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "client_vat_number", "TEXT", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "client_address", "TEXT", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "total_amount", "REAL", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "tax_amount", "REAL", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "final_amount", "REAL", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration("invoices", "line_items_snapshot", "TEXT", _INVOICE_SNAPSHOT_WHY),
+    _ColumnMigration(
+        "invoices", "sent_at", "DATETIME",
+        "Marks an invoice as transmitted; once set it can no longer be "
+        "edited (update_sale refuses), and corrections must go through a "
+        "credit note instead."
+    ),
+    _ColumnMigration(
+        "invoices", "updated_at", "DATETIME",
+        "Tracks when an unsent invoice's snapshot was last kept in sync "
+        "with an edit to its underlying sale."
+    ),
+    _ColumnMigration(
+        "z_reports", "category_breakdown", "TEXT",
+        "The Z-report needed a per-category sales breakdown alongside its "
+        "totals (feat: X and Z report)."
+    ),
+]
+
+
 def _run_migrations():
-    """Add columns that create_all() won't add to an already-existing table."""
+    """Applies every schema change create_all() can't make to an
+    already-existing table (it only creates missing tables, never alters
+    existing ones). Each step here checks before acting, so this is safe
+    to run unconditionally on every startup, including a brand new
+    database with nothing to do."""
     with ENGINE.connect() as conn:
-        sales_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)")}
-        if "cart_snapshot" not in sales_cols:
-            conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN cart_snapshot TEXT")
-            conn.commit()
-        if "payment_breakdown" not in sales_cols:
-            conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN payment_breakdown TEXT")
-            conn.commit()
-
-        if "updated_at" not in sales_cols:
-            conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN updated_at DATETIME")
-            conn.commit()
-
-        sale_item_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sale_items)")}
-        if "tax_rate" not in sale_item_cols:
-            conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_rate INTEGER DEFAULT 0")
-            conn.commit()
-        if "tax_amount" not in sale_item_cols:
-            conn.exec_driver_sql("ALTER TABLE sale_items ADD COLUMN tax_amount REAL DEFAULT 0.0")
-            conn.commit()
-
-        product_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(products)")}
-        if product_cols and "is_open_price" not in product_cols:  # empty means the table doesn't exist yet
-            conn.exec_driver_sql("ALTER TABLE products ADD COLUMN is_open_price BOOLEAN NOT NULL DEFAULT 0")
-            conn.commit()
+        for migration in _COLUMN_MIGRATIONS:
+            _add_column_if_missing(conn, migration.table, migration.column, migration.sql_type)
 
         _migrate_promo_schema(conn)
+        _migrate_clients_to_partial_unique(conn)
+        # Must run after the clients migration above: it repairs databases
+        # that already hit the FK-corruption bug that migration used to have.
+        _add_shortcuts_tables(conn)
 
-        client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
-        if "ux_clients_name_active" not in client_indexes:
-            _migrate_clients_to_partial_unique(conn)
 
-        # Rebuilds invoices (if broken) using the current model, so it already
-        # has the columns added below — run this first.
-        _repair_invoices_fk_if_broken(conn)
+def _table_columns(conn, table: str) -> set[str]:
+    """Column names of `table`, or an empty set if it doesn't exist yet —
+    create_all() will have created it fresh, with every current column, so
+    there's nothing to migrate."""
+    return {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
 
-        invoice_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(invoices)")}
-        if invoice_cols:  # empty means the table doesn't exist yet — create_all() will make it current
-            new_invoice_columns = {
-                "issued_at": "DATETIME",
-                "sent_at": "DATETIME",
-                "updated_at": "DATETIME",
-                "client_name": "TEXT",
-                "client_vat_number": "TEXT",
-                "client_address": "TEXT",
-                "total_amount": "REAL",
-                "tax_amount": "REAL",
-                "final_amount": "REAL",
-                "line_items_snapshot": "TEXT",
-            }
-            for col, col_type in new_invoice_columns.items():
-                if col not in invoice_cols:
-                    conn.exec_driver_sql(f"ALTER TABLE invoices ADD COLUMN {col} {col_type}")
-                    conn.commit()
 
-        z_report_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(z_reports)")}
-        if z_report_cols and "category_breakdown" not in z_report_cols:
-            conn.exec_driver_sql("ALTER TABLE z_reports ADD COLUMN category_breakdown TEXT")
-            conn.commit()
+def _existing_tables(conn) -> set[str]:
+    return {row[0] for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")}
 
-        # POS shortcut pages (hand-picked product-slot lists). create_all() above
-        # already makes these on any DB that reaches here; this block is the
-        # explicit record of when they were introduced and a safety net if
-        # create_all() is ever skipped.
-        existing_tables = {
-            row[0] for row in conn.exec_driver_sql(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        if "shortcuts" not in existing_tables:
-            Shortcut.__table__.create(conn)
-            conn.commit()
-        if "shortcut_items" not in existing_tables:
-            ShortcutItem.__table__.create(conn)
-            conn.commit()
+
+def _add_column_if_missing(conn, table: str, column: str, sql_type: str):
+    cols = _table_columns(conn, table)
+    if cols and column not in cols:
+        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+        conn.commit()
 
 
 def _migrate_promo_schema(conn):
-    """Promos moved from one whole-promo discount to a per-product discount
-    on a new promo_items table, and gained start_date/end_date. Handles three
-    states: no promos table yet (create_all() above already made the current
-    schema — nothing to do), an already-current promos table (just backfill
+    """Why: promos moved from one whole-promo discount to a per-product
+    discount on a new promo_items table, and gained start_date/end_date, so
+    a promo could target specific products over a specific date range
+    (feat: promo per product with dated promos). Handles three states: no
+    promos table yet (create_all() above already made the current schema —
+    nothing to do), an already-current promos table (just backfill
     promo_items if that table is somehow missing), or the old schema (has
     discount_type/discount_value) that needs migrating in place.
     """
-    existing_tables = {
-        row[0] for row in conn.exec_driver_sql(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
-    }
+    existing_tables = _existing_tables(conn)
     if "promos" not in existing_tables:
         return  # create_all() already built the current schema
 
@@ -182,12 +227,14 @@ def _migrate_promo_schema(conn):
 
 
 def _migrate_clients_to_partial_unique(conn):
-    """
-    Older schema had column-level UNIQUE constraints on clients
-    (name/address/phone/email/vatNumber/website), which SQLite bakes into
-    the table definition — they can't be dropped with ALTER TABLE, so the
-    table has to be rebuilt. Replaces them with partial unique indexes that
-    only apply to active clients (see Client.__table_args__).
+    """Why: the older schema had column-level UNIQUE constraints on clients
+    (name/address/phone/email/vatNumber/website); deactivating a client and
+    later reusing its name/VAT/etc. hit those constraints, so they're
+    replaced with partial unique indexes that only apply to active clients
+    (see Client.__table_args__) (feat: change client screen to match
+    inventory screen + CSV import). SQLite bakes column-level UNIQUE into
+    the table definition — it can't be dropped with ALTER TABLE, so the
+    table has to be rebuilt instead.
 
     PRAGMA legacy_alter_table=ON is essential here: SQLite's default (smart)
     RENAME TABLE rewrites *other* tables' REFERENCES clauses to follow the
@@ -198,69 +245,41 @@ def _migrate_clients_to_partial_unique(conn):
     dropped — corrupting invoices permanently (see _repair_invoices_fk_if_broken,
     which fixes databases that already hit this before the pragma was added).
     """
+    existing_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
+    if "ux_clients_name_active" in existing_indexes:
+        return  # already migrated
+
     conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
     conn.exec_driver_sql("PRAGMA legacy_alter_table=ON")
     conn.exec_driver_sql("ALTER TABLE clients RENAME TO clients_old")
     conn.exec_driver_sql("PRAGMA legacy_alter_table=OFF")
     Client.__table__.create(conn)
     conn.exec_driver_sql(
-        'INSERT INTO clients (id, name, address, phone, email, "vatNumber", website, is_active) '
+        'INSERT INTO clients (id, name, address, country, phone, email, "vatNumber", website, is_active) '
         # address is now NOT NULL; older rows that predate the address
         # requirement get an empty string rather than failing the copy.
-        'SELECT id, name, COALESCE(address, \'\'), phone, email, "vatNumber", website, is_active FROM clients_old'
+        # country doesn't exist on clients_old at all — this POS is
+        # Belgium-only so far, so backfill every row as domestic.
+        f'SELECT id, name, COALESCE(address, \'\'), \'{BELGIUM}\', phone, email, "vatNumber", website, is_active FROM clients_old'
     )
     conn.exec_driver_sql("DROP TABLE clients_old")
     conn.commit()
     conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
-def _repair_invoices_fk_if_broken(conn):
-    """
-    One-time repair for databases that already hit the bug described in
-    _migrate_clients_to_partial_unique: their invoices table's stored schema
-    still references the long-dropped clients_old table, which makes every
-    future invoice INSERT/UPDATE fail with "no such table: main.clients_old"
-    once foreign key enforcement is on. Rebuilds invoices against the
-    correct FOREIGN KEY(client_id) REFERENCES clients(id) if so.
-    """
-    row = conn.exec_driver_sql(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='invoices'"
-    ).fetchone()
-    if row is None or row[0] is None or "clients_old" not in row[0]:
-        return
-
-    conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
-    conn.exec_driver_sql("PRAGMA legacy_alter_table=ON")
-    conn.exec_driver_sql("ALTER TABLE invoices RENAME TO invoices_old")
-    conn.exec_driver_sql("PRAGMA legacy_alter_table=OFF")
-    Invoice.__table__.create(conn)
-
-    # client_id and the client_name/vat/address snapshot are NOT NULL now,
-    # but invoices_old may predate all of that (client_id could be NULL —
-    # invoices didn't always require a client — and the snapshot columns
-    # may not even exist yet). Route orphaned rows to a placeholder client
-    # and backfill missing/NULL snapshot text with '' rather than losing
-    # the row or fabricating a real customer.
-    old_cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(invoices_old)")}
-    has_orphans = "client_id" not in old_cols or conn.exec_driver_sql(
-        "SELECT 1 FROM invoices_old WHERE client_id IS NULL LIMIT 1"
-    ).fetchone() is not None
-    if has_orphans:
-        placeholder_id = _ensure_legacy_placeholder_client(conn)
-        client_id_expr = f"COALESCE(client_id, {placeholder_id})" if "client_id" in old_cols else str(placeholder_id)
-    else:
-        client_id_expr = "client_id"
-    snapshot_cols = ["client_name", "client_vat_number", "client_address"]
-    select_parts = ["id", "sale_id", client_id_expr, "invoice_number"] + [
-        f"COALESCE({col}, '')" if col in old_cols else "''" for col in snapshot_cols
-    ]
-    conn.exec_driver_sql(
-        f"INSERT INTO invoices (id, sale_id, client_id, invoice_number, {', '.join(snapshot_cols)}) "
-        f"SELECT {', '.join(select_parts)} FROM invoices_old"
-    )
-    conn.exec_driver_sql("DROP TABLE invoices_old")
-    conn.commit()
-    conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+def _add_shortcuts_tables(conn):
+    """Why: POS shortcut pages — hand-picked product-button pages, kept
+    separate from category browsing (feat: shortcuts). create_all() above
+    already creates these tables on any database that reaches here; this
+    is the explicit record of when they were introduced and a safety net
+    if create_all() is ever skipped."""
+    existing_tables = _existing_tables(conn)
+    if "shortcuts" not in existing_tables:
+        Shortcut.__table__.create(conn)
+        conn.commit()
+    if "shortcut_items" not in existing_tables:
+        ShortcutItem.__table__.create(conn)
+        conn.commit()
 
 
 def _ensure_legacy_placeholder_client(conn) -> int:
@@ -273,8 +292,8 @@ def _ensure_legacy_placeholder_client(conn) -> int:
     if existing:
         return existing[0]
     conn.exec_driver_sql(
-        'INSERT INTO clients (name, address, "vatNumber", is_active) '
-        "VALUES ('(legacy invoice, no client on file)', '', 'LEGACY-NO-CLIENT', 0)"
+        'INSERT INTO clients (name, address, country, "vatNumber", is_active) '
+        f"VALUES ('(legacy invoice, no client on file)', '', '{BELGIUM}', 'LEGACY-NO-CLIENT', 0)"
     )
     return conn.exec_driver_sql(
         "SELECT id FROM clients WHERE \"vatNumber\" = 'LEGACY-NO-CLIENT'"

@@ -25,7 +25,7 @@ class ReportsScreen(QWidget):
 
 
     navigate = pyqtSignal(int)
-    sale_selected = pyqtSignal(int)  # emits the DB Sale.id of the double-clicked row, not its table position
+    sale_selected = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
@@ -58,15 +58,33 @@ class ReportsScreen(QWidget):
         # Categories trio below: only one is ever "pressed" at a time.
         self._range_group = QButtonGroup(self)
         self._range_group.setExclusive(True)
-        for label, days in [("Today", 0), ("Last 7 days", 7), ("Last 30 days", 30)]:
-            btn = QPushButton(label)
-            btn.setObjectName("salesBtn")
-            btn.setCheckable(True)
-            btn.setChecked(days == 0)
-            btn.setFixedHeight(BUTTON_HEIGHT)
-            btn.clicked.connect(lambda _, d=days: self._set_range(d))
-            self._range_group.addButton(btn)
-            controls.addWidget(btn)
+
+        self.today_btn = QPushButton("Today")
+        self.today_btn.setObjectName("salesBtn")
+        self.today_btn.setCheckable(True)
+        self.today_btn.setChecked(True)
+        self.today_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.today_btn.clicked.connect(lambda: self._set_range(0))
+        self._range_group.addButton(self.today_btn)
+        controls.addWidget(self.today_btn)
+
+        last_7_days_btn = QPushButton("Last 7 days")
+        last_7_days_btn.setObjectName("salesBtn")
+        last_7_days_btn.setCheckable(True)
+        last_7_days_btn.setChecked(False)
+        last_7_days_btn.setFixedHeight(BUTTON_HEIGHT)
+        last_7_days_btn.clicked.connect(lambda: self._set_range(7))
+        self._range_group.addButton(last_7_days_btn)
+        controls.addWidget(last_7_days_btn)
+
+        last_30_days_btn = QPushButton("Last 30 days")
+        last_30_days_btn.setObjectName("salesBtn")
+        last_30_days_btn.setCheckable(True)
+        last_30_days_btn.setChecked(False)
+        last_30_days_btn.setFixedHeight(BUTTON_HEIGHT)
+        last_30_days_btn.clicked.connect(lambda: self._set_range(30))
+        self._range_group.addButton(last_30_days_btn)
+        controls.addWidget(last_30_days_btn)
 
         load_btn = QPushButton("Load Report")
         load_btn.setObjectName("primaryBtn")
@@ -77,11 +95,11 @@ class ReportsScreen(QWidget):
         # Sales/VAT/Categories are a tab-like, mutually exclusive trio — only
         # one is ever "pressed" (highlighted) at a time. Invoices is a
         # separate on/off filter, so it toggles independently of those three.
-        sales_btn = FunctionButton("Sales", "salesBtn")
-        sales_btn.setFixedHeight(BUTTON_HEIGHT)
-        sales_btn.setCheckable(True)
-        sales_btn.setChecked(True)
-        controls.addWidget(sales_btn)
+        self.sales_btn = FunctionButton("Sales", "salesBtn")
+        self.sales_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.sales_btn.setCheckable(True)
+        self.sales_btn.setChecked(True)
+        controls.addWidget(self.sales_btn)
 
         vat_btn = FunctionButton("VAT breakdown", "salesBtn")
         vat_btn.setFixedHeight(BUTTON_HEIGHT)
@@ -95,13 +113,13 @@ class ReportsScreen(QWidget):
 
         self._view_group = QButtonGroup(self)
         self._view_group.setExclusive(True)
-        for btn in (sales_btn, vat_btn, cats_btn):
+        for btn in (self.sales_btn, vat_btn, cats_btn):
             self._view_group.addButton(btn)
 
-        invoices_btn = FunctionButton("Invoices", "InvBtn")
-        invoices_btn.setFixedHeight(BUTTON_HEIGHT)
-        invoices_btn.setCheckable(True)
-        controls.addWidget(invoices_btn)
+        self.invoices_btn = FunctionButton("Invoices", "InvBtn")
+        self.invoices_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.invoices_btn.setCheckable(True)
+        controls.addWidget(self.invoices_btn)
 
         x_report_btn = FunctionButton("X Report", "XRBtn")
         x_report_btn.setFixedHeight(BUTTON_HEIGHT)
@@ -159,9 +177,6 @@ class ReportsScreen(QWidget):
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.sales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 
-        self.sales_table.itemDoubleClicked.connect(lambda _: self._display_sale())
-
-
         layout.addWidget(self.sales_table, stretch=1)
 
         # ── VAT breakdown ─────────────────────────────────────────────────────
@@ -192,8 +207,8 @@ class ReportsScreen(QWidget):
 
         layout.addWidget(self.categories_table, stretch=1)
 
-        sales_btn.clicked.connect(lambda: self._show_table("sales"))
-        invoices_btn.clicked.connect(self._invoices_only)
+        self.sales_btn.clicked.connect(lambda: self._show_table("sales"))
+        self.invoices_btn.clicked.connect(self._invoices_only)
         vat_btn.clicked.connect(lambda: self._show_table("vat"))
         cats_btn.clicked.connect(lambda: self._show_table("categories"))
 
@@ -228,6 +243,11 @@ class ReportsScreen(QWidget):
         self.date_to.setDate(QDate.currentDate().toPyDate())
         self._show_table("sales")
         self._load_report()
+        self.sales_btn.setChecked(True)
+        if self.invoices_btn.isChecked():
+            self.invoices_btn.setChecked(False)
+        self.today_btn.setChecked(True)
+
 
     def _load_report(self, invoices: bool = False):
         start = self.date_from.date().toPyDate()
@@ -278,7 +298,6 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
                 self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
                 self.sales_table.setItem(row, 6, QTableWidgetItem(f"{sale.final_amount:.2f}"))
-                print(sale.sale_number, sale.updated_at)
                 updated_at = "/" if sale.updated_at is None else sale.updated_at.strftime("%d/%m/%Y %H:%M")
                 self.sales_table.setItem(row, 7, QTableWidgetItem(updated_at))
 
@@ -337,6 +356,8 @@ class ReportsScreen(QWidget):
         self._load_report(invoices=self.invoices_only)
 
     def _confirm(self):
+        if self.sales_table.currentRow() != -1:
+            self._display_sale()
         self.navigate.emit(0)
 
     def _invoices_only(self):
@@ -361,5 +382,5 @@ class ReportsScreen(QWidget):
         sale_id = self._sales_row_ids.get(row)
         if sale_id is not None:
             self.sale_selected.emit(sale_id)
-        self.navigate.emit(0)
+        self.sales_table.setCurrentCell(-1, -1)
 

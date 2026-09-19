@@ -9,6 +9,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, backref, DeclarativeBase
 
+from app.constants.countries import BELGIUM
+
 
 class Base(DeclarativeBase):
     pass
@@ -207,6 +209,7 @@ class Client(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50), nullable=False)
     address = Column(String(50), nullable=False)
+    country = Column(String(50), nullable=False, default=BELGIUM, server_default=text(f"'{BELGIUM}'"))
     phone = Column(String(50), nullable=True)
     email = Column(String(50), nullable=True)
     vatNumber = Column(String(50), nullable=False)

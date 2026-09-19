@@ -455,6 +455,88 @@ def test_set_client_marks_invoice_and_shows_label(screen):
     assert "Acme" in screen.client_label.text()
 
 
+def test_set_client_foreign_country_zeroes_tax_and_nets_price_on_existing_items(screen):
+    pid, barcode, _ = _add_product(barcode="tax1", price=10.0, tax=21)
+    _scan(screen, barcode)
+    assert screen.cart.entries[0].tax_rate == 21
+    assert screen.cart.entries[0].unit_price == 10.0
+
+    with get_session() as session:
+        client = ClientService.create(
+            session, name="Foreign Co", vatNumber="FR1", address="1 Rue", country="FR",
+        )
+        client_id = client.id
+
+    screen.set_client(client_id, "Foreign Co")
+
+    entry = screen.cart.entries[0]
+    assert entry.tax_rate == 0
+    assert entry.base_tax_rate == 21
+    assert entry.unit_price == 8.26  # 10.0 / 1.21, netted of the 21% VAT
+    assert entry.base_unit_price == 10.0
+
+
+def test_set_client_domestic_country_keeps_normal_tax_and_price(screen):
+    pid, barcode, _ = _add_product(barcode="tax2", price=10.0, tax=21)
+    _scan(screen, barcode)
+
+    with get_session() as session:
+        client = ClientService.create(
+            session, name="Belgian Co", vatNumber="BE1", address="1 Straat", country="BE",
+        )
+        client_id = client.id
+
+    screen.set_client(client_id, "Belgian Co")
+
+    entry = screen.cart.entries[0]
+    assert entry.tax_rate == 21
+    assert entry.unit_price == 10.0
+
+
+def test_switching_from_foreign_to_domestic_client_restores_tax_and_price(screen):
+    pid, barcode, _ = _add_product(barcode="tax3", price=10.0, tax=21)
+    _scan(screen, barcode)
+
+    with get_session() as session:
+        foreign = ClientService.create(
+            session, name="Foreign Co", vatNumber="FR1", address="1 Rue", country="FR",
+        )
+        domestic = ClientService.create(
+            session, name="Belgian Co", vatNumber="BE1", address="1 Straat", country="BE",
+        )
+        foreign_id, domestic_id = foreign.id, domestic.id
+
+    screen.set_client(foreign_id, "Foreign Co")
+    assert screen.cart.entries[0].tax_rate == 0
+    assert screen.cart.entries[0].unit_price == 8.26
+
+    screen.set_client(domestic_id, "Belgian Co")
+    assert screen.cart.entries[0].tax_rate == 21
+    assert screen.cart.entries[0].unit_price == 10.0
+
+
+def test_open_price_item_entered_after_foreign_client_is_netted(screen):
+    pid, barcode, _ = _add_product(barcode="tax4", price=0.0, tax=21, is_open_price=True)
+
+    with get_session() as session:
+        client = ClientService.create(
+            session, name="Foreign Co", vatNumber="FR1", address="1 Rue", country="FR",
+        )
+        client_id = client.id
+    screen.set_client(client_id, "Foreign Co")
+
+    _scan(screen, barcode)
+    entry = screen.cart.entries[0]
+    assert entry.pending
+
+    screen.combined_input.setText("10.00")
+    screen._on_barcode_enter()
+
+    assert entry.base_unit_price == 10.0
+    assert entry.unit_price == 8.26
+    assert entry.tax_rate == 0
+
+
 def test_invoice_payment_creates_invoice_record(screen):
     with get_session() as session:
         client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
@@ -597,6 +679,22 @@ def test_removing_item_after_reopen_appends_reversal_line(screen):
     assert original.has_reversal is True
     assert reversal.is_reversal is True
     assert reversal.quantity == -1
+
+
+def test_reversal_line_copies_original_tax_rate(screen):
+    pid, barcode, _ = _add_product(barcode="rev_tax", price=10.0, tax=21, stock_quantity=50)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+
+    original_row = screen._row_to_entry.index(0)
+    screen.cart_table.selectRow(original_row)
+    screen._remove_selected()
+
+    original, reversal = screen.cart.entries
+    assert original.tax_rate == 21
+    assert reversal.tax_rate == 21
+    assert reversal.base_tax_rate == 21
 
 
 def test_remove_selected_on_promo_discount_removes_the_product_line(screen):

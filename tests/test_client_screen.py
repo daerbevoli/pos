@@ -8,6 +8,7 @@ hit an isolated in-memory database.
 import csv
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from app.ui.client_screen import ClientScreen
@@ -100,14 +101,17 @@ def test_new_client_happy_path_persists(screen):
 
     panel.name.setText("Brand New")
     panel.address.setText("1 Main St")
-    panel.vatNumber.setText("VNEW")
+    # The country-code prefix (Belgium by default) is locked in place —
+    # typing appends after it rather than replacing it.
+    assert panel.vatNumber.text() == "BE"
+    panel.vatNumber.setText("BEVNEW")
     panel._on_ok()
     assert panel._mode == "display"
 
     with get_session() as session:
         found = ClientService.get_by_name(session, "Brand New")
     assert found is not None
-    assert found.vatNumber == "VNEW"
+    assert found.vatNumber == "BEVNEW"
 
 def test_new_client_validation_blocks_empty_name(screen):
     panel = screen.detail_panel
@@ -142,7 +146,9 @@ def test_new_client_validation_blocks_empty_vat(screen):
     panel._start_new()
     panel.name.setText("Has Name")
     panel.address.setText("1 Main St")
-    panel.vatNumber.setText("")
+    # The country-code prefix can't be removed, so "empty" here means
+    # leaving it at the bare prefix with no actual VAT digits.
+    assert panel.vatNumber.text() == "BE"
 
     panel._on_ok()
     assert panel._mode != "display"
@@ -168,6 +174,51 @@ def test_start_new_ignored_while_already_editing(screen):
     panel.name.setText("First")
     panel._start_new()  # should be a no-op since mode != "display"
     assert panel.name.text() == "First"
+
+
+# ── VAT country-code prefix ──────────────────────────────────────────────
+
+def test_new_client_vat_gets_country_prefix(screen):
+    panel = screen.detail_panel
+    panel._start_new()
+    assert panel.vatNumber.text() == "BE"
+
+
+def test_new_client_vat_prefix_is_unremovable(screen):
+    panel = screen.detail_panel
+    panel._start_new()
+
+    panel.vatNumber.setText("1234")  # replacing the whole field, prefix and all
+    assert panel.vatNumber.text() == "BE1234"
+
+    panel.vatNumber.setText("")  # clearing the field entirely
+    assert panel.vatNumber.text() == "BE"
+
+
+def test_new_client_vat_prefix_survives_backspace_and_select_all_typing(screen, qtbot):
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.vatNumber.setFocus()
+
+    # Backspacing from the end can never eat into the prefix.
+    for _ in range(5):
+        qtbot.keyClick(panel.vatNumber, Qt.Key.Key_Backspace)
+    assert panel.vatNumber.text() == "BE"
+
+    # Select-all + typing only replaces the part after the prefix.
+    panel.vatNumber.selectAll()
+    qtbot.keyClicks(panel.vatNumber, "1234")
+    assert panel.vatNumber.text() == "BE1234"
+
+
+def test_changing_country_clears_vat_to_bare_prefix_for_new_client(screen):
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.vatNumber.setText("BE0123456789")
+
+    panel.country.setCurrentIndex(panel.country.findData("FR"))
+
+    assert panel.vatNumber.text() == "FR"
 
 
 # ── Edit flow ────────────────────────────────────────────────────────────
@@ -201,6 +252,20 @@ def test_edit_cancel_restores_original_values(screen):
     assert panel.name.text() == "Original"
     with get_session() as session:
         assert ClientService.get_by_id(session, cid).name == "Original"
+
+
+def test_changing_country_while_editing_clears_vat_to_bare_prefix(screen):
+    _add_client(name="Client", vatNumber="BE0123456789", country="BE")
+    screen.refresh()
+    screen.table.selectRow(0)
+
+    panel = screen.detail_panel
+    panel._start_edit()
+    assert panel.vatNumber.text() == "BE0123456789"
+
+    panel.country.setCurrentIndex(panel.country.findData("FR"))
+
+    assert panel.vatNumber.text() == "FR"
 
 
 # ── Delete flow ──────────────────────────────────────────────────────────

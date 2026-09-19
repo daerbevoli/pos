@@ -204,6 +204,8 @@ def test_add_product_creates_new_entry():
     assert entry.quantity == 2
     assert entry.unit_price == 0.5
     assert entry.tax_rate == 21
+    assert entry.base_tax_rate == 21
+    assert entry.base_unit_price == 0.5
 
 
 def test_add_product_open_price_starts_pending():
@@ -505,14 +507,85 @@ def test_clear_empties_all_entries():
     assert cart.entries == []
 
 
+# ── retax_for_client ─────────────────────────────────────────────────────
+
+def test_retax_for_client_zeroes_rate_and_nets_price_for_non_domestic():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=12.10, tax=21), quantity=1)
+    cart.add_product(_FakeProduct(id=2, price=1.06, tax=6), quantity=1)
+
+    cart.retax_for_client(is_domestic=False)
+
+    assert [e.tax_rate for e in cart.entries] == [0, 0]
+    assert [e.base_tax_rate for e in cart.entries] == [21, 6]
+    assert [e.unit_price for e in cart.entries] == [10.0, 1.0]
+    assert [e.base_unit_price for e in cart.entries] == [12.10, 1.06]
+
+
+def test_retax_for_client_restores_base_rate_and_price_for_domestic():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=12.10, tax=21), quantity=1)
+    cart.retax_for_client(is_domestic=False)
+    assert cart.entries[0].tax_rate == 0
+    assert cart.entries[0].unit_price == 10.0
+
+    cart.retax_for_client(is_domestic=True)
+    assert cart.entries[0].tax_rate == 21
+    assert cart.entries[0].unit_price == 12.10
+
+
+def test_retax_for_client_zero_rate_item_price_is_unaffected():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=5.0, tax=0), quantity=1)
+    cart.retax_for_client(is_domestic=False)
+    assert cart.entries[0].unit_price == 5.0
+
+
+def test_retax_for_client_ignores_non_item_entries():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=1.0, tax=21), quantity=1)
+    cart.add_subtotal()
+
+    cart.retax_for_client(is_domestic=False)  # should not raise on SubtotalMarker
+
+    assert cart.entries[0].tax_rate == 0
+    assert isinstance(cart.entries[1], SubtotalMarker)
+
+
+def test_add_product_after_non_domestic_client_already_set_nets_price():
+    """Items scanned *after* a foreign client is already attached should
+    come in already netted, not just ones present at the time of the
+    client change."""
+    cart = Cart(is_domestic=False)
+    cart.add_product(_FakeProduct(id=1, price=12.10, tax=21), quantity=1)
+
+    entry = cart.entries[0]
+    assert entry.tax_rate == 0
+    assert entry.unit_price == 10.0
+    assert entry.base_tax_rate == 21
+    assert entry.base_unit_price == 12.10
+
+
+def test_set_open_price_applies_current_client_vat_treatment():
+    cart = Cart(is_domestic=False)
+    product = _FakeProduct(id=1, name="Loose Snacks", price=0.0, tax=21, is_open_price=True)
+    cart.add_product(product, quantity=1)
+    entry = cart.entries[0]
+
+    cart.set_open_price(entry, 12.10)
+
+    assert entry.base_unit_price == 12.10
+    assert entry.unit_price == 10.0
+
+
 # ── Snapshot round-trip ───────────────────────────────────────────────────
 
 def test_snapshot_round_trip_preserves_all_entry_types():
     cart = Cart(entries=[
         CartItem(
             product_id=1, product_name="Bread", product_barcode="111",
-            unit_price=2.5, quantity=2, unit="pcs", tax_rate=6,
-            discount=0.5, is_reversal=False, has_reversal=True,
+            unit_price=2.5, quantity=2, unit="pcs", tax_rate=0, base_tax_rate=6,
+            base_unit_price=2.65, discount=0.5, is_reversal=False, has_reversal=True,
             promo_name="New Year Promo", promo_type="percent", promo_value=15.0,
         ),
         DiscountEntry(amount=1.0, label="1.00"),
@@ -531,7 +604,9 @@ def test_snapshot_round_trip_preserves_all_entry_types():
     assert item.product_name == "Bread"
     assert item.unit_price == 2.5
     assert item.quantity == 2
-    assert item.tax_rate == 6
+    assert item.tax_rate == 0
+    assert item.base_tax_rate == 6
+    assert item.base_unit_price == 2.65
     assert item.discount == 0.5
     assert item.has_reversal is True
     assert item.promo_name == "New Year Promo"
@@ -574,9 +649,36 @@ def test_from_snapshot_defaults_missing_optional_fields():
     item = restored.entries[0]
     assert item.unit == "pcs"
     assert item.tax_rate == 0
+    assert item.base_tax_rate == 0
+    assert item.base_unit_price == 1.0
     assert item.discount == 0.0
     assert item.is_reversal is False
     assert item.has_reversal is False
+
+
+def test_from_snapshot_missing_base_tax_rate_falls_back_to_tax_rate():
+    """Sale snapshots saved before base_tax_rate existed should still
+    round-trip without losing the item's real VAT rate."""
+    raw = json.dumps([{
+        "type": "item", "product_id": 1, "product_name": "X",
+        "product_barcode": "1", "unit_price": 1.0, "quantity": 1,
+        "tax_rate": 21,
+    }])
+    restored = Cart.from_snapshot(raw)
+    assert restored.entries[0].tax_rate == 21
+    assert restored.entries[0].base_tax_rate == 21
+
+
+def test_from_snapshot_missing_base_unit_price_falls_back_to_unit_price():
+    """Sale snapshots saved before base_unit_price existed should still
+    round-trip without losing the item's real (domestic) price."""
+    raw = json.dumps([{
+        "type": "item", "product_id": 1, "product_name": "X",
+        "product_barcode": "1", "unit_price": 12.10, "quantity": 1,
+    }])
+    restored = Cart.from_snapshot(raw)
+    assert restored.entries[0].unit_price == 12.10
+    assert restored.entries[0].base_unit_price == 12.10
 
 
 # ── _calc_tax ─────────────────────────────────────────────────────────────

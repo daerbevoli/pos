@@ -93,7 +93,7 @@ QLabel#ticketTotalLbl {
     selection-background-color: #4a90d9;
 }
 
-QLabel#ticketTotalLbl[frozen=True] {
+QLabel#ticketTotalLbl[frozen="true"] {
     background-color: #ccc5be;
     background-color: #ccc5be;
     color: #665C57;
@@ -486,7 +486,8 @@ QFrame#articleFieldFrame {
 /* Plain (non-picker) inputs — barcode, name, price, stock, min stock —
    matched to QLabel#pickerField's look so every field row reads the same. */
 QFrame#articleFieldFrame QLineEdit,
-QFrame#articleFieldFrame QDoubleSpinBox {
+QFrame#articleFieldFrame QDoubleSpinBox,
+QFrame#articleFieldFrame QComboBox {
     background-color: #ffffff;
     border: 1px solid #c3cbd6;
     border-radius: 4px;
@@ -495,7 +496,8 @@ QFrame#articleFieldFrame QDoubleSpinBox {
 }
 
 QFrame#articleFieldFrame QLineEdit:focus,
-QFrame#articleFieldFrame QDoubleSpinBox:focus {
+QFrame#articleFieldFrame QDoubleSpinBox:focus,
+QFrame#articleFieldFrame QComboBox:focus {
     border-color: #4a90d9;
 }
 

@@ -220,6 +220,63 @@ def test_confirm_emits_navigate_signal(screen, qtbot):
     assert blocker.args == [0]
 
 
+def test_confirm_without_a_selected_row_does_not_show_any_sale(screen, qtbot):
+    """Pressing OK with nothing clicked in the sales table must navigate
+    back to the POS without telling it to show any sale."""
+    with get_session() as session:
+        product = _make_product(session)
+    _finalize_sale(product)
+    screen._load_report()
+    assert screen.sales_table.currentRow() == -1  # nothing selected after a fresh load
+
+    received = []
+    screen.sale_selected.connect(received.append)
+
+    with qtbot.waitSignal(screen.navigate, timeout=1000):
+        screen._confirm()
+
+    assert received == []
+
+
+def test_confirm_with_a_selected_row_shows_that_sale(screen, qtbot):
+    """Pressing OK after clicking a row shows exactly that row's sale."""
+    with get_session() as session:
+        product = _make_product(session, price=10.0)
+    older = _finalize_sale(product, quantity=1)
+    newer = _finalize_sale(product, quantity=1)
+    screen._load_report()
+
+    row_for_newer = next(r for r, sid in screen._sales_row_ids.items() if sid == newer.id)
+    screen.sales_table.setCurrentCell(row_for_newer, 0)
+
+    with qtbot.waitSignal(screen.sale_selected, timeout=1000) as blocker:
+        screen._confirm()
+
+    assert blocker.args == [newer.id]
+
+
+def test_display_sale_clears_current_row_after_emitting(screen, qtbot):
+    """Once a selected sale has been shown, the selection is consumed —
+    pressing OK again without clicking a new row must not re-show it."""
+    with get_session() as session:
+        product = _make_product(session)
+    _finalize_sale(product)
+    screen._load_report()
+
+    row = next(iter(screen._sales_row_ids))
+    screen.sales_table.setCurrentCell(row, 0)
+
+    with qtbot.waitSignal(screen.sale_selected, timeout=1000):
+        screen._display_sale()
+
+    assert screen.sales_table.currentRow() == -1
+
+    received = []
+    screen.sale_selected.connect(received.append)
+    screen._confirm()
+    assert received == []
+
+
 def test_display_sale_emits_the_row_actual_sale_id(screen, qtbot):
     """sale_selected must carry the double-clicked row's own Sale.id, not
     the row's table position — regression test for a bug where the POS

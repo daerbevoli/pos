@@ -26,6 +26,8 @@ class CartItem(ReceiptEntry):
     quantity: float | None  # None = amount not entered yet (weight/volume units)
     unit: str = "pcs"
     tax_rate: int = 0
+    base_tax_rate: int = 0  # the product's own rate; tax_rate may be zeroed by retax_for_client()
+    base_unit_price: float = 0.0  # the domestic (VAT-incl.) price; unit_price may be netted down by retax_for_client()
     discount: float = 0.0
     is_reversal: bool = False  # True for a line that reverses an earlier line on a reopened sale
     has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
@@ -93,6 +95,16 @@ class PaymentEntry(ReceiptEntry):
 @dataclass
 class Cart:
     entries: list[ReceiptEntry] = field(default_factory=list)
+    is_domestic: bool = True  # whether the attached client is Belgian; affects unit_price/tax_rate
+
+    def _effective_price(self, base_price: float, base_tax_rate: int) -> float:
+        """The price actually charged: the domestic (VAT-incl.) price as-is
+        for a Belgian client, netted of VAT for a non-domestic one — the
+        store's own margin is unaffected either way, only the VAT portion
+        it would otherwise have collected and remitted."""
+        if self.is_domestic or base_tax_rate == 0:
+            return base_price
+        return round(base_price / (1 + base_tax_rate / 100), 2)
 
     @property
     def subtotal(self):
@@ -125,11 +137,7 @@ class Cart:
         )
 
     def add_product(self, product, quantity: float | None = 1):
-        # product.price is 0.0 for an open-price product — the CartItem
-        # starts pending (see CartItem.pending) and unit_price is filled in
-        # later the same way a weight item's quantity is.
-        # Pending (amount not yet entered) items always get their own row —
-        # merging would leave a stale value once the amount is filled in.
+
         if quantity is not None:
             # Walk backwards until we hit a subtotal marker.
             for entry in reversed(self.entries):
@@ -146,10 +154,12 @@ class Cart:
                 product_id=product.id,
                 product_name=product.name,
                 product_barcode=product.barcode or "",
-                unit_price=product.price,
+                unit_price=self._effective_price(product.price, product.tax),
                 quantity=quantity,
                 unit=product.unit,
-                tax_rate=product.tax,
+                tax_rate=product.tax if self.is_domestic else 0,
+                base_tax_rate=product.tax,
+                base_unit_price=product.price,
                 is_open_price=product.is_open_price,
                 promo_name=promo_item.promo.name if promo_item else None,
                 promo_type=promo_item.discount_type if promo_item else None,
@@ -179,6 +189,26 @@ class Cart:
             if isinstance(entry, CartItem) and not entry.has_reversal and entry.promo_discount != 0:
                 result.append(DiscountEntry(amount=entry.promo_discount, label=entry.promo_name, is_promo=True))
         self.entries = result
+
+    def retax_for_client(self, is_domestic: bool):
+        """Re-derives every item's effective VAT rate and price for the
+        client now attached to the sale: zero-rated and netted of VAT (EU
+        reverse-charge / non-EU export) once a non-domestic client is on
+        it, restored to the product's own rate/price otherwise. The
+        store's margin is unaffected — only the VAT portion changes. Call
+        whenever the attached client changes — see pos_screen.set_client()."""
+        self.is_domestic = is_domestic
+        for entry in self.entries:
+            if isinstance(entry, CartItem):
+                entry.tax_rate = entry.base_tax_rate if is_domestic else 0
+                entry.unit_price = self._effective_price(entry.base_unit_price, entry.base_tax_rate)
+
+    def set_open_price(self, entry: "CartItem", amount: float):
+        """Records the cashier-typed price for a pending open-price line,
+        applying the sale's current client VAT treatment the same way
+        retax_for_client does."""
+        entry.base_unit_price = amount
+        entry.unit_price = self._effective_price(amount, entry.base_tax_rate)
 
     def add_subtotal(self):
         self.entries.append(SubtotalMarker())
@@ -213,6 +243,8 @@ class Cart:
                     "quantity": entry.quantity,
                     "unit": entry.unit,
                     "tax_rate": entry.tax_rate,
+                    "base_tax_rate": entry.base_tax_rate,
+                    "base_unit_price": entry.base_unit_price,
                     "discount": entry.discount,
                     "is_reversal": entry.is_reversal,
                     "has_reversal": entry.has_reversal,
@@ -245,6 +277,8 @@ class Cart:
                     quantity=raw["quantity"],
                     unit=raw.get("unit", "pcs"),
                     tax_rate=raw.get("tax_rate", 0),
+                    base_tax_rate=raw.get("base_tax_rate", raw.get("tax_rate", 0)),
+                    base_unit_price=raw.get("base_unit_price", raw["unit_price"]),
                     discount=raw.get("discount", 0.0),
                     is_reversal=raw.get("is_reversal", False),
                     has_reversal=raw.get("has_reversal", False),
@@ -487,7 +521,6 @@ class SalesService:
 
         sale.tax_amount = round(total_tax, 2)
         sale.updated_at = datetime.now()
-        print(sale.updated_at.strftime("%d/%m/%Y %H:%M"))
 
         # Not-yet-sent invoice: keep its frozen snapshot in step with the
         # edit instead of letting it go stale (see the comment on

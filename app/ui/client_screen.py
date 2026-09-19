@@ -9,10 +9,11 @@ itself, mirroring the inventory screen's article editing.
 import csv
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
     QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
+from PyQt6.QtGui import QKeySequence
 
 from app.core.client_service import ClientService
 from app.models.models import Client
@@ -20,6 +21,7 @@ from app.core.database import get_session
 from app.ui.widgets.form_fields import FieldRow
 from app.ui.dialogs.file_dialog import FileDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
+from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.constants import (
     BUTTON_HEIGHT_XS,
     INPUT_HEIGHT,
@@ -28,7 +30,7 @@ from app.constants import (
     SPACING_XS,
 )
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
-CLIENT_CSV_FIELDS = ["name", "vat", "address", "phone", "email", "active"]
+CLIENT_CSV_FIELDS = ["name", "vat", "address", "country", "phone", "email", "active"]
 
 
 class ClientDetailPanel(QFrame):
@@ -45,6 +47,7 @@ class ClientDetailPanel(QFrame):
         self._mode = "display"  # "display" | "new" | "edit"
 
         self._active_row: FieldRow | None = None
+        self._vat_prefix = ""  # country-code prefix currently enforced on vatNumber
 
         self.overlay = TapToDismissOverlay(self)
 
@@ -81,6 +84,11 @@ class ClientDetailPanel(QFrame):
         self.address = QLineEdit()
         self.address.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
+        self.country = QComboBox()
+        self.country.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        for code, name in sorted(COUNTRY_NAMES.items(), key=lambda kv: kv[1]):
+            self.country.addItem(name, code)
+
         self.vatNumber = QLineEdit()
         self.vatNumber.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
@@ -93,6 +101,7 @@ class ClientDetailPanel(QFrame):
         rows_spec = [
             ("Name *",       self.name),
             ("Address *",    self.address),
+            ("Country *",    self.country),
             ("VAT Number *", self.vatNumber),
             ("Phone",        self.phone),
             ("Email",        self.email),
@@ -120,13 +129,13 @@ class ClientDetailPanel(QFrame):
         self.btn_delete = FunctionButton("Delete\nClient", "deleteArticleBtn")
         self.btn_error = FunctionButton("Error", "errorBtn")
 
-        self.btn_up = FunctionButton("Up", "secFunc")
+        self.btn_up = FunctionButton("↑", "secFunc")
         self.btn_import = FunctionButton("Import", "secFunc")
         self.btn_export = FunctionButton("Export", "secFunc")
         self.btn_search_key = FunctionButton("Search by\nvat", "secFunc")
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
-        self.btn_down = FunctionButton("Down", "secFunc")
+        self.btn_down = FunctionButton("↓", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
         layout_map = [
@@ -162,6 +171,8 @@ class ClientDetailPanel(QFrame):
         self.btn_search_key.clicked.connect(self._on_search_key)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
+        self.country.currentIndexChanged.connect(self._on_country_selected)
+        self.vatNumber.textChanged.connect(self._on_vat_text_changed)
 
         self._set_edit_mode(False)
 
@@ -177,6 +188,8 @@ class ClientDetailPanel(QFrame):
                 row.set_active(True)
 
         elif event.type() == QEvent.Type.KeyPress:
+            if obj is self.vatNumber and self._vat_guard_blocks(event):
+                return True
             key = event.key()
             if key == Qt.Key.Key_Up:
                 self._navigate(-1)
@@ -188,6 +201,39 @@ class ClientDetailPanel(QFrame):
                 return True
 
         return super().eventFilter(obj, event)
+
+    def _vat_guard_blocks(self, event) -> bool:
+        """Keeps the VAT field's country-code prefix intact against keyboard
+        edits: backspace/delete/cut can't reach into it, and typing or
+        pasting over a selection that overlaps it only replaces the part
+        after it."""
+        if self._mode not in ("new", "edit") or not self._vat_prefix:
+            return False
+        prefix_len = len(self._vat_prefix)
+        le = self.vatNumber
+        key = event.key()
+        sel_start = le.selectionStart()
+        has_selection = sel_start != -1
+
+        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            if has_selection:
+                return sel_start < prefix_len
+            pos = le.cursorPosition()
+            return pos <= prefix_len if key == Qt.Key.Key_Backspace else pos < prefix_len
+
+        if event.matches(QKeySequence.StandardKey.Cut) and has_selection:
+            return sel_start < prefix_len
+
+        is_paste = event.matches(QKeySequence.StandardKey.Paste)
+        is_typed_char = bool(event.text()) and event.text().isprintable()
+        if is_paste or is_typed_char:
+            if has_selection and sel_start < prefix_len:
+                sel_len = max(0, sel_start + len(le.selectedText()) - prefix_len)
+                le.setSelection(prefix_len, sel_len)
+            elif not has_selection and le.cursorPosition() < prefix_len:
+                le.setCursorPosition(prefix_len)
+
+        return False
 
     def _navigate(self, direction: int):
         focused = self.focusWidget()
@@ -213,14 +259,49 @@ class ClientDetailPanel(QFrame):
     def _reset_fields_to_placeholder(self):
         self.name.clear()
         self.address.clear()
+        self._set_country(BELGIUM)
         self.vatNumber.clear()
         self.phone.clear()
         self.email.clear()
 
+    def _set_country(self, code: str):
+        idx = self.country.findData(code)
+        self.country.setCurrentIndex(idx if idx >= 0 else self.country.findData(BELGIUM))
+
+    def _apply_country_to_vat(self, code: str):
+        """Resets the VAT field to just `code` — changing the country
+        discards whatever VAT number was there for the old one."""
+        self._vat_prefix = code
+        self.vatNumber.setText(code)
+
+    def _on_country_selected(self):
+        if self._mode not in ("new", "edit"):
+            return
+        self._apply_country_to_vat(self.country.currentData())
+
+    def _on_vat_text_changed(self, text: str):
+        """Safety net for edits _vat_guard_blocks can't see (e.g. a
+        context-menu paste or drag-and-drop): if the prefix is gone,
+        put it back without discarding whatever text is there."""
+        if self._mode not in ("new", "edit") or not self._vat_prefix:
+            return
+        if text.startswith(self._vat_prefix):
+            return
+        corrected = self._vat_prefix + text
+        self.vatNumber.blockSignals(True)
+        self.vatNumber.setText(corrected)
+        self.vatNumber.setCursorPosition(len(corrected))
+        self.vatNumber.blockSignals(False)
+
     def _populate_fields(self, client):
         self.name.setText(client.name or "")
         self.address.setText(client.address or "")
+        self._set_country(client.country or BELGIUM)
         self.vatNumber.setText(client.vatNumber or "")
+        # Track the country's code as the VAT prefix without rewriting the
+        # stored value — only a later, user-driven country change should
+        # strip/replace it (see _on_country_selected).
+        self._vat_prefix = client.country or BELGIUM
         self.phone.setText(client.phone or "")
         self.email.setText(client.email or "")
         is_active = getattr(client, "is_active", True)
@@ -252,6 +333,7 @@ class ClientDetailPanel(QFrame):
         self.current_client_id = None
         self._mode = "new"
         self._reset_fields_to_placeholder()
+        self._apply_country_to_vat(BELGIUM)
         self._active_status_label.setText("Active")
         self._title_label.setText("New Client")
         self._set_edit_mode(True)
@@ -277,7 +359,8 @@ class ClientDetailPanel(QFrame):
         if not self.address.text().strip():
             self._show_overlay("Address is required.")
             return False
-        if not self.vatNumber.text().strip():
+        vat = self.vatNumber.text().strip()
+        if not vat or vat == self._vat_prefix:
             self._show_overlay("VAT number is required.")
             return False
         return True
@@ -286,6 +369,7 @@ class ClientDetailPanel(QFrame):
         return {
             "name": self.name.text().strip(),
             "address": self.address.text().strip(),
+            "country": self.country.currentData(),
             "vatNumber": self.vatNumber.text().strip(),
             "phone": self.phone.text().strip() or None,
             "email": self.email.text().strip() or None,
@@ -360,12 +444,13 @@ class ClientDetailPanel(QFrame):
                         "name": c.name,
                         "vat": c.vatNumber,
                         "address": c.address,
+                        "country": c.country or BELGIUM,
                         "phone": c.phone or "",
                         "email": c.email or "",
                         "active": 1 if c.is_active else 0,
                     })
 
-        self._show_overlay(f"Exported {len(clients)} client(s).", title="Export complete")
+        self._show_overlay(f"Exported {len(clients)} client(s).")
 
     def _on_import(self):
         path = ""
@@ -375,7 +460,7 @@ class ClientDetailPanel(QFrame):
         if not path:
             return
         if not path.endswith((".csv", ".txt")):
-            self._show_overlay("Only csv and txt files allowed to import", title="Import failed", kind="error")
+            self._show_overlay("Only csv and txt files allowed to import", kind="error")
             return
         try:
             with open(path, "r", newline="", encoding="utf-8") as f:
@@ -383,11 +468,11 @@ class ClientDetailPanel(QFrame):
         except UnicodeDecodeError:
             self._show_overlay(
                 "This file isn't valid UTF-8 text. Re-save it as UTF-8 CSV and try again.",
-                title="Import failed", kind="error",
+                kind="error",
             )
             return
         except (OSError, csv.Error) as e:
-            self._show_overlay(f"Couldn't read file: {e}", title="Import failed", kind="error")
+            self._show_overlay(f"Couldn't read file: {e}", kind="error")
             return
 
         clients_added = 0
@@ -400,16 +485,20 @@ class ClientDetailPanel(QFrame):
                     existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
                     if not existing and email:
                         existing = session.query(Client).filter_by(email=email).first()
-                    address = ", ".join(part for part in (row.get("Street"), row.get("City"), row.get("Country")) if part) or row.get("address")
+                    address = ", ".join(part for part in (row.get("Street"), row.get("City")) if part) or row.get("address")
                     if not vat or existing or not row.get("name") or not address:
                         clients_skipped += 1
                         continue
 
                     phone = (row.get("phone") or "").lstrip("'") or None
+                    country = (row.get("country") or "").strip().upper()
+                    if country not in COUNTRY_NAMES:
+                        country = BELGIUM
                     session.add(Client(
                         name=row.get("name"),
                         vatNumber=vat,
                         address=address,
+                        country=country,
                         phone=phone,
                         email=email,
                         is_active=True,
@@ -430,8 +519,8 @@ class ClientDetailPanel(QFrame):
         self.parent_screen.search_input.setFocus()
         self.parent_screen.search_input.setPlaceholderText("Search by name or VAT…")
 
-    def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
-        self.overlay.show_message(message, title=title, kind=kind)
+    def _show_overlay(self, message: str, kind: str = "info"):
+        self.overlay.show_message(message, kind=kind)
 
 
 class ClientScreen(QWidget):
@@ -450,10 +539,10 @@ class ClientScreen(QWidget):
         layout.setSpacing(SPACING_MD)
 
         # ── Client table (constructed early: ClientDetailPanel references it) ─
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setObjectName("inventoryTable")
         self.table.setHorizontalHeaderLabels([
-            "Name", "Address", "VAT", "Phone", "Email"
+            "Name", "Address", "Country", "VAT", "Phone", "Email"
         ])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -461,6 +550,7 @@ class ClientScreen(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -511,9 +601,10 @@ class ClientScreen(QWidget):
 
             self.table.setItem(row, 0, QTableWidgetItem(c.name or ""))
             self.table.setItem(row, 1, QTableWidgetItem(c.address or ""))
-            self.table.setItem(row, 2, QTableWidgetItem(c.vatNumber or ""))
-            self.table.setItem(row, 3, QTableWidgetItem(c.phone or ""))
-            self.table.setItem(row, 4, QTableWidgetItem(c.email or ""))
+            self.table.setItem(row, 2, QTableWidgetItem(COUNTRY_NAMES.get(c.country, c.country or "")))
+            self.table.setItem(row, 3, QTableWidgetItem(c.vatNumber or ""))
+            self.table.setItem(row, 4, QTableWidgetItem(c.phone or ""))
+            self.table.setItem(row, 5, QTableWidgetItem(c.email or ""))
 
     # ── Detail panel wiring ─────────────────────────────────────────────────
 

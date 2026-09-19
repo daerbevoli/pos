@@ -18,8 +18,10 @@ from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
+from app.core.client_service import ClientService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, \
     generate_invoice_data
+from app.constants.countries import BELGIUM
 from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService
 from app.core.receipt_service import PrinterError, ReceiptService
@@ -499,6 +501,7 @@ class POSScreen(QWidget):
         self._frozen_change    = s.frozen_change or 0.0
         self._frozen_total     = s.frozen_total
         self._set_frozen_style(s.sale_finished or not self.cart_active)
+        self.ticket_total_lbl.setVisible(not s.sale_finished)
         if s.sale_finished:
             self._update_payment_footer()
             self.input_stack.setCurrentIndex(1)
@@ -664,7 +667,7 @@ class POSScreen(QWidget):
             if pending_entry.quantity is None:
                 pending_entry.quantity = amount
             else:
-                pending_entry.unit_price = amount
+                self.cart.set_open_price(pending_entry, amount)
             self.cart.sync_promo_discounts()
             self.combined_input.clear()
             self._refresh_cart(select_last=True)
@@ -809,6 +812,9 @@ class POSScreen(QWidget):
                 product_name=entry.product_name,
                 product_barcode=entry.product_barcode,
                 unit_price=entry.unit_price,
+                base_unit_price=entry.base_unit_price,
+                tax_rate=entry.tax_rate,
+                base_tax_rate=entry.base_tax_rate,
                 quantity=-entry.quantity,
                 unit=entry.unit,
                 discount=-entry.discount,
@@ -1502,6 +1508,10 @@ class POSScreen(QWidget):
             self.client_label.show()
             self.client_id = client_id
             self.is_invoice = True
+            with get_session() as session:
+                client = ClientService.get_by_id(session, client_id)
+            is_domestic = not client or client.country == BELGIUM
+            self.cart.retax_for_client(is_domestic)
             self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 

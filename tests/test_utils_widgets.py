@@ -173,24 +173,11 @@ def test_overlay_show_message_sets_text_and_shows(qtbot):
     parent.show()
     overlay = TapToDismissOverlay(parent)
 
-    overlay.show_message("Something happened", title="Oops", kind="error")
+    overlay.show_message("Something happened", kind="error")
 
-    assert overlay.title_label.text() == "Oops"
-    assert not overlay.title_label.isHidden()
     assert overlay.message_label.text() == "Something happened"
     assert overlay.card.property("kind") == "error"
     assert not overlay.isHidden()
-
-
-def test_overlay_show_message_without_title_hides_title_label(qtbot):
-    parent = QWidget()
-    parent.resize(400, 300)
-    qtbot.addWidget(parent)
-    overlay = TapToDismissOverlay(parent)
-
-    overlay.show_message("Just a message")
-
-    assert overlay.title_label.isVisible() is False
 
 
 def test_overlay_mouse_press_dismisses(qtbot):
