@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRegularExpression, QItemSelectionModel, QItemSelection
 from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
 
+from app.core.erp_service import ErpService
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.client_service import ClientService
@@ -111,6 +112,12 @@ class POSScreen(QWidget):
         self._build_ui()
         self._start_time_display()
         self._clear_cart(override=True)
+
+        self.erp = ErpService(
+            url="https://skbctesting.odoo.com",
+            db="skbctesting",
+            api_key="7e231b61aa3afc6c8c8fae66fcf60c35e22f4e2d"
+        )
 
     @property
     def cart_active(self) -> bool:
@@ -817,7 +824,6 @@ class POSScreen(QWidget):
                 base_tax_rate=entry.base_tax_rate,
                 quantity=-entry.quantity,
                 unit=entry.unit,
-                discount=-entry.discount,
                 is_reversal=True,
                 reversal_of=entry,
                 # promo fields deliberately not copied — the reversal line
@@ -1419,7 +1425,8 @@ class POSScreen(QWidget):
                 return
 
             invoice_data = generate_invoice_data(session=session, invoice=invoice)
-            print(invoice_data)
+            inv_id, email, inv_num, inv_date = self.erp.create_post_invoice(invoice_data=invoice_data)
+            print(f"invoice {inv_id} {inv_num} of {inv_date} sent to {email}")
             # SalesService.mark_invoice_sent(session, self._current_sale_id)
         self._show_overlay("Invoice sent", kind="info")
 

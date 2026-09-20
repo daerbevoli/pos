@@ -48,11 +48,6 @@ def test_cart_item_line_total_basic():
     assert item.line_total == 7.5
 
 
-def test_cart_item_line_total_with_discount():
-    item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=2.5, quantity=3, discount=1.0)
-    assert item.line_total == 6.5
-
-
 def test_cart_item_line_total_none_quantity_is_zero():
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=2.5, quantity=None)
     assert item.line_total == 0.0
@@ -585,7 +580,7 @@ def test_snapshot_round_trip_preserves_all_entry_types():
         CartItem(
             product_id=1, product_name="Bread", product_barcode="111",
             unit_price=2.5, quantity=2, unit="pcs", tax_rate=0, base_tax_rate=6,
-            base_unit_price=2.65, discount=0.5, is_reversal=False, has_reversal=True,
+            base_unit_price=2.65, is_reversal=False, has_reversal=True,
             promo_name="New Year Promo", promo_type="percent", promo_value=15.0,
         ),
         DiscountEntry(amount=1.0, label="1.00"),
@@ -607,7 +602,6 @@ def test_snapshot_round_trip_preserves_all_entry_types():
     assert item.tax_rate == 0
     assert item.base_tax_rate == 6
     assert item.base_unit_price == 2.65
-    assert item.discount == 0.5
     assert item.has_reversal is True
     assert item.promo_name == "New Year Promo"
     assert item.promo_type == "percent"
@@ -651,7 +645,6 @@ def test_from_snapshot_defaults_missing_optional_fields():
     assert item.tax_rate == 0
     assert item.base_tax_rate == 0
     assert item.base_unit_price == 1.0
-    assert item.discount == 0.0
     assert item.is_reversal is False
     assert item.has_reversal is False
 

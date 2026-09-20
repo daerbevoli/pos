@@ -28,7 +28,6 @@ class CartItem(ReceiptEntry):
     tax_rate: int = 0
     base_tax_rate: int = 0  # the product's own rate; tax_rate may be zeroed by retax_for_client()
     base_unit_price: float = 0.0  # the domestic (VAT-incl.) price; unit_price may be netted down by retax_for_client()
-    discount: float = 0.0
     is_reversal: bool = False  # True for a line that reverses an earlier line on a reopened sale
     has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
     reversal_of: "CartItem | None" = None  # the original line this reverses; live-session only, not persisted
@@ -67,7 +66,7 @@ class CartItem(ReceiptEntry):
     def line_total(self):
         if self.quantity is None:
             return 0.0
-        return round((self.unit_price * self.quantity) - self.discount, 2)
+        return round(self.unit_price * self.quantity, 2)
 
 @dataclass
 class SubtotalMarker(ReceiptEntry):
@@ -245,7 +244,6 @@ class Cart:
                     "tax_rate": entry.tax_rate,
                     "base_tax_rate": entry.base_tax_rate,
                     "base_unit_price": entry.base_unit_price,
-                    "discount": entry.discount,
                     "is_reversal": entry.is_reversal,
                     "has_reversal": entry.has_reversal,
                     "is_open_price": entry.is_open_price,
@@ -279,7 +277,6 @@ class Cart:
                     tax_rate=raw.get("tax_rate", 0),
                     base_tax_rate=raw.get("base_tax_rate", raw.get("tax_rate", 0)),
                     base_unit_price=raw.get("base_unit_price", raw["unit_price"]),
-                    discount=raw.get("discount", 0.0),
                     is_reversal=raw.get("is_reversal", False),
                     has_reversal=raw.get("has_reversal", False),
                     is_open_price=raw.get("is_open_price", False),
@@ -307,11 +304,11 @@ def calc_tax(line_total: float, tax_rate: int) -> float:
 class InvoiceLine:
     product_name: str
     quantity: float
-    unit_price: float
+    unit_price_excl_tax: float  # full, undiscounted unit price — discount_percent conveys the discount
     unit: str
     tax_rate: int
-    line_total: float
     line_total_excl_tax: float
+    discount_percent: float = 0.0
 
 def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
     cart = Cart.from_snapshot(invoice.line_items_snapshot)
@@ -320,14 +317,23 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
         if not isinstance(entry, CartItem) or entry.quantity is None:
             continue
         tax = calc_tax(entry.line_total, entry.tax_rate)
+        gross = entry.unit_price * entry.quantity
         lines.append(InvoiceLine(
             product_name=entry.product_name,
             quantity=entry.quantity,
-            unit_price=entry.unit_price,
+            # entry.unit_price is the full (undiscounted) tax-inclusive unit
+            # price, so its excl-tax counterpart divides out the rate rather
+            # than subtracting the *line's* tax amount (a per-unit vs.
+            # per-line unit mismatch the old formula had).
+            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 2),
             unit=entry.unit,
             tax_rate=entry.tax_rate,
-            line_total=entry.line_total,
             line_total_excl_tax=round(entry.line_total - tax, 2),
+            # promo_discount is a flat amount off the tax-inclusive gross
+            # total; as a fraction of that (also tax-inclusive) total it's
+            # the same percentage Odoo should apply to the excl-tax
+            # price_unit, since tax scales both sides equally.
+            discount_percent=round(entry.promo_discount / gross * 100, 2) if gross else 0.0,
         ))
     return lines
 
@@ -342,15 +348,16 @@ def generate_invoice_data(session: Session, invoice: Invoice) -> dict:
     invoice_data["from"] = sender
     receiver = {
         "name": invoice.client_name,
-        "address": invoice.client_address,
+        "street": invoice.client_street,
+        "zip": invoice.client_zip,
+        "city": invoice.client_city,
         "vat": invoice.client_vat_number,
         "phone": invoice.client.phone,
         "email": invoice.client.email
     }
     invoice_data["to"] = receiver
-    items = invoice_lines(invoice)
-    invoice_data["items"] = items
-    invoice_data["notes"] = "Payment due within 30 days. Late payments subject to 1.5% monthly interest."
+    invoice_data["items"] = invoice_lines(invoice)
+    invoice_data["notes"] = "Thank you for shopping."
 
     return invoice_data
 
@@ -419,7 +426,7 @@ class SalesService:
                 unit_price=entry.unit_price,
                 tax_rate=entry.tax_rate,
                 tax_amount=tax_amount,
-                discount=entry.discount,
+                discount=entry.promo_discount,
                 line_total=entry.line_total
             )
             session.add(sale_item)
@@ -506,7 +513,7 @@ class SalesService:
                 unit_price=entry.unit_price,
                 tax_rate=entry.tax_rate,
                 tax_amount=tax_amount,
-                discount=entry.discount,
+                discount=entry.promo_discount,
                 line_total=entry.line_total
             )
             session.add(sale_item)
@@ -626,7 +633,7 @@ class SalesService:
                 unit_price=entry.unit_price,
                 tax_rate=entry.tax_rate,
                 tax_amount=tax_amount,
-                discount=entry.discount,
+                discount=entry.promo_discount,
                 line_total=entry.line_total
             )
 
@@ -649,7 +656,9 @@ class SalesService:
             # afterward, so this document can't silently change later.
             client_name=client.name,
             client_vat_number=client.vatNumber,
-            client_address=client.address,
+            client_street=client.street,
+            client_zip=client.zip_code,
+            client_city=client.city,
             total_amount=sale.total_amount,
             tax_amount=sale.tax_amount,
             final_amount=sale.final_amount,

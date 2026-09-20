@@ -108,7 +108,7 @@ def test_load_report_shows_client_name_for_invoices(screen):
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Acme Corp", vatNumber="BE001", address="1 Main St")
+        client = ClientService.create(session, name="Acme Corp", vatNumber="BE001", street="1 Main St", zip_code="1000", city="Brussels")
         client_id = client.id
     _finalize_sale(product, client_id=client_id)
 
@@ -123,7 +123,7 @@ def test_load_report_shows_invoiced_client_name_as_issued_even_after_rename(scre
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Original Name", vatNumber="V-ORIG", address="1 Main St")
+        client = ClientService.create(session, name="Original Name", vatNumber="V-ORIG", street="1 Main St", zip_code="1000", city="Brussels")
         client_id = client.id
     _finalize_sale(product, client_id=client_id)
 
@@ -185,7 +185,7 @@ def test_invoices_only_filters_out_regular_sales(screen):
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Client", vatNumber="V1", address="1 Main St")
+        client = ClientService.create(session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
         client_id = client.id
     _finalize_sale(product)  # regular sale
     _finalize_sale(product, client_id=client_id)  # invoice

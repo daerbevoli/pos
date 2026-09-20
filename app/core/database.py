@@ -111,7 +111,6 @@ _COLUMN_MIGRATIONS = [
     _ColumnMigration("invoices", "issued_at", "DATETIME", _INVOICE_SNAPSHOT_WHY),
     _ColumnMigration("invoices", "client_name", "TEXT", _INVOICE_SNAPSHOT_WHY),
     _ColumnMigration("invoices", "client_vat_number", "TEXT", _INVOICE_SNAPSHOT_WHY),
-    _ColumnMigration("invoices", "client_address", "TEXT", _INVOICE_SNAPSHOT_WHY),
     _ColumnMigration("invoices", "total_amount", "REAL", _INVOICE_SNAPSHOT_WHY),
     _ColumnMigration("invoices", "tax_amount", "REAL", _INVOICE_SNAPSHOT_WHY),
     _ColumnMigration("invoices", "final_amount", "REAL", _INVOICE_SNAPSHOT_WHY),
@@ -150,6 +149,8 @@ def _run_migrations():
         # Must run after the clients migration above: it repairs databases
         # that already hit the FK-corruption bug that migration used to have.
         _add_shortcuts_tables(conn)
+        _migrate_client_address_to_components(conn)
+        _migrate_invoice_address_to_components(conn)
 
 
 def _table_columns(conn, table: str) -> set[str]:
@@ -255,16 +256,68 @@ def _migrate_clients_to_partial_unique(conn):
     conn.exec_driver_sql("PRAGMA legacy_alter_table=OFF")
     Client.__table__.create(conn)
     conn.exec_driver_sql(
-        'INSERT INTO clients (id, name, address, country, phone, email, "vatNumber", website, is_active) '
-        # address is now NOT NULL; older rows that predate the address
-        # requirement get an empty string rather than failing the copy.
+        'INSERT INTO clients (id, name, street, zip_code, city, country, phone, email, "vatNumber", website, is_active) '
+        # street/zip_code/city are now NOT NULL; this predates that split
+        # entirely, so the old free-text address lands whole in street and
+        # zip_code/city backfill blank, same as _migrate_client_address_to_components.
         # country doesn't exist on clients_old at all — this POS is
         # Belgium-only so far, so backfill every row as domestic.
-        f'SELECT id, name, COALESCE(address, \'\'), \'{BELGIUM}\', phone, email, "vatNumber", website, is_active FROM clients_old'
+        f'SELECT id, name, COALESCE(address, \'\'), \'\', \'\', \'{BELGIUM}\', phone, email, "vatNumber", website, is_active FROM clients_old'
     )
     conn.exec_driver_sql("DROP TABLE clients_old")
     conn.commit()
     conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+
+def _migrate_client_address_to_components(conn):
+    """Why: ERP export (Odoo res.partner, see ErpService.get_or_create_partner)
+    needs a client's street/zip/city as separate fields, not one free-text
+    address — Belgian addresses don't split predictably on commas, so
+    parsing them back out later is unreliable (feat: structured client
+    address for ERP export). Existing clients only have the old free-text
+    address; it lands whole in `street`, with zip_code/city left blank for
+    manual cleanup, rather than guessing at a split.
+    """
+    cols = _table_columns(conn, "clients")
+    if not cols or "street" in cols:
+        return  # brand-new table (create_all already current) or already migrated
+
+    existing_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
+    if "ux_clients_address_active" in existing_indexes:
+        conn.exec_driver_sql("DROP INDEX ux_clients_address_active")
+
+    conn.exec_driver_sql("ALTER TABLE clients ADD COLUMN street TEXT NOT NULL DEFAULT ''")
+    conn.exec_driver_sql("ALTER TABLE clients ADD COLUMN zip_code TEXT NOT NULL DEFAULT ''")
+    conn.exec_driver_sql("ALTER TABLE clients ADD COLUMN city TEXT NOT NULL DEFAULT ''")
+    conn.exec_driver_sql("UPDATE clients SET street = COALESCE(address, '')")
+    conn.commit()
+    conn.exec_driver_sql("ALTER TABLE clients DROP COLUMN address")
+    conn.commit()
+    conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX ux_clients_address_active ON clients (street, zip_code, city) "
+        "WHERE is_active = 1"
+    )
+    conn.commit()
+
+
+def _migrate_invoice_address_to_components(conn):
+    """Why: same split as _migrate_client_address_to_components, applied to
+    the frozen invoice snapshot (Invoice.client_street/client_zip/client_city)
+    so a sent invoice's ERP-bound address is structured too. Existing
+    invoices' free-text client_address lands whole in client_street."""
+    cols = _table_columns(conn, "invoices")
+    if not cols or "client_street" in cols:
+        return  # brand-new table (create_all already current) or already migrated
+
+    conn.exec_driver_sql("ALTER TABLE invoices ADD COLUMN client_street TEXT NOT NULL DEFAULT ''")
+    conn.exec_driver_sql("ALTER TABLE invoices ADD COLUMN client_zip TEXT NOT NULL DEFAULT ''")
+    conn.exec_driver_sql("ALTER TABLE invoices ADD COLUMN client_city TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+    if "client_address" in cols:
+        conn.exec_driver_sql("UPDATE invoices SET client_street = COALESCE(client_address, '')")
+        conn.commit()
+        conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN client_address")
+        conn.commit()
 
 
 def _add_shortcuts_tables(conn):
@@ -292,8 +345,8 @@ def _ensure_legacy_placeholder_client(conn) -> int:
     if existing:
         return existing[0]
     conn.exec_driver_sql(
-        'INSERT INTO clients (name, address, country, "vatNumber", is_active) '
-        f"VALUES ('(legacy invoice, no client on file)', '', '{BELGIUM}', 'LEGACY-NO-CLIENT', 0)"
+        'INSERT INTO clients (name, street, zip_code, city, country, "vatNumber", is_active) '
+        f"VALUES ('(legacy invoice, no client on file)', '', '', '', '{BELGIUM}', 'LEGACY-NO-CLIENT', 0)"
     )
     return conn.exec_driver_sql(
         "SELECT id FROM clients WHERE \"vatNumber\" = 'LEGACY-NO-CLIENT'"

@@ -30,7 +30,7 @@ from app.constants import (
     SPACING_XS,
 )
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
-CLIENT_CSV_FIELDS = ["name", "vat", "address", "country", "phone", "email", "active"]
+CLIENT_CSV_FIELDS = ["name", "vat", "street", "zip", "city", "country", "phone", "email", "active"]
 
 
 class ClientDetailPanel(QFrame):
@@ -81,8 +81,14 @@ class ClientDetailPanel(QFrame):
         self.name = QLineEdit()
         self.name.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
-        self.address = QLineEdit()
-        self.address.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.street = QLineEdit()
+        self.street.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        self.zip_code = QLineEdit()
+        self.zip_code.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
+        self.city = QLineEdit()
+        self.city.setMinimumHeight(INPUT_HEIGHT_COMPACT)
 
         self.country = QComboBox()
         self.country.setMinimumHeight(INPUT_HEIGHT_COMPACT)
@@ -100,7 +106,9 @@ class ClientDetailPanel(QFrame):
 
         rows_spec = [
             ("Name *",       self.name),
-            ("Address *",    self.address),
+            ("Street *",     self.street),
+            ("Zip *",        self.zip_code),
+            ("City *",       self.city),
             ("Country *",    self.country),
             ("VAT Number *", self.vatNumber),
             ("Phone",        self.phone),
@@ -258,7 +266,9 @@ class ClientDetailPanel(QFrame):
 
     def _reset_fields_to_placeholder(self):
         self.name.clear()
-        self.address.clear()
+        self.street.clear()
+        self.zip_code.clear()
+        self.city.clear()
         self._set_country(BELGIUM)
         self.vatNumber.clear()
         self.phone.clear()
@@ -295,7 +305,9 @@ class ClientDetailPanel(QFrame):
 
     def _populate_fields(self, client):
         self.name.setText(client.name or "")
-        self.address.setText(client.address or "")
+        self.street.setText(client.street or "")
+        self.zip_code.setText(client.zip_code or "")
+        self.city.setText(client.city or "")
         self._set_country(client.country or BELGIUM)
         self.vatNumber.setText(client.vatNumber or "")
         # Track the country's code as the VAT prefix without rewriting the
@@ -356,8 +368,14 @@ class ClientDetailPanel(QFrame):
         if not self.name.text().strip():
             self._show_overlay("Client name is required.")
             return False
-        if not self.address.text().strip():
-            self._show_overlay("Address is required.")
+        if not self.street.text().strip():
+            self._show_overlay("Street is required.")
+            return False
+        if not self.zip_code.text().strip():
+            self._show_overlay("Zip is required.")
+            return False
+        if not self.city.text().strip():
+            self._show_overlay("City is required.")
             return False
         vat = self.vatNumber.text().strip()
         if not vat or vat == self._vat_prefix:
@@ -368,7 +386,9 @@ class ClientDetailPanel(QFrame):
     def _collect_data(self) -> dict:
         return {
             "name": self.name.text().strip(),
-            "address": self.address.text().strip(),
+            "street": self.street.text().strip(),
+            "zip_code": self.zip_code.text().strip(),
+            "city": self.city.text().strip(),
             "country": self.country.currentData(),
             "vatNumber": self.vatNumber.text().strip(),
             "phone": self.phone.text().strip() or None,
@@ -443,7 +463,9 @@ class ClientDetailPanel(QFrame):
                     writer.writerow({
                         "name": c.name,
                         "vat": c.vatNumber,
-                        "address": c.address,
+                        "street": c.street,
+                        "zip": c.zip_code,
+                        "city": c.city,
                         "country": c.country or BELGIUM,
                         "phone": c.phone or "",
                         "email": c.email or "",
@@ -485,8 +507,13 @@ class ClientDetailPanel(QFrame):
                     existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
                     if not existing and email:
                         existing = session.query(Client).filter_by(email=email).first()
-                    address = ", ".join(part for part in (row.get("Street"), row.get("City")) if part) or row.get("address")
-                    if not vat or existing or not row.get("name") or not address:
+                    street = (row.get("street") or row.get("Street") or "").strip()
+                    zip_code = (row.get("zip") or row.get("Zip") or row.get("zip_code") or "").strip()
+                    city = (row.get("city") or row.get("City") or "").strip()
+                    if not street and not zip_code and not city and row.get("address"):
+                        # Old export format (one free-text address column) — best effort.
+                        street = row.get("address")
+                    if not vat or existing or not row.get("name") or not street:
                         clients_skipped += 1
                         continue
 
@@ -497,7 +524,9 @@ class ClientDetailPanel(QFrame):
                     session.add(Client(
                         name=row.get("name"),
                         vatNumber=vat,
-                        address=address,
+                        street=street,
+                        zip_code=zip_code,
+                        city=city,
                         country=country,
                         phone=phone,
                         email=email,
@@ -551,6 +580,8 @@ class ClientScreen(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        # "Address" column below shows the combined street/zip/city — see
+        # Client.full_address; the underlying fields stay structured for ERP export.
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -600,7 +631,7 @@ class ClientScreen(QWidget):
             self._client_cache[row] = c.id
 
             self.table.setItem(row, 0, QTableWidgetItem(c.name or ""))
-            self.table.setItem(row, 1, QTableWidgetItem(c.address or ""))
+            self.table.setItem(row, 1, QTableWidgetItem(c.full_address))
             self.table.setItem(row, 2, QTableWidgetItem(COUNTRY_NAMES.get(c.country, c.country or "")))
             self.table.setItem(row, 3, QTableWidgetItem(c.vatNumber or ""))
             self.table.setItem(row, 4, QTableWidgetItem(c.phone or ""))

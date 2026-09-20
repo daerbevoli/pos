@@ -208,7 +208,9 @@ class Client(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50), nullable=False)
-    address = Column(String(50), nullable=False)
+    street = Column(String(100), nullable=False)
+    zip_code = Column(String(20), nullable=False)
+    city = Column(String(50), nullable=False)
     country = Column(String(50), nullable=False, default=BELGIUM, server_default=text(f"'{BELGIUM}'"))
     phone = Column(String(50), nullable=True)
     email = Column(String(50), nullable=True)
@@ -220,12 +222,20 @@ class Client(Base):
     # (soft delete) frees up its name/address/phone/email/vat/website for reuse.
     __table_args__ = (
         Index("ux_clients_name_active", "name", unique=True, sqlite_where=text("is_active = 1")),
-        Index("ux_clients_address_active", "address", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ux_clients_address_active", "street", "zip_code", "city", unique=True, sqlite_where=text("is_active = 1")),
         Index("ux_clients_phone_active", "phone", unique=True, sqlite_where=text("is_active = 1")),
         Index("ux_clients_email_active", "email", unique=True, sqlite_where=text("is_active = 1")),
         Index("ux_clients_vatnumber_active", "vatNumber", unique=True, sqlite_where=text("is_active = 1")),
         Index("ux_clients_website_active", "website", unique=True, sqlite_where=text("is_active = 1")),
     )
+
+    @property
+    def full_address(self) -> str:
+        """Single-line display address for receipts/labels, e.g.
+        'Kerkstraat 12, 2000 Antwerpen'. Structured street/zip_code/city are
+        what the ERP export (Odoo res.partner) needs; this is only for
+        printing."""
+        return f"{self.street}, {self.zip_code} {self.city}".strip(", ")
 
     def __repr__(self):
         return f"<Client {self.name} {self.vatNumber}>"
@@ -269,7 +279,9 @@ class Invoice(Base):
     sent_at = Column(DateTime, nullable=True)  # None = still editable; set once transmitted, after which it's locked
     client_name = Column(String, nullable=False)
     client_vat_number = Column(String, nullable=False)
-    client_address = Column(String, nullable=False)
+    client_street = Column(String, nullable=False)
+    client_zip = Column(String, nullable=False)
+    client_city = Column(String, nullable=False)
     total_amount = Column(Float, nullable=True)
     tax_amount = Column(Float, nullable=True)
     final_amount = Column(Float, nullable=True)
@@ -277,6 +289,13 @@ class Invoice(Base):
 
     sale   = relationship("Sale", backref=backref("invoice", uselist=False))
     client = relationship("Client", backref=backref("invoices", uselist=True))
+
+    @property
+    def full_address(self) -> str:
+        """Single-line display address for receipts, frozen at issue time —
+        see the class docstring above on why this snapshot isn't derived
+        live from `client`."""
+        return f"{self.client_street}, {self.client_zip} {self.client_city}".strip(", ")
 
 
 class Shortcut(Base):

@@ -26,7 +26,9 @@ def screen(qtbot, patched_db):
 def _add_client(**overrides):
     data = {"name": "Client A", "vatNumber": "V1"}
     data.update(overrides)
-    data.setdefault("address", f"1 Main St, {data['name']}")
+    data.setdefault("street", f"1 Main St, {data['name']}")
+    data.setdefault("zip_code", "1000")
+    data.setdefault("city", "Brussels")
     with get_session() as session:
         client = ClientService.create(session, **data)
         return client.id
@@ -100,7 +102,9 @@ def test_new_client_happy_path_persists(screen):
     assert panel._mode == "new"
 
     panel.name.setText("Brand New")
-    panel.address.setText("1 Main St")
+    panel.street.setText("1 Main St")
+    panel.zip_code.setText("1000")
+    panel.city.setText("Brussels")
     # The country-code prefix (Belgium by default) is locked in place —
     # typing appends after it rather than replacing it.
     assert panel.vatNumber.text() == "BE"
@@ -117,7 +121,9 @@ def test_new_client_validation_blocks_empty_name(screen):
     panel = screen.detail_panel
     panel._start_new()
     panel.name.setText("")
-    panel.address.setText("1 Main St")
+    panel.street.setText("1 Main St")
+    panel.zip_code.setText("1000")
+    panel.city.setText("Brussels")
     panel.vatNumber.setText("V1")
 
     panel._on_ok()
@@ -127,11 +133,13 @@ def test_new_client_validation_blocks_empty_name(screen):
         assert ClientService.get_all(session) == []
 
 
-def test_new_client_validation_blocks_empty_address(screen):
+def test_new_client_validation_blocks_empty_street(screen):
     panel = screen.detail_panel
     panel._start_new()
     panel.name.setText("Has Name")
-    panel.address.setText("")
+    panel.street.setText("")
+    panel.zip_code.setText("1000")
+    panel.city.setText("Brussels")
     panel.vatNumber.setText("V1")
 
     panel._on_ok()
@@ -145,7 +153,9 @@ def test_new_client_validation_blocks_empty_vat(screen):
     panel = screen.detail_panel
     panel._start_new()
     panel.name.setText("Has Name")
-    panel.address.setText("1 Main St")
+    panel.street.setText("1 Main St")
+    panel.zip_code.setText("1000")
+    panel.city.setText("Brussels")
     # The country-code prefix can't be removed, so "empty" here means
     # leaving it at the bare prefix with no actual VAT digits.
     assert panel.vatNumber.text() == "BE"

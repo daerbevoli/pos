@@ -210,7 +210,8 @@ def test_migrations_add_invoice_snapshot_columns_preserving_data(monkeypatch):
     with engine.connect() as conn:
         cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(invoices)")}
         assert {
-            "issued_at", "client_name", "client_vat_number", "client_address",
+            "issued_at", "client_name", "client_vat_number",
+            "client_street", "client_zip", "client_city",
             "total_amount", "tax_amount", "final_amount", "line_items_snapshot",
         } <= cols
 
@@ -281,7 +282,10 @@ def test_migrate_clients_preserves_data_and_relaxes_uniqueness(monkeypatch):
         # impossible under the old blanket column-level UNIQUE.
         conn.exec_driver_sql("UPDATE clients SET is_active = 0 WHERE name = 'Acme'")
         conn.commit()
-        conn.exec_driver_sql("INSERT INTO clients (name, address, vatNumber, is_active) VALUES ('Acme', '2 Main St', 'V2', 1)")
+        conn.exec_driver_sql(
+            "INSERT INTO clients (name, street, zip_code, city, vatNumber, is_active) "
+            "VALUES ('Acme', '2 Main St', '2000', 'Antwerpen', 'V2', 1)"
+        )
         conn.commit()
 
         count = conn.exec_driver_sql("SELECT COUNT(*) FROM clients").scalar()

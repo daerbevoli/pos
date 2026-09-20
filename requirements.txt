@@ -12,3 +12,4 @@ pyinstaller>=6.0.0
 pyqt6-sip
 pytest
 pytest-qt
+requests

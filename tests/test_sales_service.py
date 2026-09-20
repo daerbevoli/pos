@@ -19,7 +19,7 @@ def _cart_with(*items):
     return Cart(entries=list(items))
 
 
-def _item_for(product, quantity=1, discount=0.0):
+def _item_for(product, quantity=1):
     return CartItem(
         product_id=product.id,
         product_name=product.name,
@@ -27,7 +27,6 @@ def _item_for(product, quantity=1, discount=0.0):
         unit_price=product.price,
         quantity=quantity,
         tax_rate=product.tax,
-        discount=discount,
     )
 
 
@@ -197,7 +196,7 @@ def test_void_sale_cannot_void_twice(db_session):
 
 def test_finalize_invoice_creates_sale_and_invoice(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, stock_quantity=10)
 
     invoice = SalesService.finalize_invoice(
@@ -221,7 +220,7 @@ def test_finalize_invoice_empty_cart_raises(db_session):
 
 def test_finalize_invoice_number_mirrors_sale_number(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
         db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
@@ -231,7 +230,7 @@ def test_finalize_invoice_number_mirrors_sale_number(db_session):
 
 def test_finalize_invoice_snapshots_client_and_amounts(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Acme Corp", vatNumber="BE001", address="1 Main St")
+    client = ClientService.create(db_session, name="Acme Corp", vatNumber="BE001", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=12.1, tax=21)  # 10 base, 2.1 tax
 
     invoice = SalesService.finalize_invoice(
@@ -240,7 +239,10 @@ def test_finalize_invoice_snapshots_client_and_amounts(db_session):
 
     assert invoice.client_name == "Acme Corp"
     assert invoice.client_vat_number == "BE001"
-    assert invoice.client_address == "1 Main St"
+    assert invoice.client_street == "1 Main St"
+    assert invoice.client_zip == "1000"
+    assert invoice.client_city == "Brussels"
+    assert invoice.full_address == "1 Main St, 1000 Brussels"
     assert invoice.total_amount == invoice.sale.total_amount
     assert invoice.tax_amount == pytest.approx(2.1, abs=0.01)
     assert invoice.final_amount == 12.1
@@ -267,7 +269,7 @@ def test_finalize_invoice_unknown_client_id_raises(db_session):
 
 def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Original Name", vatNumber="V-ORIG", address="1 Main St")
+    client = ClientService.create(db_session, name="Original Name", vatNumber="V-ORIG", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
 
     invoice = SalesService.finalize_invoice(
@@ -288,7 +290,7 @@ def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
     sale (update_sale) must re-derive the invoice's frozen snapshot fields
     rather than leave them stale."""
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=10.0, tax=21)
 
     invoice = SalesService.finalize_invoice(
@@ -307,7 +309,7 @@ def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
 
 def test_mark_invoice_sent_sets_timestamp(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
         db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
@@ -323,7 +325,7 @@ def test_mark_invoice_sent_is_idempotent(db_session):
     """Calling it again after the invoice is already sent must not re-stamp
     (and, once real Peppol transmission is wired in, must not re-send)."""
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
         db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
@@ -346,7 +348,7 @@ def test_update_sale_refuses_once_invoice_sent(db_session):
     """The hard lock: update_sale() must reject edits once mark_invoice_sent()
     has been called, even if a caller bypasses the UI's own reopen guard."""
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Client", vatNumber="V1", address="1 Main St")
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
         db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id

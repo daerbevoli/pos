@@ -444,7 +444,9 @@ def test_payment_zero_amount_shows_overlay(screen):
 
 def test_set_client_marks_invoice_and_shows_label(screen):
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
+        client = ClientService.create(
+            session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+        )
         client_id = client.id
 
     screen.set_client(client_id, "Acme")
@@ -463,7 +465,7 @@ def test_set_client_foreign_country_zeroes_tax_and_nets_price_on_existing_items(
 
     with get_session() as session:
         client = ClientService.create(
-            session, name="Foreign Co", vatNumber="FR1", address="1 Rue", country="FR",
+            session, name="Foreign Co", vatNumber="FR1", street="1 Rue", zip_code="75000", city="Paris", country="FR",
         )
         client_id = client.id
 
@@ -482,7 +484,7 @@ def test_set_client_domestic_country_keeps_normal_tax_and_price(screen):
 
     with get_session() as session:
         client = ClientService.create(
-            session, name="Belgian Co", vatNumber="BE1", address="1 Straat", country="BE",
+            session, name="Belgian Co", vatNumber="BE1", street="1 Straat", zip_code="2000", city="Antwerpen", country="BE",
         )
         client_id = client.id
 
@@ -499,10 +501,10 @@ def test_switching_from_foreign_to_domestic_client_restores_tax_and_price(screen
 
     with get_session() as session:
         foreign = ClientService.create(
-            session, name="Foreign Co", vatNumber="FR1", address="1 Rue", country="FR",
+            session, name="Foreign Co", vatNumber="FR1", street="1 Rue", zip_code="75000", city="Paris", country="FR",
         )
         domestic = ClientService.create(
-            session, name="Belgian Co", vatNumber="BE1", address="1 Straat", country="BE",
+            session, name="Belgian Co", vatNumber="BE1", street="1 Straat", zip_code="2000", city="Antwerpen", country="BE",
         )
         foreign_id, domestic_id = foreign.id, domestic.id
 
@@ -520,7 +522,7 @@ def test_open_price_item_entered_after_foreign_client_is_netted(screen):
 
     with get_session() as session:
         client = ClientService.create(
-            session, name="Foreign Co", vatNumber="FR1", address="1 Rue", country="FR",
+            session, name="Foreign Co", vatNumber="FR1", street="1 Rue", zip_code="75000", city="Paris", country="FR",
         )
         client_id = client.id
     screen.set_client(client_id, "Foreign Co")
@@ -539,7 +541,9 @@ def test_open_price_item_entered_after_foreign_client_is_netted(screen):
 
 def test_invoice_payment_creates_invoice_record(screen):
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
+        client = ClientService.create(
+            session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+        )
         client_id = client.id
     pid, barcode, _ = _add_product(barcode="inv1", price=8.0)
 
@@ -615,7 +619,9 @@ def test_reopen_ticket_allowed_when_invoice_not_sent(screen):
     the sale it came from must be allowed while invoice.sent_at is still
     None (see SalesService.mark_invoice_sent)."""
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
+        client = ClientService.create(
+            session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+        )
         client_id = client.id
     pid, barcode, _ = _add_product(barcode="reopen3", price=5.0)
 
@@ -638,7 +644,9 @@ def test_reopen_ticket_blocked_once_invoice_sent(screen):
     """Once SalesService.mark_invoice_sent() has locked the invoice, the
     sale it came from must stay immutable — reopening is refused."""
     with get_session() as session:
-        client = ClientService.create(session, name="Acme", vatNumber="V1", address="1 Main St")
+        client = ClientService.create(
+            session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+        )
         client_id = client.id
     pid, barcode, _ = _add_product(barcode="reopen4", price=5.0)
 

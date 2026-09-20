@@ -159,13 +159,6 @@ def _print_line_items(printer, cart: Cart, currency: str):
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")
             if weight_text:
                 printer.text(weight_text.center(LINE_WIDTH // 2) + "\n")
-            if entry.discount:
-                pre_discount = entry.unit_price * entry.quantity
-                pct = round(entry.discount / pre_discount * 100, 2) if pre_discount else 0
-                printer.text(
-                    f"{'':<{QTY_COL}}{f'Discount {pct:g}%':<{NAME_COL}}{'':>{UNIT_COL}}"
-                    f"{'-' + _money(currency, entry.discount):>{TOTAL_COL}}\n"
-                )
         elif isinstance(entry, SubtotalMarker):
             qty_str = f"{running_qty:g}"
             printer.set(bold=True)
@@ -303,7 +296,7 @@ def _print_categories(printer, currency: str, totals: dict):
 def _print_b2b_info(printer, invoice):
     printer.set(align="left", bold=True, width=1, height=1)
     printer.text(f"{invoice.client_name}\n")
-    printer.text(f"{invoice.client_address}\n")
+    printer.text(f"{invoice.full_address}\n")
     printer.text(f"{invoice.client_vat_number}\n")
     printer.text("-" * LINE_WIDTH + "\n")
 
@@ -422,8 +415,8 @@ class ReceiptService:
                 printer.text(f"Bill to: {invoice.client_name}\n")
             if invoice.client_vat_number:
                 printer.text(f"VAT: {invoice.client_vat_number}\n")
-            if invoice.client_address:
-                printer.text(f"{invoice.client_address}\n")
+            if invoice.full_address:
+                printer.text(f"{invoice.full_address}\n")
             printer.text("-" * LINE_WIDTH + "\n")
             _print_line_items(printer, Cart.from_snapshot(invoice.line_items_snapshot), currency)
             _print_totals(printer, currency, invoice.tax_amount, invoice.final_amount)

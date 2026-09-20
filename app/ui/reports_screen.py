@@ -16,12 +16,26 @@ from PyQt6.QtWidgets import QMessageBox
 
 from app.core.database import get_session
 from app.core.sales_service import SalesService
-from app.core.settings_service import SettingsService
 from app.core.receipt_service import ReceiptService, PrinterError
 from app.core.report_service import XZReportService
 from app.utils.utils import FunctionButton
 from app.constants import BUTTON_HEIGHT, ROW_HEIGHT
 
+
+def _make_card(title: str, value: str, bold: bool = False) -> QGroupBox:
+    card = QGroupBox(title)
+    card.setObjectName("summaryCard")
+    v = QVBoxLayout(card)
+    label = QLabel(value)
+    label.setObjectName("cardValue")
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if bold:
+        font = QFont()
+        font.setBold(True)
+        label.setFont(font)
+    v.addWidget(label)
+    card._value_label = label
+    return card
 
 class ReportsScreen(QWidget):
 
@@ -58,8 +72,6 @@ class ReportsScreen(QWidget):
         self.date_to.setFixedHeight(BUTTON_HEIGHT)
         controls.addWidget(self.date_to)
 
-        # Quick range presets — mutually exclusive, like the Sales/VAT/
-        # Categories trio below: only one is ever "pressed" at a time.
         self._range_group = QButtonGroup(self)
         self._range_group.setExclusive(True)
 
@@ -96,9 +108,6 @@ class ReportsScreen(QWidget):
         load_btn.clicked.connect(self._load_report)
         controls.addWidget(load_btn)
 
-        # Sales/VAT/Categories are a tab-like, mutually exclusive trio — only
-        # one is ever "pressed" (highlighted) at a time. Invoices is a
-        # separate on/off filter, so it toggles independently of those three.
         self.sales_btn = FunctionButton("Sales", "salesBtn")
         self.sales_btn.setFixedHeight(BUTTON_HEIGHT)
         self.sales_btn.setCheckable(True)
@@ -147,11 +156,11 @@ class ReportsScreen(QWidget):
         cards_group = QGroupBox("Summary")
         cards_layout = QGridLayout(cards_group)
 
-        self.card_revenue = self._make_card("Total Revenue", "0.00", True)
-        self.card_transactions = self._make_card("Transactions", "0")
-        self.card_avg = self._make_card("Avg. Transaction", "0.00")
-        self.card_cash = self._make_card("Cash Sales", "0.00")
-        self.card_card = self._make_card("Card Sales", "0.00")
+        self.card_revenue = _make_card("Total Revenue", "0.00", True)
+        self.card_transactions = _make_card("Transactions", "0")
+        self.card_avg = _make_card("Avg. Transaction", "0.00")
+        self.card_cash = _make_card("Cash Sales", "0.00")
+        self.card_card = _make_card("Card Sales", "0.00")
 
         cards_layout.addWidget(self.card_revenue, 0, 0)
         cards_layout.addWidget(self.card_transactions, 0, 1)
@@ -216,22 +225,6 @@ class ReportsScreen(QWidget):
         vat_btn.clicked.connect(lambda: self._show_table("vat"))
         cats_btn.clicked.connect(lambda: self._show_table("categories"))
 
-
-    def _make_card(self, title: str, value: str, bold: bool = False) -> QGroupBox:
-        card = QGroupBox(title)
-        card.setObjectName("summaryCard")
-        v = QVBoxLayout(card)
-        label = QLabel(value)
-        label.setObjectName("cardValue")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        if bold:
-            font = QFont()
-            font.setBold(True)
-            label.setFont(font)
-        v.addWidget(label)
-        card._value_label = label
-        return card
-
     def _set_range(self, days: int):
         today = QDate.currentDate()
         self.date_to.setDate(today)
@@ -258,7 +251,6 @@ class ReportsScreen(QWidget):
         end = self.date_to.date().toPyDate()
 
         with get_session() as session:
-            currency = SettingsService.get(session, "currency_symbol", "€")
             all_sales = SalesService.get_sales_range(session, start, end)
 
             sales = all_sales
@@ -338,8 +330,7 @@ class ReportsScreen(QWidget):
     def _print_z_report(self):
         reply = QMessageBox.question(
             self, "Print Z Report",
-            "This will print the Z report and permanently clear all sales "
-            "recorded since the last Z report. This cannot be undone.\nContinue?"
+            "This will print the Z report and clear all sales. This cannot be undone.\nContinue?"
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
