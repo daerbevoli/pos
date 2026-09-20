@@ -5,7 +5,7 @@ Store info, receipt printer, label printer configuration.
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog,
-    QListWidget, QListWidgetItem
+    QListWidget, QListWidgetItem, QTabWidget
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -37,13 +37,29 @@ class SettingsScreen(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
-        columns = QHBoxLayout()
-        columns.setSpacing(15)
-        left_col = QVBoxLayout()
-        right_col = QVBoxLayout()
-        columns.addLayout(left_col, 1)
-        columns.addLayout(right_col, 1)
-        layout.addLayout(columns)
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        general_tab = QWidget()
+        left_col = QVBoxLayout(general_tab)
+
+        printers_tab = QWidget()
+        printers_row = QHBoxLayout(printers_tab)
+        printers_row.setSpacing(15)
+
+        catalog_tab = QWidget()
+        catalog_row = QHBoxLayout(catalog_tab)
+        catalog_row.setSpacing(15)
+        sc_col = QVBoxLayout()
+        cats_col = QVBoxLayout()
+        promos_col = QVBoxLayout()
+        catalog_row.addLayout(sc_col, 1)
+        catalog_row.addLayout(cats_col, 1)
+        catalog_row.addLayout(promos_col, 1)
+
+        tabs.addTab(general_tab, "General")
+        tabs.addTab(printers_tab, "Printers")
+        tabs.addTab(catalog_tab, "Catalog")
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -86,7 +102,7 @@ class SettingsScreen(QWidget):
         self.shortcuts_list = QListWidget()
         self.shortcuts_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
         sc_layout.addWidget(self.shortcuts_list)
-        left_col.addWidget(sc_group)
+        sc_col.addWidget(sc_group)
         self._reload_shortcuts()
         btn_add_sc = FunctionButton("Add")
         btn_add_sc.clicked.connect(self._on_add_sc)
@@ -98,7 +114,7 @@ class SettingsScreen(QWidget):
         sc_btn_layout.addWidget(btn_add_sc)
         sc_btn_layout.addWidget(btn_edit_sc)
         sc_btn_layout.addWidget(btn_remove_sc)
-        left_col.addLayout(sc_btn_layout)
+        sc_col.addLayout(sc_btn_layout)
 
         # ── Printer config ────────────────────────────────────────────────────
         printer_group = QGroupBox("Receipt Printer (USB)")
@@ -115,7 +131,7 @@ class SettingsScreen(QWidget):
         test_btn = QPushButton("Test Print")
         test_btn.clicked.connect(self._test_print)
         printer_form.addRow("", test_btn)
-        right_col.addWidget(printer_group)
+        printers_row.addWidget(printer_group)
 
         # ── Label printer config ─────────────────────────────────────────────
         label_group = QGroupBox("Label Printer (USB)")
@@ -132,7 +148,7 @@ class SettingsScreen(QWidget):
         label_test_btn = QPushButton("Test Print")
         label_test_btn.clicked.connect(self._test_print_label)
         label_form.addRow("", label_test_btn)
-        right_col.addWidget(label_group)
+        printers_row.addWidget(label_group)
 
         # ── Categories ─────────────────────────────────────────────
         cats_group = QGroupBox("Categories")
@@ -140,7 +156,7 @@ class SettingsScreen(QWidget):
         self.categories_list = QListWidget()
         self.categories_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
         cats_layout.addWidget(self.categories_list)
-        right_col.addWidget(cats_group)
+        cats_col.addWidget(cats_group)
         self._reload_categories()
         btn_add = FunctionButton("Add")
         btn_add.clicked.connect(self._on_add)
@@ -152,7 +168,7 @@ class SettingsScreen(QWidget):
         cats_btn_layout.addWidget(btn_add)
         cats_btn_layout.addWidget(btn_edit)
         cats_btn_layout.addWidget(btn_remove)
-        right_col.addLayout(cats_btn_layout)
+        cats_col.addLayout(cats_btn_layout)
 
         # ── Promos ─────────────────────────────────────────────────
         promos_group = QGroupBox("Promos")
@@ -160,7 +176,7 @@ class SettingsScreen(QWidget):
         self.promos_list = QListWidget()
         self.promos_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
         promos_layout.addWidget(self.promos_list)
-        right_col.addWidget(promos_group)
+        promos_col.addWidget(promos_group)
         self._reload_promos()
         btn_add_promo = FunctionButton("Add")
         btn_add_promo.clicked.connect(self._on_add_promo)
@@ -172,7 +188,7 @@ class SettingsScreen(QWidget):
         promos_btn_layout.addWidget(btn_add_promo)
         promos_btn_layout.addWidget(btn_edit_promo)
         promos_btn_layout.addWidget(btn_remove_promo)
-        right_col.addLayout(promos_btn_layout)
+        promos_col.addLayout(promos_btn_layout)
 
 
         # # ── Save ──────────────────────────────────────────────────────────────

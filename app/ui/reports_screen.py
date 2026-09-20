@@ -1,6 +1,8 @@
 """
 Reports Screen
-Daily summary, date range sales, and top products.
+- Daily summary of sales and current and previous invoices
+- Vat breakdown, category breakdown
+- X report and Z report.
 """
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -23,8 +25,10 @@ from app.constants import BUTTON_HEIGHT, ROW_HEIGHT
 
 class ReportsScreen(QWidget):
 
-
+    # Navigate across screens
     navigate = pyqtSignal(int)
+
+    # Send selected sale id to pos to display
     sale_selected = pyqtSignal(int)
 
     def __init__(self):
@@ -287,10 +291,7 @@ class ReportsScreen(QWidget):
                 self.sales_table.setItem(row, 1, QTableWidgetItem(
                     sale.created_at.strftime("%d/%m/%Y %H:%M")
                 ))
-                # Read the invoice's own snapshot, not the live client — a
-                # renamed/deactivated client (or an invoice issued with no
-                # client at all) must not change what an already-issued
-                # invoice is shown as having billed.
+
                 client_name = (sale.invoice.client_name if sale.invoice else None) or "/"
                 self.sales_table.setItem(row, 2, QTableWidgetItem(client_name))
                 vat_num = (sale.invoice.client_vat_number if sale.invoice else None) or "/"
