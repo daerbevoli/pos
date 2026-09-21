@@ -27,6 +27,7 @@ from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
+from app.core.erp_worker import InvoiceSendWorker
 from app.constants import (
     BUTTON_HEIGHT_COMPACT,
     CART_LABEL_HEIGHT,
@@ -858,7 +859,7 @@ class POSScreen(QWidget):
             return
         pct = min(value, 100.0)
         amount = round(base * pct / 100.0, 2)
-        self.cart.entries.append(DiscountEntry(amount=amount, label=f"{pct:g}%"))
+        self.cart.entries.append(DiscountEntry(amount=amount, label=f"MANUAL DISCOUNT {pct:g}%"))
         self.combined_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
@@ -877,7 +878,7 @@ class POSScreen(QWidget):
             self._show_overlay("Nothing to discount", kind="error")
             return
         amount = round(min(value, base), 2)
-        self.cart.entries.append(DiscountEntry(amount=amount, label=f"{amount:.2f}"))
+        self.cart.entries.append(DiscountEntry(amount=amount, label=f"MANUAL DISCOUNT {amount:.2f}"))
         self.combined_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
@@ -1046,7 +1047,7 @@ class POSScreen(QWidget):
                 self._row_to_entry.append(i)
                 cells = [
                     QTableWidgetItem(""),
-                    QTableWidgetItem(f"DISCOUNT  {entry.label}"),
+                    QTableWidgetItem(f"{entry.label}"),
                     QTableWidgetItem(""),
                     QTableWidgetItem(f"{entry.line_total:.2f}"),
                 ]
@@ -1425,10 +1426,39 @@ class POSScreen(QWidget):
                 return
 
             invoice_data = generate_invoice_data(session=session, invoice=invoice)
-            inv_id, email, inv_num, inv_date = self.erp.create_post_invoice(invoice_data=invoice_data)
-            print(f"invoice {inv_id} {inv_num} of {inv_date} sent to {email}")
-            # SalesService.mark_invoice_sent(session, self._current_sale_id)
+
+        # The session above is closed before starting the worker — ErpService's
+        # HTTP calls are blocking (create_post_invoice + send_invoice is many
+        # sequential round trips) and a SQLAlchemy Session isn't safe to hold
+        # open across threads.
+        self.btn_send_invoice.setEnabled(False)
+        self._show_overlay("Sending invoice…", kind="info")
+        self._invoice_worker = InvoiceSendWorker(self.erp, invoice_data, False, True)
+        self._invoice_worker.succeeded.connect(self._on_invoice_send_succeeded)
+        self._invoice_worker.duplicate.connect(self._on_invoice_send_duplicate)
+        self._invoice_worker.failed.connect(self._on_invoice_send_failed)
+        self._invoice_worker.finished.connect(self._invoice_worker.deleteLater)
+        self._invoice_worker.start()
+
+    def _on_invoice_send_succeeded(self, invoice_id: int, inv_num: str, message: str):
+        print(f"invoice {invoice_id} ({inv_num}): {message}")
+        try:
+            with get_session() as session:
+                SalesService.mark_invoice_sent(session, self._current_sale_id)
+        except ValueError as e:
+            self.btn_send_invoice.setEnabled(True)
+            self._show_overlay(f"Invoice sent, but failed to lock the sale: {e}", kind="error")
+            return
+        self.btn_send_invoice.setEnabled(True)
         self._show_overlay("Invoice sent", kind="info")
+
+    def _on_invoice_send_duplicate(self, inv_num: str):
+        self.btn_send_invoice.setEnabled(True)
+        self._show_overlay(f"Invoice {inv_num} already exists in the ERP", kind="error")
+
+    def _on_invoice_send_failed(self, message: str):
+        self.btn_send_invoice.setEnabled(True)
+        self._show_overlay(message, kind="error")
 
     def _open_drawer(self):
         with get_session() as session:

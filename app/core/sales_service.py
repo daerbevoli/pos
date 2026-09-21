@@ -309,32 +309,38 @@ class InvoiceLine:
     tax_rate: int
     line_total_excl_tax: float
     discount_percent: float = 0.0
+    is_discount: bool = False
 
 def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
     cart = Cart.from_snapshot(invoice.line_items_snapshot)
     lines = []
     for entry in cart.entries:
-        if not isinstance(entry, CartItem) or entry.quantity is None:
-            continue
-        tax = calc_tax(entry.line_total, entry.tax_rate)
-        gross = entry.unit_price * entry.quantity
-        lines.append(InvoiceLine(
-            product_name=entry.product_name,
-            quantity=entry.quantity,
-            # entry.unit_price is the full (undiscounted) tax-inclusive unit
-            # price, so its excl-tax counterpart divides out the rate rather
-            # than subtracting the *line's* tax amount (a per-unit vs.
-            # per-line unit mismatch the old formula had).
-            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 2),
-            unit=entry.unit,
-            tax_rate=entry.tax_rate,
-            line_total_excl_tax=round(entry.line_total - tax, 2),
-            # promo_discount is a flat amount off the tax-inclusive gross
-            # total; as a fraction of that (also tax-inclusive) total it's
-            # the same percentage Odoo should apply to the excl-tax
-            # price_unit, since tax scales both sides equally.
-            discount_percent=round(entry.promo_discount / gross * 100, 2) if gross else 0.0,
-        ))
+        if isinstance(entry, CartItem):
+            if entry.quantity is None:
+                continue
+            tax = calc_tax(entry.line_total, entry.tax_rate)
+            gross = entry.unit_price * entry.quantity
+            lines.append(InvoiceLine(
+                product_name=entry.product_name,
+                quantity=entry.quantity,
+                unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 2),
+                unit=entry.unit,
+                tax_rate=entry.tax_rate,
+                line_total_excl_tax=round(entry.line_total - tax, 2),
+                discount_percent=round(entry.promo_discount / gross * 100, 2) if gross else 0.0,
+                is_discount=False
+            ))
+        elif isinstance(entry, DiscountEntry) and entry.label.startswith("MANUAL DISCOUNT"):
+            lines.append(InvoiceLine(
+                product_name=entry.label,
+                quantity=1,
+                unit_price_excl_tax=entry.amount,
+                unit="pcs",
+                tax_rate=0,
+                line_total_excl_tax=entry.amount,
+                discount_percent=0.0,
+                is_discount=True
+            ))
     return lines
 
 
@@ -367,11 +373,11 @@ class SalesService:
 
     @staticmethod
     def _generate_sale_number(session: Session) -> str:
-        today = date.today().strftime("%Y%m%d")
+        today = date.today().strftime("%d%m%y")
         count = session.query(func.count(Sale.id)).filter(
             func.date(Sale.created_at) == date.today()
         ).scalar() or 0
-        return f"S-{today}-{count + 1:04d}"
+        return f"S-{today}-{count + 1:03d}"
 
 
     @staticmethod

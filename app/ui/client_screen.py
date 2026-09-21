@@ -21,6 +21,7 @@ from app.core.database import get_session
 from app.ui.widgets.form_fields import FieldRow
 from app.ui.dialogs.file_dialog import FileDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
+from app.utils.validators import is_valid_vat
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.constants import (
     BUTTON_HEIGHT_XS,
@@ -381,6 +382,9 @@ class ClientDetailPanel(QFrame):
         if not vat or vat == self._vat_prefix:
             self._show_overlay("VAT number is required.")
             return False
+        if not is_valid_vat(vat, self.country.currentData()):
+            self._show_overlay(f"VAT number {vat} is not valid.", kind="error")
+            return False
         return True
 
     def _collect_data(self) -> dict:
@@ -513,14 +517,17 @@ class ClientDetailPanel(QFrame):
                     if not street and not zip_code and not city and row.get("address"):
                         # Old export format (one free-text address column) — best effort.
                         street = row.get("address")
-                    if not vat or existing or not row.get("name") or not street:
+                    country = (row.get("country") or "").strip().upper()
+                    if country not in COUNTRY_NAMES:
+                        country = BELGIUM
+                    if (
+                        not vat or existing or not row.get("name") or not street
+                        or not is_valid_vat(vat, country)
+                    ):
                         clients_skipped += 1
                         continue
 
                     phone = (row.get("phone") or "").lstrip("'") or None
-                    country = (row.get("country") or "").strip().upper()
-                    if country not in COUNTRY_NAMES:
-                        country = BELGIUM
                     session.add(Client(
                         name=row.get("name"),
                         vatNumber=vat,

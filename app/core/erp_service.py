@@ -141,8 +141,17 @@ class ErpService:
         lines = []
 
         for invoiceLine in invoice_lines:
-            tax_id = self.get_sale_tax_id(invoiceLine.tax_rate)
-            lines.append((0, 0, {
+            if invoiceLine.is_discount:
+                lines.append((0, 0, {
+                    "name": invoiceLine.product_name,
+                    "quantity": invoiceLine.quantity,
+                    "price_unit": (-1)*invoiceLine.unit_price_excl_tax,
+                    "discount": 0,
+                    "account_id": account_id
+                }))
+            else:
+                tax_id = self.get_sale_tax_id(invoiceLine.tax_rate)
+                lines.append((0, 0, {
                     "name": invoiceLine.product_name,
                     "quantity": invoiceLine.quantity,
                     "price_unit": invoiceLine.unit_price_excl_tax,
@@ -245,3 +254,111 @@ class ErpService:
         self.button("account.move", "action_post", [invoice_id])
 
         return invoice_id, partner_email, inv_num, inv_date
+
+    def send_invoice(
+            self,
+            invoice_id: int,
+            use_peppol: bool = True,
+            use_email: bool = True,
+    ) -> tuple[bool, str]:
+        """
+        Send an invoice via Peppol and/or email through the Odoo "Send & Print" wizard.
+        Each channel is only used if it is actually possible for this invoice/partner.
+
+        :param invoice_id: id of the account.move to send
+        :param use_peppol: try to send via the Peppol network
+        :param use_email: try to send via email
+        :return: (True, message) if at least one channel was triggered, (False, reason) otherwise
+        """
+
+        # 1. Read invoice + partner
+        invoice = self.read(
+            model="account.move",
+            ids=[invoice_id],
+            fields=["state", "partner_id", "peppol_move_state"],
+        )[0]
+
+        print(invoice)
+
+        if invoice["state"] != "posted":
+            return False, "Invoice is not posted"
+
+        partner_id = invoice["partner_id"][0]
+        move_state = invoice["peppol_move_state"]
+
+        partner = self.read(
+            model="res.partner",
+            ids=[partner_id],
+            fields=["email", "peppol_verification_state"])[0]
+
+        print(partner)
+        partner_state = partner["peppol_verification_state"]
+
+        methods: list[str] = []
+        notes: list[str] = []
+
+        # # 2. Peppol eligibility
+        # if use_peppol:
+        #     if partner_state == "not_verified":
+        #         # Trigger the verification, it can't be used for this run
+        #         self.button(
+        #             "res.partner",
+        #             "button_account_peppol_check_partner_endpoint",
+        #             [partner_id],
+        #         )
+        #         notes.append("Peppol partner verification triggered")
+        #     elif partner_state != "valid":
+        #         notes.append("Partner is not on Peppol")
+        #     elif move_state in ("done", "processing"):
+        #         notes.append("Invoice already sent via Peppol")
+        #     elif move_state == "error":
+        #         notes.append("Previous Peppol send failed")
+        #     else:
+        #         methods.append("peppol")
+
+        # 3. Email eligibility
+        if use_email:
+            if partner["email"]:
+                methods.append("email")
+            else:
+                notes.append("Partner has no email address")
+
+        if not methods:
+            return False, "; ".join(notes) or "No sending method available"
+
+        # 4. Create the wizard. Building the context ourselves avoids an extra
+        #    round trip; it is what the "Send & Print" button would pass.
+        context = {"active_model": "account.move", "active_ids": [invoice_id]}
+
+        wizard_id = self.create(
+            model="account.move.send.wizard",
+            vals={
+                "move_id": invoice_id,
+                "sending_methods": methods,
+            },
+            context=context,
+        )
+
+        # 5. Send (drop the context kwarg if your button() helper doesn't take one)
+        self.button(
+            "account.move.send.wizard",
+            "action_send_and_print",
+            [wizard_id],
+            context=context,
+        )
+
+        # 6. Read back the Peppol state to confirm it was queued
+        # if "peppol" in methods:
+        #     new_state = self.read(
+        #         model="account.move",
+        #         ids=[invoice_id],
+        #         fields=["peppol_move_state"],
+        #     )[0]["peppol_move_state"]
+        #     if new_state == "error":
+        #         notes.append("Peppol send failed")
+        #         return False, "; ".join(notes)
+
+        message = "Invoice sent via " + " and ".join(methods)
+        if notes:
+            message += " (" + "; ".join(notes) + ")"
+        return True, message
