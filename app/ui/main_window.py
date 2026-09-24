@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         self.pos_screen.navigate.connect(self._navigate)
         self.pos_screen.salesperson_changed.connect(self.salesperson_label.setText)
         self.pos_screen.tab_updated.connect(self._on_tab_updated)
+        self.pos_screen.emit_all_tab_amounts()  # show carts recovered from a crash/close
         self.client_screen.navigate.connect(self._navigate)
         self.inventory_screen.navigate.connect(self._navigate)
         self.reports_screen.navigate.connect(self._navigate)

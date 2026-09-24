@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.models.models import Sale, SaleItem, Invoice, Client
+from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket
 from app.core.product_service import ProductService
 from app.core.settings_service import get_store_data
 
@@ -291,6 +291,62 @@ class Cart:
             elif kind == "subtotal":
                 entries.append(SubtotalMarker())
         return cls(entries=entries)
+
+
+@dataclass
+class OpenTicketData:
+    """One V-tab's recovered in-progress cart, read back from `open_tickets`
+    at startup — see SalesService.load_open_tickets()."""
+    cart: Cart
+    is_invoice: bool
+    client_id: int | None
+    client_name: str
+    sale_id: int | None
+
+
+def save_open_ticket(
+    session: Session,
+    vtab_slot: int,
+    cart: Cart,
+    is_invoice: bool,
+    client_id: int | None,
+    client_name: str,
+    sale_id: int | None,
+) -> None:
+    """Upserts the crash-recovery snapshot of one V-tab's in-progress cart.
+    Called after every cart mutation while the ticket isn't finished yet."""
+    row = session.query(OpenTicket).filter_by(vtab_slot=vtab_slot).first()
+    if row is None:
+        row = OpenTicket(vtab_slot=vtab_slot)
+        session.add(row)
+    row.cart_snapshot = cart.to_snapshot()
+    row.is_invoice = is_invoice
+    row.client_id = client_id
+    row.client_name = client_name
+    row.sale_id = sale_id
+    session.commit()
+
+
+def clear_open_ticket(session: Session, vtab_slot: int) -> None:
+    """Drops the crash-recovery snapshot for a V-tab once its ticket is no
+    longer in progress (paid, voided, or explicitly cleared)."""
+    session.query(OpenTicket).filter_by(vtab_slot=vtab_slot).delete()
+    session.commit()
+
+
+def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
+    """Every saved in-progress V-tab cart, keyed by vtab slot — read once at
+    startup to recover from a crash or unclean close."""
+    return {
+        row.vtab_slot: OpenTicketData(
+            cart=Cart.from_snapshot(row.cart_snapshot),
+            is_invoice=row.is_invoice,
+            client_id=row.client_id,
+            client_name=row.client_name or "",
+            sale_id=row.sale_id,
+        )
+        for row in session.query(OpenTicket).all()
+    }
 
 
 def calc_tax(line_total: float, tax_rate: int) -> float:

@@ -260,6 +260,23 @@ class ZReport(Base):
         return f"<ZReport {self.report_number} €{self.final_amount:.2f}>"
 
 
+class OpenTicket(Base):
+    """Crash-recovery snapshot of one V-tab's in-progress (unpaid) cart —
+    upserted on every cart mutation while the ticket isn't finished yet
+    (see POSScreen._autosave_open_ticket()), and dropped once it's paid,
+    voided, or explicitly cleared, since a real Sale row then covers it.
+    One row per active V-tab slot, never a history table."""
+    __tablename__ = "open_tickets"
+
+    vtab_slot = Column(Integer, primary_key=True)
+    cart_snapshot = Column(Text, nullable=False)
+    is_invoice = Column(Boolean, nullable=False, default=False)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    client_name = Column(String, nullable=True)
+    sale_id = Column(Integer, ForeignKey("sales.id"), nullable=True)  # set while re-editing a reopened sale
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class Invoice(Base):
     __tablename__ = "invoices"
 

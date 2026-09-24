@@ -21,7 +21,7 @@ from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.client_service import ClientService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, \
-    generate_invoice_data
+    generate_invoice_data, save_open_ticket, clear_open_ticket, load_open_tickets
 from app.constants.countries import BELGIUM
 from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService
@@ -70,7 +70,7 @@ class _TabState:
 class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
     salesperson_changed = pyqtSignal(str)  # cashier name update for header
-    tab_updated        = pyqtSignal(int, str)  # (vtab_idx, amount_str) for tab button
+    tab_updated        = pyqtSign al(int, str)  # (vtab_idx, amount_str) for tab button
 
     isAdmin = False
 
@@ -112,7 +112,11 @@ class POSScreen(QWidget):
         self._load_settings()
         self._build_ui()
         self._start_time_display()
-        self._clear_cart(override=True)
+        restored_slots = self._restore_open_tickets()
+        if self._active_tab in restored_slots:
+            self._load_tab_state(self._active_tab)
+        else:
+            self._clear_cart(override=True)
 
         self.erp = ErpService(
             url="https://skbctesting.odoo.com",
@@ -463,6 +467,60 @@ class POSScreen(QWidget):
 
     # ── V-tab state management ───────────────────────────────────────────
 
+    def _restore_open_tickets(self) -> set[int]:
+        """Recovers any V-tab carts left in progress by a crash or unclean
+        close (see save_open_ticket()/load_open_tickets() in sales_service).
+        Only updates _tab_states — call _load_tab_state() afterward for the
+        active tab if it's in the returned set, to reflect it on screen."""
+        with get_session() as session:
+            drafts = load_open_tickets(session)
+        for slot, draft in drafts.items():
+            s = self._tab_states.get(slot)
+            if s is None:
+                continue
+            s.cart          = draft.cart
+            s.sale_finished = False
+            s.is_invoice    = draft.is_invoice
+            s.client_id     = draft.client_id
+            s.client_name   = draft.client_name
+            s.sale_id       = draft.sale_id
+        return set(drafts)
+
+    def _autosave_open_ticket(self):
+        """Persists the active tab's in-progress cart so it survives a crash
+        or close before checkout. No-op once the ticket is finished — a real
+        Sale/Invoice row already covers that case."""
+        if self.sale_finished:
+            return
+        with get_session() as session:
+            save_open_ticket(
+                session,
+                vtab_slot=self._active_tab,
+                cart=self.cart,
+                is_invoice=self.is_invoice,
+                client_id=self.client_id,
+                client_name=self.client_label.text() if self.client_label.isVisible() else "",
+                sale_id=self._current_sale_id,
+            )
+
+    def _clear_open_ticket(self):
+        """Drops the active tab's crash-recovery snapshot once its ticket is
+        no longer in progress (paid, voided, or explicitly cleared)."""
+        with get_session() as session:
+            clear_open_ticket(session, self._active_tab)
+
+    def emit_all_tab_amounts(self):
+        """Re-emits tab_updated for every V-tab slot. The restore in __init__
+        runs before MainWindow connects tab_updated, so MainWindow calls this
+        once after wiring up to show recovered carts' amounts on the tab bar."""
+        for slot, s in self._tab_states.items():
+            if slot == self._active_tab:
+                cart, finished = self.cart, self.sale_finished
+            else:
+                cart, finished = s.cart, s.sale_finished
+            amount = f"{cart.remaining_due:.2f}" if cart.entries and not finished else ""
+            self.tab_updated.emit(slot, amount)
+
     def set_active_tab(self, idx: int):
         """Called by MainWindow when the user selects a different V tab."""
         if idx == self._active_tab:
@@ -774,6 +832,7 @@ class POSScreen(QWidget):
             self._refresh_cart()
             self._tick_time(override=True)
             self.sale_finished = True
+            self._clear_open_ticket()
         self.cart_table.setFocus()
 
     def _remove_selected(self):
@@ -1009,7 +1068,7 @@ class POSScreen(QWidget):
                 pending = entry.pending
                 is_weight = entry.unit in WEIGHT_UNITS
                 if is_weight:
-                    qty_text = "?" if pending else ("-1" if entry.quantity < 0 else "1")
+                    qty_text = "1" if pending else ("-1" if entry.quantity < 0 else "1")
                     weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
                     name_text = f"{entry.product_name} - {weight_text}"
                     price_text = f"{entry.unit_price:.2f}/{entry.unit}"
@@ -1138,6 +1197,8 @@ class POSScreen(QWidget):
             label = "Remaining" if self.cart.paid_total > 0 else "Total"
             self.ticket_total_lbl.setText(f"{label}  {remaining:.2f}")
 
+        self._autosave_open_ticket()
+
     def _move_selection(self, delta: int):
         if self.sale_finished:
             return
@@ -1250,6 +1311,7 @@ class POSScreen(QWidget):
 
     def _freeze_ticket(self, breakdown: list[dict], change: float):
         self.sale_finished     = True
+        self._clear_open_ticket()  # a real Sale/Invoice row now covers this ticket
         self._frozen_breakdown = breakdown
         self._frozen_change    = change
         self._frozen_total     = self.cart.total
