@@ -62,11 +62,11 @@ The SQLite database is created automatically at:
 ## Testing
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 pytest
 ```
 
-Tests use `pytest-qt` to exercise PyQt6 widgets/dialogs alongside the service-layer and database logic. Configuration lives in `pytest.ini`.
+Tests use `pytest-qt` to exercise PyQt6 widgets/dialogs alongside the service-layer and database logic. Test dependencies (`pytest`, `pytest-qt`) are included in `requirements.txt`; there's no separate dev-requirements file or pytest config file — `pytest` uses plain discovery of `tests/`.
 
 ---
 
@@ -86,9 +86,7 @@ The standalone `.exe` will be in the `dist/` folder.
 ```
 pos/
 ├── main.py                        # Entry point
-├── requirements.txt
-├── requirements-dev.txt           # Test dependencies (pytest, pytest-qt, pytest-cov)
-├── pytest.ini
+├── requirements.txt                # App deps + test deps (pytest, pytest-qt)
 ├── superpos.spec                  # PyInstaller build config
 ├── resources/
 │   ├── icons/                     # Logo and app icons
@@ -106,8 +104,10 @@ pos/
 │   │   ├── client_service.py      # Client CRUD
 │   │   ├── settings_service.py    # App settings
 │   │   ├── receipt_service.py     # ESC/POS receipt printing, cash drawer kick
-│   │   └── label_service.py       # ZPL shelf-label printing
-│   ├── reports/                   # Sales report generation
+│   │   ├── label_service.py       # ZPL shelf-label printing
+│   │   ├── report_service.py      # Sales report generation
+│   │   ├── erp_service.py         # Odoo JSON-2 API client (invoice create/post/send)
+│   │   └── erp_worker.py          # Runs erp_service calls off the UI thread
 │   ├── utils/
 │   │   ├── error_handling.py      # Logging setup + global exception hook
 │   │   └── utils.py                # Shared UI helpers (e.g. TicketTab)
