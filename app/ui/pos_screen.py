@@ -70,7 +70,7 @@ class _TabState:
 class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
     salesperson_changed = pyqtSignal(str)  # cashier name update for header
-    tab_updated        = pyqtSign al(int, str)  # (vtab_idx, amount_str) for tab button
+    tab_updated        = pyqtSignal(int, str)  # (vtab_idx, amount_str) for tab button
 
     isAdmin = False
 
