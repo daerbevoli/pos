@@ -169,7 +169,7 @@ def _print_line_items(printer, cart: Cart, currency: str):
             printer.set(bold=False)
         elif isinstance(entry, DiscountEntry):
             running_total += entry.line_total
-            label_lines = _wrap_name(f"Discount {entry.label}")
+            label_lines = _wrap_name(entry.label)
             # amount is usually positive (deducts); a promo entry undoing a
             # reversed line's discount is negative (adds back) — sign comes
             # from amount itself rather than a hardcoded "-" so both print right.
@@ -293,12 +293,15 @@ def _print_categories(printer, currency: str, totals: dict):
     printer.text("-" * LINE_WIDTH + "\n")
 
 
-def _print_b2b_info(printer, invoice):
+def _print_b2b_info(printer, invoice: Invoice):
     printer.set(align="left", bold=True, width=1, height=1)
     printer.text(f"{invoice.client_name}\n")
     printer.text(f"{invoice.full_address}\n")
     printer.text(f"{invoice.client_vat_number}\n")
     printer.text("-" * LINE_WIDTH + "\n")
+    printer.text(f"Invoice: {invoice.invoice_number}\nTHIS IS NOT AN INVOICE")
+    printer.text("-" * LINE_WIDTH + "\n")
+
 
 class ReceiptService:
 
@@ -399,33 +402,6 @@ class ReceiptService:
             raise
         except Exception as e:
             logger.exception("Failed to print Z report %s", z_report.report_number)
-            raise PrinterError(f"Printer connected but failed to print: {e}") from e
-        finally:
-            printer.close()
-
-    @staticmethod
-    def print_invoice(session: Session, invoice: Invoice):
-        settings = SettingsService.get_all(session)
-        currency = settings.get("currency_symbol", "€")
-        printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
-        try:
-            # _print_store_header(printer, settings)
-            printer.set(align="left", bold=False)
-            if invoice.client_name:
-                printer.text(f"Bill to: {invoice.client_name}\n")
-            if invoice.client_vat_number:
-                printer.text(f"VAT: {invoice.client_vat_number}\n")
-            if invoice.full_address:
-                printer.text(f"{invoice.full_address}\n")
-            printer.text("-" * LINE_WIDTH + "\n")
-            _print_line_items(printer, Cart.from_snapshot(invoice.line_items_snapshot), currency)
-            _print_totals(printer, currency, invoice.tax_amount, invoice.final_amount)
-            _print_footer(printer, invoice.invoice_number, invoice.issued_at, settings.get("receipt_footer", ""))
-            printer.cut()
-        except PrinterError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to print invoice %s", invoice.invoice_number)
             raise PrinterError(f"Printer connected but failed to print: {e}") from e
         finally:
             printer.close()
