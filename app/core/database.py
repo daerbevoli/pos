@@ -131,6 +131,12 @@ _COLUMN_MIGRATIONS = [
         "The Z-report needed a per-category sales breakdown alongside its "
         "totals (feat: X and Z report)."
     ),
+    _ColumnMigration(
+        "open_tickets", "is_refund", "BOOLEAN NOT NULL DEFAULT 0",
+        "A V-tab left in RF/CN (refund / credit note) mode must come back "
+        "in that mode after a crash, or lines added afterward would go in "
+        "positive (feat: refund / credit note mode)."
+    ),
 ]
 
 

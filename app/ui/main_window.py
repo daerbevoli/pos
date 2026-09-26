@@ -42,6 +42,8 @@ class MainWindow(QMainWindow):
         self._active_vtab = 1
         # Per V-tab: which QStackedWidget index (screen) was last active
         self._vtab_screen = {i: 0 for i in range(1, MAX_VTABS + 1)}
+        self._salesperson_name = ""  # "Cashier name" / "Admin", shown top right
+        self._rf_cn_mode = False     # active POS ticket is in refund / credit-note mode
 
         self._build_ui()
         self._start_clock()
@@ -130,9 +132,11 @@ class MainWindow(QMainWindow):
         self.settings_screen.settings_saved.connect(self._refresh_salesperson)
         self.settings_screen.settings_saved.connect(self.pos_screen.reload_shortcuts)
         self.pos_screen.navigate.connect(self._navigate)
-        self.pos_screen.salesperson_changed.connect(self.salesperson_label.setText)
+        self.pos_screen.salesperson_changed.connect(self._set_salesperson)
+        self.pos_screen.rf_cn_mode_changed.connect(self._set_rf_cn_mode)
         self.pos_screen.tab_updated.connect(self._on_tab_updated)
         self.pos_screen.emit_all_tab_amounts()  # show carts recovered from a crash/close
+        self.pos_screen.emit_rf_cn_mode()
         self.client_screen.navigate.connect(self._navigate)
         self.inventory_screen.navigate.connect(self._navigate)
         self.reports_screen.navigate.connect(self._navigate)
@@ -169,7 +173,19 @@ class MainWindow(QMainWindow):
     def _refresh_salesperson(self):
         with get_session() as session:
             name = SettingsService.get(session, "cashier_name", "Cashier")
-        self.salesperson_label.setText(name)
+        self._set_salesperson(name)
+
+    def _set_salesperson(self, name: str):
+        self._salesperson_name = name
+        self._render_salesperson()
+
+    def _set_rf_cn_mode(self, active: bool):
+        self._rf_cn_mode = active
+        self._render_salesperson()
+
+    def _render_salesperson(self):
+        suffix = " (RF / CN)" if self._rf_cn_mode else ""
+        self.salesperson_label.setText(f"{self._salesperson_name}{suffix}")
 
     # ── V-tab switching ───────────────────────────────────────────────────────
 

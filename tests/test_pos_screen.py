@@ -5,6 +5,8 @@ Covers scanning/adding items (incl. pending weight items), discounts,
 subtotal sections, payment (full/partial/mixed/invoice), freeze/unfreeze,
 ticket reopen + reversal lines, tab-state persistence, and sale browsing.
 """
+import json
+
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
@@ -957,3 +959,146 @@ def test_articles_navigation_always_allowed(screen, qtbot):
     with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
         screen._emit_signal(1)
     assert blocker.args == [1]
+
+
+# ── Refund / credit-note (RF / CN) mode ──────────────────────────────────
+
+def _press_rf_cn(screen):
+    """The RF / CN button is admin-only."""
+    screen.isAdmin = True
+    screen._rf_cn()
+
+
+def test_rf_cn_mode_requires_admin(screen):
+    screen.isAdmin = False
+    screen._rf_cn()
+    assert screen.cart.is_refund is False
+
+
+def test_rf_cn_mode_adds_products_with_negative_quantity(screen, qtbot):
+    pid, barcode, _ = _add_product(barcode="rf1", price=5.0)
+    with qtbot.waitSignal(screen.rf_cn_mode_changed, timeout=1000) as blocker:
+        _press_rf_cn(screen)
+    assert blocker.args == [True]
+    assert screen.cart.is_refund is True
+
+    screen.combined_input.setText("3")
+    screen.add_product_by_id(pid)
+
+    assert screen.cart.entries[0].quantity == -3
+    assert screen.cart.total == -15.0
+
+
+def test_rf_cn_mode_declined_stays_off(screen, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.No))
+    _press_rf_cn(screen)
+    assert screen.cart.is_refund is False
+
+
+def test_rf_cn_mode_blocked_with_items_in_cart(screen):
+    pid, _, _ = _add_product(barcode="rf2")
+    screen.add_product_by_id(pid)
+    _press_rf_cn(screen)
+    assert screen.cart.is_refund is False
+
+
+def test_rf_cn_pending_weight_amount_goes_negative(screen):
+    pid, _, _ = _add_product(barcode="rf3", unit="kg", price=10.0)
+    _press_rf_cn(screen)
+    screen.add_product_by_id(pid)
+    screen.combined_input.setText("0.5")
+    screen._on_barcode_enter()
+    assert screen.cart.entries[0].quantity == -0.5
+    assert screen.cart.total == -5.0
+
+
+def test_rf_cn_plus_minus_move_away_from_and_toward_zero(screen):
+    pid, _, _ = _add_product(barcode="rf4")
+    _press_rf_cn(screen)
+    screen.add_product_by_id(pid)
+    screen._increase_product()
+    assert screen.cart.entries[0].quantity == -2
+    screen._decrease_product()
+    assert screen.cart.entries[0].quantity == -1
+
+
+def test_rf_cn_payment_saves_rf_sale_pays_out_and_stays_in_mode(screen):
+    pid, _, _ = _add_product(barcode="rf5", price=5.0, stock_quantity=10)
+    _press_rf_cn(screen)
+    screen.combined_input.setText("2")
+    screen.add_product_by_id(pid)
+    screen._open_payment("cash")
+
+    assert screen.sale_finished is True
+    assert screen.cart.is_refund is True
+    with get_session() as session:
+        sale = session.query(Sale).filter_by(id=screen._current_sale_id).one()
+        assert sale.sale_number.startswith("RF-")
+        assert sale.is_refund
+        assert sale.final_amount == -10.0
+        assert sale.change_given == 0.0
+        assert json.loads(sale.payment_breakdown) == [{"method": "cash", "amount": -10.0}]
+        assert ProductService.get_by_id(session, pid).stock_quantity == 12
+
+
+def test_rf_cn_with_client_creates_credit_note(screen):
+    pid, _, _ = _add_product(barcode="rf6", price=5.0)
+    with get_session() as session:
+        client = ClientService.create(
+            session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+        )
+        client_id = client.id
+    _press_rf_cn(screen)
+    screen.set_client(client_id, "Acme")
+    screen.add_product_by_id(pid)
+    screen._open_payment("card")
+
+    with get_session() as session:
+        sale = session.query(Sale).filter_by(id=screen._current_sale_id).one()
+        assert sale.sale_number.startswith("RF-")
+        assert sale.invoice.invoice_number.startswith("CN-")
+        assert sale.invoice.is_credit_note
+
+
+def test_rf_cn_mode_survives_clear_cart(screen):
+    pid, _, _ = _add_product(barcode="rf8")
+    _press_rf_cn(screen)
+    screen.add_product_by_id(pid)
+    screen._clear_cart()
+    assert screen.cart.is_refund is True
+
+
+def test_rf_cn_mode_carries_into_next_ticket_until_button_pressed(screen):
+    pid, _, _ = _add_product(barcode="rf9", price=5.0)
+    _press_rf_cn(screen)
+    screen.add_product_by_id(pid)
+    screen._open_payment("cash")
+
+    screen.add_product_by_id(pid)  # starts the next ticket
+    assert screen.cart.entries[0].quantity == -1
+
+    screen._clear_cart()
+    _press_rf_cn(screen)  # pressed again: leave the mode
+    assert screen.cart.is_refund is False
+    screen.add_product_by_id(pid)
+    assert screen.cart.entries[0].quantity == 1
+
+
+def test_rf_cn_mode_is_per_tab(screen):
+    _press_rf_cn(screen)
+    screen.set_active_tab(2)
+    assert screen.cart.is_refund is False
+    screen.set_active_tab(1)
+    assert screen.cart.is_refund is True
+
+
+def test_reopen_and_browse_do_not_change_rf_cn_mode(screen):
+    pid, _, _ = _add_product(barcode="rf7")
+    _press_rf_cn(screen)
+    screen.add_product_by_id(pid)
+    screen._open_payment("cash")
+
+    screen._previous_sale()
+    assert screen.cart.is_refund is True
+    screen._reopen_ticket()
+    assert screen.cart.is_refund is True

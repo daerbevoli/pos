@@ -421,3 +421,38 @@ def test_get_sales_range_excludes_voided(db_session):
     today = date.today()
     result = SalesService.get_sales_range(db_session, today, today)
     assert result == []
+
+
+# ── Refund / credit-note numbering ───────────────────────────────────────
+
+def test_refund_cart_negates_added_quantity(db_session):
+    product = _make_product(db_session)
+    cart = Cart(is_refund=True)
+    cart.add_product(product, quantity=2)
+    assert cart.entries[0].quantity == -2
+
+
+def test_refund_sale_numbered_rf_with_its_own_sequence(db_session):
+    product = _make_product(db_session)
+    s1 = SalesService.finalize_sale(db_session, _cart_with(_item_for(product)))
+    refund_cart = _cart_with(_item_for(product, quantity=-1))
+    refund_cart.is_refund = True
+    r1 = SalesService.finalize_sale(db_session, refund_cart)
+
+    assert s1.sale_number.endswith("-001") and s1.sale_number.startswith("S-")
+    assert r1.sale_number.startswith("RF-") and r1.sale_number.endswith("-001")
+
+
+def test_refund_invoice_numbered_cn(db_session):
+    from app.core.client_service import ClientService
+    product = _make_product(db_session)
+    client = ClientService.create(
+        db_session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+    )
+    cart = _cart_with(_item_for(product, quantity=-1))
+    cart.is_refund = True
+    invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
+
+    assert invoice.invoice_number.startswith("CN-")
+    assert invoice.is_credit_note
+    assert invoice.sale.sale_number.startswith("RF-")

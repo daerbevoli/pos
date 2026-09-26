@@ -71,6 +71,7 @@ class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
     salesperson_changed = pyqtSignal(str)  # cashier name update for header
     tab_updated        = pyqtSignal(int, str)  # (vtab_idx, amount_str) for tab button
+    rf_cn_mode_changed = pyqtSignal(bool)  # active tab entered/left refund / credit-note mode, for header
 
     isAdmin = False
 
@@ -319,6 +320,8 @@ class POSScreen(QWidget):
         self.btn_settings = FunctionButton("Settings", "secFunc")
         self.btn_reports  = FunctionButton("Reports", "reportsBtn")
 
+        self.btn_rf_cn = FunctionButton("Refund / \nCreditnota", "secFunc")
+
         layout_map = [
             (self.btn_left, 0, 0, 1, 1), (self.btn_right, 0, 1, 1, 1),
             (self.btn_reopen, 0, 2, 1, 1), (self.btn_print_ticket, 0, 3, 1, 1),
@@ -334,7 +337,7 @@ class POSScreen(QWidget):
             (self.btn_barcode, 3, 2, 1, 1), (self.btn_articles, 3, 3, 1, 1),
             (self.btn_drawer, 3, 4, 1, 1), (self.btn_reports, 3, 5, 1, 1),
 
-            (self.btn_client, 4, 2, 1, 1),
+            (self.btn_client, 4, 2, 1, 1), (self.btn_rf_cn, 4, 3, 1, 1),
             (self.btn_ok, 4, 5, 1, 1),
         ]
         for widget, r, c, rs, cs in layout_map:
@@ -392,6 +395,8 @@ class POSScreen(QWidget):
         self.btn_drawer.clicked.connect(self._open_drawer)
 
         self.btn_barcode.clicked.connect(self._open_barcode)
+
+        self.btn_rf_cn.clicked.connect(self._rf_cn)
 
         return col
 
@@ -501,6 +506,7 @@ class POSScreen(QWidget):
                 client_id=self.client_id,
                 client_name=self.client_label.text() if self.client_label.isVisible() else "",
                 sale_id=self._current_sale_id,
+                is_refund=self.cart.is_refund,
             )
 
     def _clear_open_ticket(self):
@@ -520,6 +526,16 @@ class POSScreen(QWidget):
                 cart, finished = s.cart, s.sale_finished
             amount = f"{cart.remaining_due:.2f}" if cart.entries and not finished else ""
             self.tab_updated.emit(slot, amount)
+
+    def emit_rf_cn_mode(self):
+        """Re-emits rf_cn_mode_changed for the active tab — like
+        emit_all_tab_amounts(), for a tab restored in RF/CN mode before
+        MainWindow connected the signal."""
+        self.rf_cn_mode_changed.emit(self.cart.is_refund)
+
+    def _set_rf_cn_mode(self, active: bool):
+        self.cart.is_refund = active
+        self.rf_cn_mode_changed.emit(active)
 
     def set_active_tab(self, idx: int):
         """Called by MainWindow when the user selects a different V tab."""
@@ -583,6 +599,7 @@ class POSScreen(QWidget):
 
         self.ticket_title.setText(f"V {idx}")
         self._refresh_cart()
+        self.rf_cn_mode_changed.emit(self.cart.is_refund)
         self.cart_table.setFocus()
 
 
@@ -731,7 +748,7 @@ class POSScreen(QWidget):
                 self._show_overlay("Enter an valid amount", kind="info")
                 return True
             if pending_entry.quantity is None:
-                pending_entry.quantity = amount
+                pending_entry.quantity = -amount if self.cart.is_refund else amount
             else:
                 self.cart.set_open_price(pending_entry, amount)
             self.cart.sync_promo_discounts()
@@ -1219,6 +1236,17 @@ class POSScreen(QWidget):
             self._show_overlay("Fill in the amount for pending items first", kind="error")
             return
 
+        if self.cart.is_refund:
+            if self.cart.total >= 0:
+                self._show_overlay("Nothing to refund", kind="error")
+                return
+            # A refund is paid out in full by the chosen method in one go —
+            # no tendering, partial payments or change.
+            payout = self.cart.total
+            self.combined_input.clear()
+            self._save_and_freeze([{"method": method, "amount": payout}], payout, method)
+            return
+
         prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
         if prior_payments and any(p.method != method for p in prior_payments):
             self._show_overlay(
@@ -1264,7 +1292,13 @@ class POSScreen(QWidget):
             breakdown.append({"method": method, "amount": round(tendered, 2)})
 
         self.cart.entries = [e for e in self.cart.entries if not isinstance(e, PaymentEntry)]
+        self._save_and_freeze(breakdown, total_tendered, final_method)
 
+    def _save_and_freeze(self, breakdown: list[dict], total_tendered: float, final_method: str):
+        """Persists the fully-paid cart (new sale, new invoice, or overwrite of
+        a reopened sale), then freezes the ticket. RF/CN mode stays on — only
+        the button leaves it (see _rf_cn())."""
+        total = self.cart.total
         with get_session() as session:
             if self._current_sale_id is not None:
                 # Re-paying a reopened ticket: overwrite the existing sale in place.
@@ -1284,7 +1318,7 @@ class POSScreen(QWidget):
                     cart=self.cart,
                     payment_method=final_method,
                     amount_tendered=total_tendered,
-                    notes="Invoice",
+                    notes="Credit note" if self.cart.is_refund else "Invoice",
                     client_id=self.client_id,
                     payment_breakdown=breakdown,
                 )
@@ -1556,7 +1590,8 @@ class POSScreen(QWidget):
         if isinstance(entry, CartItem) and entry.quantity is not None and not entry.is_reversal and not entry.has_reversal:
             if entry.unit in WEIGHT_UNITS:
                 return
-            entry.quantity += 1
+            # Grow the line away from zero — more returned on a refund line.
+            entry.quantity += -1 if entry.quantity < 0 else 1
             self.cart.sync_promo_discounts()
             self._refresh_cart()
 
@@ -1567,10 +1602,11 @@ class POSScreen(QWidget):
         if idx is None:
             return
         entry = self.cart.entries[idx]
-        if isinstance(entry, CartItem) and entry.quantity is not None and entry.quantity > 1:
+        if (isinstance(entry, CartItem) and entry.quantity is not None
+                and not entry.is_reversal and abs(entry.quantity) > 1):
             if entry.unit in WEIGHT_UNITS:
                 return
-            entry.quantity -= 1
+            entry.quantity -= -1 if entry.quantity < 0 else 1
             self.cart.sync_promo_discounts()
             self._refresh_cart()
 
@@ -1635,6 +1671,37 @@ class POSScreen(QWidget):
                 self.cart.add_product(product, quantity=quantity)
                 self._refresh_cart(select_last=True)
         self.combined_input.clear()
+
+    def _rf_cn(self):
+        """Toggles refund / credit-note mode for this tab's ticket. While on,
+        every product added goes in with a negative quantity, and paying
+        pays the (negative) total out. The sale is numbered RF-…, or CN-…
+        as an invoice when a client is attached (see SalesService). Stays on
+        across tickets until pressed again — nothing else leaves the mode.
+        Only toggles on an empty or finished ticket, so a ticket never mixes
+        regular and refund lines."""
+        if not self.isAdmin:
+            self._show_overlay("No admin", kind="error")
+            return
+
+        if self._guard_payment_in_progress():
+            return
+        if not self.sale_finished and self.cart.entries:
+            self._show_overlay("Finish or clear the current ticket first", kind="error")
+            return
+        entering = not self.cart.is_refund
+        if entering:
+            reply = QMessageBox.question(
+                self, "Enter RF / CN",
+                "You will enter RF / CN mode.\nContinue?"
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            if self.sale_finished:
+                self._unfreeze_ticket()
+        self._set_rf_cn_mode(entering)
+        self._refresh_cart()
+        self.cart_table.setFocus()
 
     def _emit_signal(self, signal: int):
         if signal == 4 and not self.isAdmin:

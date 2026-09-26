@@ -299,7 +299,8 @@ def _print_b2b_info(printer, invoice: Invoice):
     printer.text(f"{invoice.full_address}\n")
     printer.text(f"{invoice.client_vat_number}\n")
     printer.text("-" * LINE_WIDTH + "\n")
-    printer.text(f"Invoice: {invoice.invoice_number}\nTHIS IS NOT AN INVOICE")
+    doc_label = "Credit note" if invoice.is_credit_note else "Invoice"
+    printer.text(f"{doc_label}: {invoice.invoice_number}\nTHIS IS NOT AN INVOICE")
     printer.text("-" * LINE_WIDTH + "\n")
 
 

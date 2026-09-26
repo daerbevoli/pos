@@ -95,6 +95,7 @@ class PaymentEntry(ReceiptEntry):
 class Cart:
     entries: list[ReceiptEntry] = field(default_factory=list)
     is_domestic: bool = True  # whether the attached client is Belgian; affects unit_price/tax_rate
+    is_refund: bool = False  # RF/CN mode: every line added goes in with a negative quantity
 
     def _effective_price(self, base_price: float, base_tax_rate: int) -> float:
         """The price actually charged: the domestic (VAT-incl.) price as-is
@@ -136,6 +137,8 @@ class Cart:
         )
 
     def add_product(self, product, quantity: float | None = 1):
+        if quantity is not None and self.is_refund:
+            quantity = -abs(quantity)
 
         if quantity is not None:
             # Walk backwards until we hit a subtotal marker.
@@ -302,6 +305,7 @@ class OpenTicketData:
     client_id: int | None
     client_name: str
     sale_id: int | None
+    is_refund: bool = False
 
 
 def save_open_ticket(
@@ -312,6 +316,7 @@ def save_open_ticket(
     client_id: int | None,
     client_name: str,
     sale_id: int | None,
+    is_refund: bool = False,
 ) -> None:
     """Upserts the crash-recovery snapshot of one V-tab's in-progress cart.
     Called after every cart mutation while the ticket isn't finished yet."""
@@ -324,6 +329,7 @@ def save_open_ticket(
     row.client_id = client_id
     row.client_name = client_name
     row.sale_id = sale_id
+    row.is_refund = is_refund
     session.commit()
 
 
@@ -337,16 +343,19 @@ def clear_open_ticket(session: Session, vtab_slot: int) -> None:
 def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
     """Every saved in-progress V-tab cart, keyed by vtab slot — read once at
     startup to recover from a crash or unclean close."""
-    return {
-        row.vtab_slot: OpenTicketData(
-            cart=Cart.from_snapshot(row.cart_snapshot),
+    drafts = {}
+    for row in session.query(OpenTicket).all():
+        cart = Cart.from_snapshot(row.cart_snapshot)
+        cart.is_refund = bool(row.is_refund)
+        drafts[row.vtab_slot] = OpenTicketData(
+            cart=cart,
             is_invoice=row.is_invoice,
             client_id=row.client_id,
             client_name=row.client_name or "",
             sale_id=row.sale_id,
+            is_refund=cart.is_refund,
         )
-        for row in session.query(OpenTicket).all()
-    }
+    return drafts
 
 
 def calc_tax(line_total: float, tax_rate: int) -> float:
@@ -418,7 +427,16 @@ def generate_invoice_data(session: Session, invoice: Invoice) -> dict:
         "email": invoice.client.email
     }
     invoice_data["to"] = receiver
-    invoice_data["items"] = invoice_lines(invoice)
+    items = invoice_lines(invoice)
+    if invoice.is_credit_note:
+        # Odoo books a credit note as its own move type with positive
+        # quantities — the refund direction comes from out_refund itself,
+        # not from negative lines (which an out_invoice refuses to post).
+        for line in items:
+            line.quantity = abs(line.quantity)
+            line.line_total_excl_tax = abs(line.line_total_excl_tax)
+    invoice_data["move_type"] = "out_refund" if invoice.is_credit_note else "out_invoice"
+    invoice_data["items"] = items
     invoice_data["notes"] = "Thank you for shopping."
 
     return invoice_data
@@ -428,12 +446,15 @@ def generate_invoice_data(session: Session, invoice: Invoice) -> dict:
 class SalesService:
 
     @staticmethod
-    def _generate_sale_number(session: Session) -> str:
+    def _generate_sale_number(session: Session, prefix: str = "S") -> str:
+        """Next "<prefix>-ddmmyy-NNN" number, sequenced per prefix so
+        refunds (RF-) get their own run of numbers next to sales (S-)."""
         today = date.today().strftime("%d%m%y")
         count = session.query(func.count(Sale.id)).filter(
-            func.date(Sale.created_at) == date.today()
+            func.date(Sale.created_at) == date.today(),
+            Sale.sale_number.like(f"{prefix}-%"),
         ).scalar() or 0
-        return f"S-{today}-{count + 1:03d}"
+        return f"{prefix}-{today}-{count + 1:03d}"
 
 
     @staticmethod
@@ -446,13 +467,14 @@ class SalesService:
         payment_breakdown: list[dict] = None,
     ) -> Sale:
         """
-        Convert cart to a completed Sale. Deducts stock automatically.
-        Returns the saved Sale object.
+        Convert cart to a completed Sale. Deducts stock automatically
+        (a refund's negative lines put it back). Numbered RF- instead of
+        S- when cart.is_refund. Returns the saved Sale object.
         """
         if not cart.entries:
             raise ValueError("Empty cart.")
 
-        sale_number = SalesService._generate_sale_number(session)
+        sale_number = SalesService._generate_sale_number(session, "RF" if cart.is_refund else "S")
         change = None
         if payment_method in ("cash", "card") and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
@@ -659,7 +681,7 @@ class SalesService:
         if not client:
             raise ValueError("An invoice requires a valid client.")
 
-        sale_number = SalesService._generate_sale_number(session)
+        sale_number = SalesService._generate_sale_number(session, "RF" if cart.is_refund else "S")
         change = None
         if payment_method in ("cash", "card") and amount_tendered is not None:
             change = round(amount_tendered - cart.total, 2)
@@ -713,7 +735,11 @@ class SalesService:
         invoice = Invoice(
             sale_id=sale.id,
             client_id=client_id,
-            invoice_number=sale_number.replace("S-", "I-", 1),
+            # A refund issued to a client is a credit note: RF-… sale, CN-… document.
+            invoice_number=(
+                sale_number.replace("RF-", "CN-", 1) if cart.is_refund
+                else sale_number.replace("S-", "I-", 1)
+            ),
             # Snapshot now, once — never re-derived from the live client/sale
             # afterward, so this document can't silently change later.
             client_name=client.name,

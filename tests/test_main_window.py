@@ -120,3 +120,11 @@ def test_pos_screen_salesperson_changed_updates_label(window):
 def test_update_clock_sets_readable_text(window):
     window._update_clock()
     assert window.clock_label.text() != ""
+
+
+def test_rf_cn_mode_shows_suffix_next_to_salesperson(window):
+    window.pos_screen.salesperson_changed.emit("Admin")
+    window.pos_screen.rf_cn_mode_changed.emit(True)
+    assert window.salesperson_label.text() == "Admin (RF / CN)"
+    window.pos_screen.rf_cn_mode_changed.emit(False)
+    assert window.salesperson_label.text() == "Admin"

@@ -144,6 +144,11 @@ class Sale(Base):
 
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
 
+    @property
+    def is_refund(self) -> bool:
+        """Rung up in RF/CN mode — see SalesService._generate_sale_number()."""
+        return self.sale_number.startswith("RF-")
+
     def __repr__(self):
         return f"<Sale {self.sale_number} €{self.final_amount:.2f}>"
 
@@ -274,6 +279,7 @@ class OpenTicket(Base):
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
     client_name = Column(String, nullable=True)
     sale_id = Column(Integer, ForeignKey("sales.id"), nullable=True)  # set while re-editing a reopened sale
+    is_refund = Column(Boolean, nullable=False, default=False)  # tab was in RF/CN mode
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
@@ -306,6 +312,11 @@ class Invoice(Base):
 
     sale   = relationship("Sale", backref=backref("invoice", uselist=False))
     client = relationship("Client", backref=backref("invoices", uselist=True))
+
+    @property
+    def is_credit_note(self) -> bool:
+        """A refund issued to a client (CN-…) rather than a regular invoice (I-…)."""
+        return (self.invoice_number or "").startswith("CN-")
 
     @property
     def full_address(self) -> str:

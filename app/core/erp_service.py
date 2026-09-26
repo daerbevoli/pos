@@ -218,6 +218,9 @@ class ErpService:
                                                                         invoice_data["due_date"], invoice_data["from"],
                                                                         invoice_data["to"], invoice_data["items"], invoice_data["notes"])
 
+        # "out_refund" for a credit note (CN-…), see generate_invoice_data()
+        move_type = invoice_data.get("move_type", "out_invoice")
+
         if not inv_num or not inv_date:
             raise Exception(f"Missing crucial invoice data")
 
@@ -229,7 +232,7 @@ class ErpService:
         # 3. Check for duplicate -> return original invoice id
         existing = self.search(
             model="account.move",
-            domain=[["move_type", "=", "out_invoice"], ["ref", "=", inv_num]],
+            domain=[["move_type", "=", move_type], ["ref", "=", inv_num]],
             limit=1,
         )
         if existing:
@@ -239,7 +242,7 @@ class ErpService:
         invoice_id = self.create(
             model="account.move",
             vals={
-                "move_type": "out_invoice",
+                "move_type": move_type,
                 "journal_id": journal_id,
                 "partner_id": partner_id,
                 "invoice_date": inv_date,
