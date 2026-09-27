@@ -307,6 +307,40 @@ def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
     assert snapshot[0]["quantity"] == 3
 
 
+def test_update_sale_with_client_turns_refund_into_credit_note(db_session):
+    """A finished RF- ticket reopened and given a client must become a CN-
+    credit note on re-payment, not stay a plain refund."""
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session)
+    cart = _cart_with(_item_for(product, quantity=-1))
+    cart.is_refund = True
+    sale = SalesService.finalize_sale(db_session, cart)
+    assert sale.sale_number.startswith("RF-") and sale.invoice is None
+
+    updated = SalesService.update_sale(db_session, sale.id, cart, client_id=client.id)
+
+    assert updated.sale_number == sale.sale_number
+    assert updated.invoice is not None
+    assert updated.invoice.is_credit_note
+    assert updated.invoice.invoice_number == sale.sale_number.replace("RF-", "CN-", 1)
+    assert updated.invoice.client_name == "Client"
+    assert updated.invoice.final_amount == -10.0
+
+
+def test_update_sale_with_client_turns_receipt_into_invoice(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session)
+    cart = _cart_with(_item_for(product, quantity=1))
+    sale = SalesService.finalize_sale(db_session, cart)
+
+    updated = SalesService.update_sale(db_session, sale.id, cart, client_id=client.id)
+
+    assert updated.invoice.invoice_number == sale.sale_number.replace("S-", "I-", 1)
+    assert not updated.invoice.is_credit_note
+
+
 def test_mark_invoice_sent_sets_timestamp(db_session):
     from app.core.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")

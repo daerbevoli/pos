@@ -92,10 +92,6 @@ def _open(vendor_id: str, product_id: str):
         raise PrinterError(f"Could not connect to receipt printer: {e}") from e
 
 
-def _money(currency: str, amount: float) -> str:
-    return f"{currency}{amount:.2f}"
-
-
 def _print_logo(printer, settings: dict):
     logo_path = settings.get("logo_path", "")
     if not logo_path or not os.path.isfile(logo_path):
@@ -122,7 +118,7 @@ def _wrap_name(name: str) -> list[str]:
     return textwrap.wrap(name, width=NAME_COL, break_long_words=True, break_on_hyphens=False) or [""]
 
 
-def _print_line_items(printer, cart: Cart, currency: str):
+def _print_line_items(printer, cart: Cart):
     printer.set(bold=True)
     printer.text(f"{'#':<{QTY_COL}}{'Description':<{NAME_COL}}{'Price':>{UNIT_COL}}{'Total':>{TOTAL_COL}}\n")
     printer.text("-" * LINE_WIDTH + "\n")
@@ -142,18 +138,18 @@ def _print_line_items(printer, cart: Cart, currency: str):
                 qty_count = -1 if entry.quantity < 0 else 1
                 qty = f"{qty_count}"
                 weight_text = f"{abs(entry.quantity):g}{entry.unit}"
-                unit_price = f"{_money(currency, entry.unit_price)}/{entry.unit}"
+                unit_price = f"{entry.unit_price:.2f}/{entry.unit}"
             else:
                 qty_count = entry.quantity
                 qty = f"{entry.quantity:g}"
-                unit_price = _money(currency, entry.unit_price)
+                unit_price = f"{entry.unit_price:.2f}"
             name = prefix + entry.product_name
             running_qty += qty_count
             running_total += entry.line_total
             name_lines = _wrap_name(name)
             printer.text(
                 f"{qty:<{QTY_COL}}{name_lines[0]:<{NAME_COL}}"
-                f"{unit_price:>{UNIT_COL}}{_money(currency, entry.line_total):>{TOTAL_COL}}\n"
+                f"{unit_price:>{UNIT_COL}}{entry.line_total:>{TOTAL_COL}.2f}\n"
             )
             for extra in name_lines[1:]:
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")
@@ -164,10 +160,11 @@ def _print_line_items(printer, cart: Cart, currency: str):
             printer.set(bold=True)
             printer.text(
                 f"{qty_str:<{QTY_COL}}{'Subtotal':<{NAME_COL}}{'':>{UNIT_COL}}"
-                f"{_money(currency, running_total):>{TOTAL_COL}}\n"
+                f"{running_total:>{TOTAL_COL}.2f}\n"
             )
             printer.set(bold=False)
         elif isinstance(entry, DiscountEntry):
+            printer.set(bold=True)
             running_total += entry.line_total
             label_lines = _wrap_name(entry.label)
             # amount is usually positive (deducts); a promo entry undoing a
@@ -176,7 +173,7 @@ def _print_line_items(printer, cart: Cart, currency: str):
             sign = "-" if entry.amount >= 0 else "+"
             printer.text(
                 f"{'':<{QTY_COL-1}} {label_lines[0]:<{NAME_COL}}{'':>{UNIT_COL}}"
-                f"{sign + _money(currency, abs(entry.amount)):>{TOTAL_COL}}\n"
+                f"{sign + f'{abs(entry.amount):.2f}':>{TOTAL_COL}}\n"
             )
             for extra in label_lines[1:]:
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")
@@ -186,20 +183,20 @@ def _print_line_items(printer, cart: Cart, currency: str):
 TOTAL_ROW_WIDTH = LINE_WIDTH // 2  # columns available at the TOTAL row's 2x character width
 
 
-def _print_totals(printer, currency: str, tax_amount: float, final_amount: float):
+def _print_totals(printer, tax_amount: float, final_amount: float):
     printer.set(bold=True, width=2, height=2, custom_size=True)
     label_col = TOTAL_ROW_WIDTH - 10
-    printer.text(f"{'TOTAL':<{label_col}}{_money(currency, final_amount):>10}\n")
+    printer.text(f"{'TOTAL':<{label_col}}{final_amount:>10.2f}\n")
     printer.set(bold=False, width=1, height=1, custom_size=True)
 
-def _print_payment_breakdown(printer, currency: str, sale: Sale):
+def _print_payment_breakdown(printer, sale: Sale):
     breakdown = json.loads(sale.payment_breakdown) if sale.payment_breakdown else [
         {"method": sale.payment_method, "amount": sale.amount_tendered or sale.final_amount}
     ]
     for entry in breakdown:
-        printer.text(f"{entry['method'].capitalize():<{LABEL_COL}}{_money(currency, entry['amount']):>{TOTAL_COL}}\n")
+        printer.text(f"{entry['method'].capitalize():<{LABEL_COL}}{entry['amount']:>{TOTAL_COL}.2f}\n")
     if sale.change_given:
-        printer.text(f"{'Change':<{LABEL_COL}}{'-'+_money(currency, sale.change_given):>{TOTAL_COL}}\n")
+        printer.text(f"{'Change':<{LABEL_COL}}{-sale.change_given:>{TOTAL_COL}.2f}\n")
     printer.text("-" * LINE_WIDTH + "\n")
 
 
@@ -238,7 +235,7 @@ def _print_report_header(printer, title: str, report_number, period_start, perio
     printer.text("-" * LINE_WIDTH + "\n")
 
 
-def _print_report_totals(printer, currency: str, totals: dict):
+def _print_report_totals(printer, totals: dict):
 
     printer.set(bold=True)
     printer.text(f"{'Payment':<{LABEL_COL}}{'Amount':>{TOTAL_COL}}\n")
@@ -273,7 +270,7 @@ def _print_report_totals(printer, currency: str, totals: dict):
     printer.set(bold=False)
     printer.text("-" * LINE_WIDTH + "\n")
 
-    _print_categories(printer, currency, totals)
+    _print_categories(printer, totals)
 
 
 
@@ -282,7 +279,7 @@ CAT_QTY_COL = 10
 CAT_AMT_COL = LINE_WIDTH - CAT_NAME_COL - CAT_QTY_COL  # 14
 
 
-def _print_categories(printer, currency: str, totals: dict):
+def _print_categories(printer, totals: dict):
     printer.set(bold=True)
     printer.text(f"{'Category':<{CAT_NAME_COL}}{'Qty':>{CAT_QTY_COL}}{'Amount':>{CAT_AMT_COL}}\n")
     printer.set(bold=False)
@@ -335,16 +332,15 @@ class ReceiptService:
     @staticmethod
     def print_receipt(session: Session, sale: Sale):
         settings = SettingsService.get_all(session)
-        currency = settings.get("currency_symbol", "€")
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
             _print_logo(printer, settings)
             if sale.invoice:
                 _print_b2b_info(printer, sale.invoice)
             ticket_num = sale.invoice.invoice_number if sale.invoice else sale.sale_number
-            _print_line_items(printer, Cart.from_snapshot(sale.cart_snapshot), currency)
-            _print_totals(printer, currency, sale.tax_amount, sale.final_amount)
-            _print_payment_breakdown(printer, currency, sale)
+            _print_line_items(printer, Cart.from_snapshot(sale.cart_snapshot))
+            _print_totals(printer, sale.tax_amount, sale.final_amount)
+            _print_payment_breakdown(printer, sale)
             _print_footer(printer, ticket_num, sale.created_at, settings.get("receipt_footer", ""))
             _print_company_info(printer, settings)
 
@@ -360,13 +356,12 @@ class ReceiptService:
     @staticmethod
     def print_x_report(session: Session, totals: dict):
         settings = SettingsService.get_all(session)
-        currency = settings.get("currency_symbol", "€")
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
             _print_company_info(printer, settings)
             printer.text("\n")
             _print_report_header(printer, "X REPORT", None, totals["period_start"], totals["period_end"])
-            _print_report_totals(printer, currency, totals)
+            _print_report_totals(printer, totals)
             printer.text("\n")
 
             printer.cut()
@@ -381,7 +376,6 @@ class ReceiptService:
     @staticmethod
     def print_z_report(session: Session, z_report: ZReport):
         settings = SettingsService.get_all(session)
-        currency = settings.get("currency_symbol", "€")
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
             totals = {
@@ -395,7 +389,7 @@ class ReceiptService:
             _print_company_info(printer, settings)
             printer.text("\n")
             _print_report_header(printer, "Z REPORT", z_report.report_number, z_report.period_start, z_report.period_end)
-            _print_report_totals(printer, currency, totals)
+            _print_report_totals(printer, totals)
             printer.text("\n")
 
             printer.cut()

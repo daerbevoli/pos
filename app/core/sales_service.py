@@ -530,6 +530,32 @@ class SalesService:
         return sale
 
     @staticmethod
+    def _new_invoice(sale: Sale, client: Client, cart: Cart) -> Invoice:
+        """Builds the Invoice document for an already-flushed sale. Its number
+        follows the sale's: a refund issued to a client is a credit note
+        (RF-… sale, CN-… document), anything else a regular invoice (S-… → I-…)."""
+        if sale.is_refund:
+            invoice_number = sale.sale_number.replace("RF-", "CN-", 1)
+        else:
+            invoice_number = sale.sale_number.replace("S-", "I-", 1)
+        return Invoice(
+            sale_id=sale.id,
+            client_id=client.id,
+            invoice_number=invoice_number,
+            # Snapshot now, once — never re-derived from the live client/sale
+            # afterward, so this document can't silently change later.
+            client_name=client.name,
+            client_vat_number=client.vatNumber,
+            client_street=client.street,
+            client_zip=client.zip_code,
+            client_city=client.city,
+            total_amount=sale.total_amount,
+            tax_amount=sale.tax_amount,
+            final_amount=sale.final_amount,
+            line_items_snapshot=cart.to_snapshot(),
+        )
+
+    @staticmethod
     def update_sale(
         session: Session,
         sale_id: int,
@@ -538,12 +564,15 @@ class SalesService:
         amount_tendered: float = None,
         notes: str = None,
         payment_breakdown: list[dict] = None,
+        client_id: int = None,
     ) -> Sale:
         """
         Overwrite an existing completed sale with an edited cart, in place.
         Keeps the same id / sale_number / created_at. Stock is reconciled:
         old line quantities are restored, then the new cart's quantities
-        are deducted.
+        are deducted. With a client_id, a sale that has no invoice yet gets
+        one (S- → I-, RF- → CN-); an unsent one is re-snapshotted for that
+        client.
         """
         if not cart.entries:
             raise ValueError("Empty cart.")
@@ -616,7 +645,20 @@ class SalesService:
         # Not-yet-sent invoice: keep its frozen snapshot in step with the
         # edit instead of letting it go stale (see the comment on
         # Invoice.issued_at) — a sent one was already rejected above.
-        if sale.invoice is not None:
+        client = session.query(Client).filter_by(id=client_id).first() if client_id else None
+        if client_id and not client:
+            raise ValueError("An invoice requires a valid client.")
+        if sale.invoice is None and client is not None:
+            # Reopened receipt/refund turned into an invoice/credit note.
+            session.add(SalesService._new_invoice(sale, client, cart))
+        elif sale.invoice is not None:
+            if client is not None and client.id != sale.invoice.client_id:
+                sale.invoice.client_id = client.id
+                sale.invoice.client_name = client.name
+                sale.invoice.client_vat_number = client.vatNumber
+                sale.invoice.client_street = client.street
+                sale.invoice.client_zip = client.zip_code
+                sale.invoice.client_city = client.city
             sale.invoice.total_amount = sale.total_amount
             sale.invoice.tax_amount = sale.tax_amount
             sale.invoice.final_amount = sale.final_amount
@@ -732,26 +774,7 @@ class SalesService:
 
         sale.tax_amount = round(total_tax, 2)
 
-        invoice = Invoice(
-            sale_id=sale.id,
-            client_id=client_id,
-            # A refund issued to a client is a credit note: RF-… sale, CN-… document.
-            invoice_number=(
-                sale_number.replace("RF-", "CN-", 1) if cart.is_refund
-                else sale_number.replace("S-", "I-", 1)
-            ),
-            # Snapshot now, once — never re-derived from the live client/sale
-            # afterward, so this document can't silently change later.
-            client_name=client.name,
-            client_vat_number=client.vatNumber,
-            client_street=client.street,
-            client_zip=client.zip_code,
-            client_city=client.city,
-            total_amount=sale.total_amount,
-            tax_amount=sale.tax_amount,
-            final_amount=sale.final_amount,
-            line_items_snapshot=cart.to_snapshot(),
-        )
+        invoice = SalesService._new_invoice(sale, client, cart)
         session.add(invoice)
         session.commit()
         session.refresh(sale)

@@ -1309,7 +1309,7 @@ class POSScreen(QWidget):
                     payment_method=final_method,
                     amount_tendered=total_tendered,
                     payment_breakdown=breakdown,
-
+                    client_id=self.client_id if self.is_invoice else None,
                 )
                 self._current_sale_id = sale.id
             elif self.is_invoice:
@@ -1390,6 +1390,10 @@ class POSScreen(QWidget):
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
+            if sale.is_refund and not self.cart.is_refund:
+                self._show_overlay("Refund can only be opened in refund mode", kind="error")
+                return
+
             if sale.invoice is not None and sale.invoice.sent_at is not None:
                 self._show_overlay(
                     "This invoice had alreasy been sent", kind="error",
@@ -1676,7 +1680,7 @@ class POSScreen(QWidget):
         """Toggles refund / credit-note mode for this tab's ticket. While on,
         every product added goes in with a negative quantity, and paying
         pays the (negative) total out. The sale is numbered RF-…, or CN-…
-        as an invoice when a client is attached (see SalesService). Stays on
+        as an invoice when a client is attached. Stays on
         across tickets until pressed again — nothing else leaves the mode.
         Only toggles on an empty or finished ticket, so a ticket never mixes
         regular and refund lines."""
@@ -1697,8 +1701,7 @@ class POSScreen(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            if self.sale_finished:
-                self._unfreeze_ticket()
+
         self._set_rf_cn_mode(entering)
         self._refresh_cart()
         self.cart_table.setFocus()
