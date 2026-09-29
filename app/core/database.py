@@ -378,6 +378,9 @@ def _seed_defaults():
             ("receipt_printer_product_id", "", "USB product ID for receipt printer"),
             ("label_printer_vendor_id", "", "USB vendor ID for label printer"),
             ("label_printer_product_id", "", "USB product ID for label printer"),
+            ("erp_url", "", "Odoo base URL, e.g. https://mycompany.odoo.com"),
+            ("erp_db", "", "Odoo database name"),
+            ("erp_api_key", "", "Odoo API key used for invoice export"),
             # ("logo", "Browse logo", "Logo shown on receipts")
         ]
         for key, value, desc in defaults:

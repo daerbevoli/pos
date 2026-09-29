@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 from app.core.database import get_session
+from app.core.erp_service import ErpService
 from app.core.label_service import LabelPrinterService
 from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
@@ -37,8 +38,8 @@ class SettingsScreen(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
 
         general_tab = QWidget()
         left_col = QVBoxLayout(general_tab)
@@ -50,16 +51,23 @@ class SettingsScreen(QWidget):
         catalog_tab = QWidget()
         catalog_row = QHBoxLayout(catalog_tab)
         catalog_row.setSpacing(15)
+
+        erp_tab = QWidget()
+        erp_row = QHBoxLayout(erp_tab)
+        erp_row.setSpacing(15)
+
         sc_col = QVBoxLayout()
         cats_col = QVBoxLayout()
         promos_col = QVBoxLayout()
+
         catalog_row.addLayout(sc_col, 1)
         catalog_row.addLayout(cats_col, 1)
         catalog_row.addLayout(promos_col, 1)
 
-        tabs.addTab(general_tab, "General")
-        tabs.addTab(printers_tab, "Printers")
-        tabs.addTab(catalog_tab, "Catalog")
+        self.tabs.addTab(general_tab, "General")
+        self.tabs.addTab(printers_tab, "Printers")
+        self.tabs.addTab(catalog_tab, "Catalog")
+        self.tabs.addTab(erp_tab, "ERP")
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -190,17 +198,30 @@ class SettingsScreen(QWidget):
         promos_btn_layout.addWidget(btn_remove_promo)
         promos_col.addLayout(promos_btn_layout)
 
+        # --- ERP -------
+        erp_group = QGroupBox("ERP Information")
+        erp_form = QFormLayout(erp_group)
 
-        # # ── Save ──────────────────────────────────────────────────────────────
-        # save_btn = QPushButton("Save Information")
-        # save_btn.setObjectName("primaryBtn")
-        # save_btn.setFixedHeight(BUTTON_HEIGHT_LG)
-        # save_btn.clicked.connect(self._save)
+        self.erp_url = QLineEdit()
+        self.erp_url.setPlaceholderText("https://mycompany.odoo.com")
+        self.erp_db = QLineEdit()
+        self.erp_api_key = QLineEdit()
+        self.erp_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+
+        erp_form.addRow("URL:", self.erp_url)
+        erp_form.addRow("Database:", self.erp_db)
+        erp_form.addRow("API Key:", self.erp_api_key)
+
+
+        erp_test_btn = QPushButton("Test ERP")
+        erp_test_btn.clicked.connect(self._test_erp_connection)
+        erp_form.addRow("", erp_test_btn)
+
+        erp_row.addWidget(erp_group)
 
         ok_btn = FunctionButton("OK", "okBtn")
         ok_btn.setFixedHeight(BUTTON_HEIGHT_LG)
         ok_btn.clicked.connect(self._on_ok)
-        # layout.addWidget(save_btn)
         layout.addWidget(ok_btn)
         layout.addStretch()
 
@@ -240,6 +261,9 @@ class SettingsScreen(QWidget):
         self.receipt_product.setText(s.get("receipt_printer_product_id", ""))
         self.label_vendor.setText(s.get("label_printer_vendor_id", ""))
         self.label_product.setText(s.get("label_printer_product_id", ""))
+        self.erp_url.setText(s.get("erp_url", ""))
+        self.erp_db.setText(s.get("erp_db", ""))
+        self.erp_api_key.setText(s.get("erp_api_key", ""))
         self._logo_path = s.get("logo_path", "")
         if self._logo_path:
             self._show_logo_preview(self._logo_path)
@@ -485,6 +509,9 @@ class SettingsScreen(QWidget):
             SettingsService.set(session, "receipt_printer_product_id", self.receipt_product.text())
             SettingsService.set(session, "label_printer_vendor_id", self.label_vendor.text())
             SettingsService.set(session, "label_printer_product_id", self.label_product.text())
+            SettingsService.set(session, "erp_url", self.erp_url.text().strip().rstrip("/"))
+            SettingsService.set(session, "erp_db", self.erp_db.text().strip())
+            SettingsService.set(session, "erp_api_key", self.erp_api_key.text().strip())
             if getattr(self, "_logo_path", ""):
                 SettingsService.set(session, "logo_path", self._logo_path)
         QMessageBox.information(self, "Saved", "Settings saved successfully.")
@@ -492,6 +519,7 @@ class SettingsScreen(QWidget):
 
     def _on_ok(self):
         self._save()
+        self.tabs.setCurrentIndex(0)
         self.navigate.emit(0)
 
     def _test_print(self):
@@ -509,3 +537,17 @@ class SettingsScreen(QWidget):
             QMessageBox.warning(self, "Test Print Failed", str(e))
         else:
             QMessageBox.information(self, "Test Print", "Test label sent to the printer.")
+
+    def _test_erp_connection(self):
+        """Tests the values currently typed in the form, before they're saved."""
+        try:
+            erp = ErpService(
+                url=self.erp_url.text().strip().rstrip("/"),
+                db=self.erp_db.text().strip(),
+                api_key=self.erp_api_key.text().strip()
+            )
+            erp.connect()
+        except Exception as e:
+            QMessageBox.warning(self, "Test ERP Failed", str(e))
+        else:
+            QMessageBox.information(self, "Test ERP Success", "Connected to the ERP successfully.")

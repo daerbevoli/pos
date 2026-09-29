@@ -24,7 +24,7 @@ from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry
     generate_invoice_data, save_open_ticket, clear_open_ticket, load_open_tickets
 from app.constants.countries import BELGIUM
 from app.models.models import Sale, Invoice
-from app.core.settings_service import SettingsService
+from app.core.settings_service import SettingsService, get_erp_data
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.core.erp_worker import InvoiceSendWorker
@@ -118,12 +118,6 @@ class POSScreen(QWidget):
             self._load_tab_state(self._active_tab)
         else:
             self._clear_cart(override=True)
-
-        self.erp = ErpService(
-            url="https://skbctesting.odoo.com",
-            db="skbctesting",
-            api_key="7e231b61aa3afc6c8c8fae66fcf60c35e22f4e2d"
-        )
 
     @property
     def cart_active(self) -> bool:
@@ -1519,6 +1513,11 @@ class POSScreen(QWidget):
                 self._show_overlay(f"Already sent at {sent_str}", kind="info")
                 return
 
+            erp_config = get_erp_data(session)
+            if not all(erp_config.values()):
+                self._show_overlay("ERP is not configured (Settings → ERP)", kind="error")
+                return
+
             if QMessageBox.question(
                 self, "Send invoice",
                 "Send this invoice?",
@@ -1533,7 +1532,7 @@ class POSScreen(QWidget):
         # open across threads.
         self.btn_send_invoice.setEnabled(False)
         self._show_overlay("Sending invoice…", kind="info")
-        self._invoice_worker = InvoiceSendWorker(self.erp, invoice_data, False, True)
+        self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data, False, True)
         self._invoice_worker.succeeded.connect(self._on_invoice_send_succeeded)
         self._invoice_worker.duplicate.connect(self._on_invoice_send_duplicate)
         self._invoice_worker.failed.connect(self._on_invoice_send_failed)
