@@ -38,6 +38,7 @@ def get_store_data(session: Session):
         "phone": settings.get("store_phone"),
         "email": settings.get("store_email")
     }
+
 def get_erp_data(session: Session):
     settings = SettingsService.get_all(session)
     return {

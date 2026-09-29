@@ -706,7 +706,7 @@ class ArticleDetailPanel(QFrame):
             session.commit()
 
         self.parent_screen.refresh()
-        self._show_overlay(f"{added} added, {skipped} skipped.", title="Import complete")
+        self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)

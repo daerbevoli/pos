@@ -182,7 +182,7 @@ class ErpService:
 
 
         # Create partner
-        country_id = self.get_country_id("BE")
+        country_id = self.get_country_id(customer_info["country"])
 
         new_partner = self.create(
             model="res.partner",
@@ -206,17 +206,19 @@ class ErpService:
 
         return new_partner, partner_email
 
-    def create_post_invoice(self, invoice_data: dict) -> tuple[int, bool, str, str]:
+    def create_post_invoice(self, invoice_data: dict) -> tuple[int, bool]:
         """
-        Creates and post invoice from filepath
-        :param invoice_data: data of invoice
-        :return: invoice id
+        Creates and posts the invoice, or picks up the one already in Odoo
+        under the same number (e.g. an earlier attempt that got created but
+        failed to send), so a retry can finish the job instead of stalling.
+        :param invoice_data: data of invoice, see generate_invoice_data()
+        :return: (invoice id, whether Odoo has already sent it)
         """
 
         # 1. Parse invoice and extract data
-        inv_num, inv_date, due_date, sender, receiver, items, notes =  (invoice_data["inv_num"], invoice_data["inv_date"],
-                                                                        invoice_data["due_date"], invoice_data["from"],
-                                                                        invoice_data["to"], invoice_data["items"], invoice_data["notes"])
+        inv_num, inv_date, due_date, receiver, items, notes =  (invoice_data["inv_num"], invoice_data["inv_date"],
+                                                                invoice_data["due_date"], invoice_data["to"],
+                                                                invoice_data["items"], invoice_data["notes"])
 
         # "out_refund" for a credit note (CN-…), see generate_invoice_data()
         move_type = invoice_data.get("move_type", "out_invoice")
@@ -229,14 +231,24 @@ class ErpService:
         journal_id = self.get_journal_id("VF")
 
 
-        # 3. Check for duplicate -> return original invoice id
+        # 3. Already in Odoo -> resume from wherever the earlier attempt stopped
         existing = self.search(
             model="account.move",
             domain=[["move_type", "=", move_type], ["ref", "=", inv_num]],
             limit=1,
         )
         if existing:
-            return 0, False, inv_num, inv_date
+            invoice_id = existing[0]
+            move = self.read(
+                model="account.move",
+                ids=[invoice_id],
+                fields=["state", "is_move_sent"],
+            )[0]
+            if move["state"] == "cancel":
+                raise Exception(f"Invoice {inv_num} is cancelled in the ERP")
+            if move["state"] == "draft":
+                self.button("account.move", "action_post", [invoice_id])
+            return invoice_id, bool(move["is_move_sent"])
 
         # 4. No duplicate -> create invoice
         invoice_id = self.create(
@@ -256,7 +268,7 @@ class ErpService:
         # 6. Post invoice
         self.button("account.move", "action_post", [invoice_id])
 
-        return invoice_id, partner_email, inv_num, inv_date
+        return invoice_id, False
 
     def send_invoice(
             self,

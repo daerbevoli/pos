@@ -157,6 +157,7 @@ def _run_migrations():
         _add_shortcuts_tables(conn)
         _migrate_client_address_to_components(conn)
         _migrate_invoice_address_to_components(conn)
+        _migrate_invoice_client_country(conn)
 
 
 def _table_columns(conn, table: str) -> set[str]:
@@ -324,6 +325,25 @@ def _migrate_invoice_address_to_components(conn):
         conn.commit()
         conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN client_address")
         conn.commit()
+
+
+def _migrate_invoice_client_country(conn):
+    """Why: the ERP export needs the client's country to create the partner
+    in the right country (it was hardcoded to Belgium), so the invoice
+    snapshot gained client_country. Existing invoices backfill from their
+    client's current country — the closest record there is of it at issue
+    time, since clients.country predates this column."""
+    cols = _table_columns(conn, "invoices")
+    if not cols or "client_country" in cols:
+        return  # brand-new table (create_all already current) or already migrated
+
+    conn.exec_driver_sql(f"ALTER TABLE invoices ADD COLUMN client_country TEXT NOT NULL DEFAULT '{BELGIUM}'")
+    conn.exec_driver_sql(
+        "UPDATE invoices SET client_country = COALESCE("
+        "(SELECT country FROM clients WHERE clients.id = invoices.client_id), "
+        f"'{BELGIUM}')"
+    )
+    conn.commit()
 
 
 def _add_shortcuts_tables(conn):

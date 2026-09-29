@@ -460,3 +460,31 @@ def test_repair_invoices_fk_noop_when_invoices_table_missing(monkeypatch):
     monkeypatch.setattr(database, "ENGINE", engine)
     with engine.connect() as conn:
         database._repair_invoices_fk_if_broken(conn)  # no invoices table at all — must not raise
+
+
+# ── _migrate_invoice_client_country ─────────────────────────────────────
+
+def test_migrate_invoice_client_country_backfills_from_client():
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO clients (id, name, street, zip_code, city, country, vatNumber, is_active) "
+            "VALUES (1, 'Dutch BV', 'Straat 1', '1011', 'Amsterdam', 'NL', 'NL001', 1)"
+        )
+        # Invoice 2 points at a client that no longer exists -> falls back to BE.
+        conn.exec_driver_sql(
+            "INSERT INTO invoices (id, sale_id, client_id, invoice_number, client_name, "
+            "client_vat_number, client_street, client_zip, client_city) VALUES "
+            "(1, 1, 1, 'I-1', 'Dutch BV', 'NL001', 'Straat 1', '1011', 'Amsterdam'), "
+            "(2, 2, 99, 'I-2', 'Gone', 'BE002', 'x', 'y', 'z')"
+        )
+        # Simulate a database from before the column existed.
+        conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN client_country")
+        conn.commit()
+
+        database._migrate_invoice_client_country(conn)
+        database._migrate_invoice_client_country(conn)  # idempotent
+
+        rows = conn.exec_driver_sql("SELECT id, client_country FROM invoices ORDER BY id").fetchall()
+    assert rows == [(1, "NL"), (2, "BE")]

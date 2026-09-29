@@ -12,10 +12,10 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class InvoiceSendWorker(QThread):
     """Creates + posts the ERP invoice from `invoice_data`, then sends it —
     the full create_post_invoice() + send_invoice() round trip, all off the
-    UI thread."""
+    UI thread. `succeeded` only fires once the invoice has actually gone out
+    (now, or by an earlier attempt), since the slot locks the sale on it."""
 
     succeeded = pyqtSignal(int, str, str)  # invoice_id, inv_num, send message
-    duplicate = pyqtSignal(str)            # inv_num already exists as a posted move
     failed = pyqtSignal(str)
 
     def __init__(self, erp, invoice_data, use_peppol, use_email, parent=None):
@@ -27,16 +27,19 @@ class InvoiceSendWorker(QThread):
 
     def run(self):
         try:
-            invoice_id, _email, inv_num, _inv_date = (self.erp.create_post_invoice(
+            invoice_id, already_sent = self.erp.create_post_invoice(
                 invoice_data=self.invoice_data
-            ))
-            if not invoice_id:
-                self.duplicate.emit(inv_num)
-                return
-            sent, message = self.erp.send_invoice(
-                invoice_id, self.use_peppol, self.use_email
             )
+            if already_sent:
+                sent, message = True, "Invoice was already sent from the ERP"
+            else:
+                sent, message = self.erp.send_invoice(
+                    invoice_id, self.use_peppol, self.use_email
+                )
         except Exception as e:
             self.failed.emit(str(e))
             return
-        self.succeeded.emit(invoice_id, inv_num, message)
+        if not sent:
+            self.failed.emit(message)
+            return
+        self.succeeded.emit(invoice_id, self.invoice_data["inv_num"], message)

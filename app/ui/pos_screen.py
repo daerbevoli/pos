@@ -7,6 +7,7 @@ driven externally by MainWindow via set_active_tab().
 """
 import datetime
 import json
+from functools import partial
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
@@ -1524,7 +1525,7 @@ class POSScreen(QWidget):
             ) != QMessageBox.StandardButton.Yes:
                 return
 
-            invoice_data = generate_invoice_data(session=session, invoice=invoice)
+        invoice_data = generate_invoice_data(invoice=invoice)
 
         # The session above is closed before starting the worker — ErpService's
         # HTTP calls are blocking (create_post_invoice + send_invoice is many
@@ -1533,27 +1534,26 @@ class POSScreen(QWidget):
         self.btn_send_invoice.setEnabled(False)
         self._show_overlay("Sending invoice…", kind="info")
         self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data, False, True)
-        self._invoice_worker.succeeded.connect(self._on_invoice_send_succeeded)
-        self._invoice_worker.duplicate.connect(self._on_invoice_send_duplicate)
+        # Bind the sale now: the cashier may switch tab/ticket before the
+        # worker finishes, and it's this sale that must be locked.
+        self._invoice_worker.succeeded.connect(
+            partial(self._on_invoice_send_succeeded, self._current_sale_id)
+        )
         self._invoice_worker.failed.connect(self._on_invoice_send_failed)
         self._invoice_worker.finished.connect(self._invoice_worker.deleteLater)
         self._invoice_worker.start()
 
-    def _on_invoice_send_succeeded(self, invoice_id: int, inv_num: str, message: str):
+    def _on_invoice_send_succeeded(self, sale_id: int, invoice_id: int, inv_num: str, message: str):
         print(f"invoice {invoice_id} ({inv_num}): {message}")
         try:
             with get_session() as session:
-                SalesService.mark_invoice_sent(session, self._current_sale_id)
+                SalesService.mark_invoice_sent(session, sale_id)
         except ValueError as e:
             self.btn_send_invoice.setEnabled(True)
             self._show_overlay(f"Invoice sent, but failed to lock the sale: {e}", kind="error")
             return
         self.btn_send_invoice.setEnabled(True)
         self._show_overlay("Invoice sent", kind="info")
-
-    def _on_invoice_send_duplicate(self, inv_num: str):
-        self.btn_send_invoice.setEnabled(True)
-        self._show_overlay(f"Invoice {inv_num} already exists in the ERP", kind="error")
 
     def _on_invoice_send_failed(self, message: str):
         self.btn_send_invoice.setEnabled(True)

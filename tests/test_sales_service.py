@@ -242,6 +242,7 @@ def test_finalize_invoice_snapshots_client_and_amounts(db_session):
     assert invoice.client_street == "1 Main St"
     assert invoice.client_zip == "1000"
     assert invoice.client_city == "Brussels"
+    assert invoice.client_country == "BE"
     assert invoice.full_address == "1 Main St, 1000 Brussels"
     assert invoice.total_amount == invoice.sale.total_amount
     assert invoice.tax_amount == pytest.approx(2.1, abs=0.01)
@@ -490,3 +491,20 @@ def test_refund_invoice_numbered_cn(db_session):
     assert invoice.invoice_number.startswith("CN-")
     assert invoice.is_credit_note
     assert invoice.sale.sale_number.startswith("RF-")
+
+
+def test_generate_invoice_data_sends_frozen_client_country(db_session):
+    """The ERP partner's country comes from the invoice snapshot, not the
+    live client — changing the client afterward must not alter the invoice."""
+    from app.core.client_service import ClientService
+    from app.core.sales_service import generate_invoice_data
+    client = ClientService.create(db_session, name="Dutch BV", vatNumber="NL001", street="Straat 1",
+                                  zip_code="1011", city="Amsterdam", country="NL")
+    product = _make_product(db_session)
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
+    )
+    client.country = "DE"
+    db_session.commit()
+
+    assert generate_invoice_data(invoice)["to"]["country"] == "NL"

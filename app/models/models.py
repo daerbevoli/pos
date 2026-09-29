@@ -305,6 +305,9 @@ class Invoice(Base):
     client_street = Column(String, nullable=False)
     client_zip = Column(String, nullable=False)
     client_city = Column(String, nullable=False)
+    # ISO code (Client.country), e.g. "BE" — decides the VAT treatment and
+    # the partner's country in the ERP.
+    client_country = Column(String, nullable=False, default=BELGIUM, server_default=text(f"'{BELGIUM}'"))
     total_amount = Column(Float, nullable=True)
     tax_amount = Column(Float, nullable=True)
     final_amount = Column(Float, nullable=True)

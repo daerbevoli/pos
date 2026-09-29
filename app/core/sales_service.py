@@ -409,19 +409,18 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
     return lines
 
 
-def generate_invoice_data(session: Session, invoice: Invoice) -> dict:
+def generate_invoice_data(invoice: Invoice) -> dict:
     invoice_data = {
         "inv_num": invoice.invoice_number,
         "inv_date": invoice.issued_at.strftime("%Y-%m-%d"),
         "due_date": (invoice.issued_at + timedelta(weeks=1)).strftime("%Y-%m-%d")
     }
-    sender = get_store_data(session)
-    invoice_data["from"] = sender
     receiver = {
         "name": invoice.client_name,
         "street": invoice.client_street,
         "zip": invoice.client_zip,
         "city": invoice.client_city,
+        "country": invoice.client_country,
         "vat": invoice.client_vat_number,
         "phone": invoice.client.phone,
         "email": invoice.client.email
@@ -549,6 +548,7 @@ class SalesService:
             client_street=client.street,
             client_zip=client.zip_code,
             client_city=client.city,
+            client_country=client.country,
             total_amount=sale.total_amount,
             tax_amount=sale.tax_amount,
             final_amount=sale.final_amount,
@@ -659,6 +659,7 @@ class SalesService:
                 sale.invoice.client_street = client.street
                 sale.invoice.client_zip = client.zip_code
                 sale.invoice.client_city = client.city
+                sale.invoice.client_country = client.country
             sale.invoice.total_amount = sale.total_amount
             sale.invoice.tax_amount = sale.tax_amount
             sale.invoice.final_amount = sale.final_amount
