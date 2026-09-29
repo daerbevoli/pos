@@ -328,6 +328,13 @@ class ReportsScreen(QWidget):
                 QMessageBox.critical(self, "Printer Error", str(e))
 
     def _print_z_report(self):
+        # Checked before the confirmation, so the cashier learns why up front.
+        with get_session() as session:
+            unsent = XZReportService.unsent_invoice_numbers(session)
+        if unsent:
+            self._warn_unsent_invoices(unsent)
+            return
+
         reply = QMessageBox.question(
             self, "Print Z Report",
             "This will print the Z report and clear all sales. This cannot be undone.\nContinue?"
@@ -336,7 +343,13 @@ class ReportsScreen(QWidget):
             return
 
         with get_session() as session:
-            z_report = XZReportService.close_z_report(session)
+            # Re-checked inside close_z_report(): an invoice may have been
+            # created on another V-tab while the dialog was open.
+            try:
+                z_report = XZReportService.close_z_report(session)
+            except ValueError:
+                self._warn_unsent_invoices(XZReportService.unsent_invoice_numbers(session))
+                return
             try:
                 ReceiptService.print_z_report(session, z_report)
             except PrinterError as e:
@@ -346,6 +359,15 @@ class ReportsScreen(QWidget):
                     f"but printing failed:\n{e}"
                 )
         self._load_report(invoices=self.invoices_only)
+
+    def _warn_unsent_invoices(self, invoice_numbers: list[str]):
+        QMessageBox.warning(
+            self, "Z Report Blocked",
+            "These invoices haven't been sent to the ERP yet:\n\n"
+            + "\n".join(invoice_numbers)
+            + "\n\nSend them first — once the Z report clears the sales, "
+              "they can no longer be sent from the POS."
+        )
 
     def _confirm(self):
         if self.sales_table.currentRow() != -1:

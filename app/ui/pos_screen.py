@@ -1666,13 +1666,27 @@ class POSScreen(QWidget):
 
         with get_session() as session:
             product = ProductService.get_by_id(session, product_id)
-            if product:
-                if self.sale_finished:
-                    self._unfreeze_ticket()
-                if product.unit in WEIGHT_UNITS and not quantity_typed:
-                    quantity = None
-                self.cart.add_product(product, quantity=quantity)
-                self._refresh_cart(select_last=True)
+            if product is None:
+                self.combined_input.clear()
+                return
+            if self.sale_finished:
+                self._unfreeze_ticket()
+            if product.unit in WEIGHT_UNITS and not quantity_typed:
+                quantity = None
+            # For an open-price item the typed number is the price, not a
+            # quantity. It's applied to the cart line only: assigning it to
+            # product.price would dirty the Product row, get autoflushed as an
+            # UPDATE, and hold SQLite's write lock until this session closes.
+            open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
+            if open_price is not None:
+                quantity = 1
+            self.cart.add_product(product, quantity=quantity)
+            if open_price is not None:
+                entry = next(e for e in reversed(self.cart.entries) if isinstance(e, CartItem))
+                self.cart.set_open_price(entry, open_price)
+                self.cart.sync_promo_discounts()
+        # Outside the session: this autosaves the ticket through its own session.
+        self._refresh_cart(select_last=True)
         self.combined_input.clear()
 
     def _rf_cn(self):

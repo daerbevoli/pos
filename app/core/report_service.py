@@ -12,7 +12,7 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.models import Sale, ZReport
+from app.models.models import Invoice, Sale, ZReport
 
 VAT_RATES = (0, 6, 21)
 
@@ -97,11 +97,34 @@ class XZReportService:
         return totals
 
     @staticmethod
+    def unsent_invoice_numbers(session: Session) -> list[str]:
+        """Invoices/credit notes of the current period not yet sent to the
+        ERP. Only those whose sale still exists count — the POS finds an
+        invoice through its sale, so one orphaned by an earlier Z report
+        can't be sent anymore and mustn't block every future close."""
+        rows = (
+            session.query(Invoice.invoice_number)
+            .join(Sale, Invoice.sale_id == Sale.id)
+            .filter(Invoice.sent_at.is_(None))
+            .order_by(Invoice.invoice_number)
+            .all()
+        )
+        return [number for (number,) in rows]
+
+    @staticmethod
     def close_z_report(session: Session) -> ZReport:
         """Snapshot current sales into a new ZReport row, then purge them.
         Runs as one transaction: the snapshot and the purge succeed or fail
         together. Printing happens separately, after this commits, so a
-        printer failure can never lose sales data."""
+        printer failure can never lose sales data.
+
+        Refuses (ValueError, nothing changed) while any invoice of the period
+        is still unsent: purging its sale unlinks the invoice from it, and
+        the POS can then no longer reach it to send it."""
+        unsent = XZReportService.unsent_invoice_numbers(session)
+        if unsent:
+            raise ValueError(f"Unsent invoices: {', '.join(unsent)}")
+
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
         totals = XZReportService.compute_totals(session, sales)
 

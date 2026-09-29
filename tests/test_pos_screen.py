@@ -543,6 +543,48 @@ def test_open_price_item_entered_after_foreign_client_is_netted(screen):
     assert entry.tax_rate == 0
 
 
+@pytest.fixture
+def file_db(monkeypatch, tmp_path):
+    """Like patched_db, but a real on-disk SQLite file in WAL mode, as in
+    production: separate sessions get separate connections, so a write left
+    pending in one really does lock out the others (the shared in-memory
+    connection of patched_db can never reproduce that). A short timeout
+    makes a lock fail fast instead of after SQLite's default 5s."""
+    import app.core.database as database
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from app.models.models import Base
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'pos.db'}", connect_args={"timeout": 0.2})
+    event.listen(engine, "connect", lambda conn, _: conn.execute("PRAGMA journal_mode=WAL"))
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, "SessionFactory", sessionmaker(bind=engine, autoflush=True))
+    monkeypatch.setattr(database, "ENGINE", engine)
+    database._seed_defaults()
+    yield
+    engine.dispose()
+
+
+def test_open_price_typed_before_adding_does_not_lock_or_change_product(qtbot, file_db):
+    """Regression: the typed price used to be assigned to product.price
+    inside the lookup session, which autoflushed an UPDATE and held the
+    write lock while the ticket autosave tried to commit in its own
+    session -> "database is locked". It also rounded 2.50 to 3."""
+    from app.models.models import OpenTicket, Product
+    pid, _, _ = _add_product(name="Food", price=0.0, tax=6, is_open_price=True)
+    screen = POSScreen()
+    qtbot.addWidget(screen)
+
+    screen.combined_input.setText("2.50")
+    screen.add_product_by_id(pid)  # raised OperationalError before the fix
+
+    entry = screen.cart.entries[-1]
+    assert entry.unit_price == 2.5 and entry.quantity == 1
+    with get_session() as session:
+        assert session.get(Product, pid).price == 0.0  # catalogue price untouched
+        assert session.query(OpenTicket).count() == 1   # autosave went through
+
+
 def test_invoice_payment_creates_invoice_record(screen):
     with get_session() as session:
         client = ClientService.create(

@@ -300,3 +300,71 @@ def test_display_sale_emits_the_row_actual_sale_id(screen, qtbot):
     assert {older.id, newer.id} == set(screen._sales_row_ids.values())
 
 
+# ── Z report blocked by unsent invoices ──────────────────────────────────
+
+def _make_invoice():
+    # Separate sessions: create() commits, which would expire the product.
+    with get_session() as session:
+        product = _make_product(session)
+    with get_session() as session:
+        client = ClientService.create(session, name="Acme", vatNumber="BE0123456749",
+                                      street="1 Main St", zip_code="1000", city="Brussels")
+        client_id = client.id
+    return _finalize_sale(product, client_id=client_id)
+
+
+def test_close_z_report_refuses_while_an_invoice_is_unsent(patched_db):
+    from app.core.report_service import XZReportService
+    from app.models.models import Sale, ZReport
+    invoice = _make_invoice()
+
+    with get_session() as session:
+        with pytest.raises(ValueError, match=invoice.invoice_number):
+            XZReportService.close_z_report(session)
+    with get_session() as session:
+        # Nothing was closed or purged.
+        assert session.query(ZReport).count() == 0
+        assert session.query(Sale).count() == 1
+
+
+def test_close_z_report_allowed_once_invoice_is_sent(patched_db):
+    from app.core.report_service import XZReportService
+    invoice = _make_invoice()
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+
+    with get_session() as session:
+        assert XZReportService.unsent_invoice_numbers(session) == []
+        assert XZReportService.close_z_report(session).report_number == "Z-0001"
+
+
+def test_invoice_orphaned_by_an_earlier_z_report_does_not_block(patched_db):
+    """An unsent invoice whose sale is already gone can't be sent from the
+    POS anymore — it mustn't block every future Z report forever."""
+    from app.core.report_service import XZReportService
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    with get_session() as session:
+        session.get(Invoice, invoice.id).sale_id = None
+        session.commit()
+
+    with get_session() as session:
+        assert XZReportService.unsent_invoice_numbers(session) == []
+
+
+def test_z_report_button_warns_and_skips_confirmation_when_unsent(screen, monkeypatch):
+    from app.models.models import ZReport
+    from PyQt6.QtWidgets import QMessageBox
+    invoice = _make_invoice()
+    warnings, questions = [], []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: warnings.append(a)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: questions.append(a)))
+
+    screen._print_z_report()
+
+    assert len(warnings) == 1 and invoice.invoice_number in warnings[0][2]
+    assert questions == []
+    with get_session() as session:
+        assert session.query(ZReport).count() == 0
+
+
