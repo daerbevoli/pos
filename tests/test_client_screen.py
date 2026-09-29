@@ -108,14 +108,14 @@ def test_new_client_happy_path_persists(screen):
     # The country-code prefix (Belgium by default) is locked in place —
     # typing appends after it rather than replacing it.
     assert panel.vatNumber.text() == "BE"
-    panel.vatNumber.setText("BEVNEW")
+    panel.vatNumber.setText("BE0801427262")
     panel._on_ok()
     assert panel._mode == "display"
 
     with get_session() as session:
         found = ClientService.get_by_name(session, "Brand New")
     assert found is not None
-    assert found.vatNumber == "BEVNEW"
+    assert found.vatNumber == "BE0801427262"
 
 def test_new_client_validation_blocks_empty_name(screen):
     panel = screen.detail_panel
@@ -234,7 +234,8 @@ def test_changing_country_clears_vat_to_bare_prefix_for_new_client(screen):
 # ── Edit flow ────────────────────────────────────────────────────────────
 
 def test_edit_client_updates_existing_row(screen):
-    cid = _add_client(name="Old Name", vatNumber="V1")
+    # Saving re-runs the VAT checksum, so this needs a valid Belgian number.
+    cid = _add_client(name="Old Name", vatNumber="BE0123456749")
     screen.refresh()
     screen.table.selectRow(0)
 
@@ -317,15 +318,16 @@ class _FakeFileDialog:
 
 
 def test_import_csv_adds_new_clients_and_skips_duplicates(screen, monkeypatch, tmp_path):
-    _add_client(name="Existing", vatNumber="DUPVAT")
+    # Import skips rows failing the VAT checksum, so these are valid Belgian numbers.
+    _add_client(name="Existing", vatNumber="BE0345678997")
 
     csv_path = tmp_path / "clients.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["name", "vat", "email", "phone", "Street", "City", "Country"])
         writer.writeheader()
-        writer.writerow({"name": "New Client", "vat": "NEWVAT", "email": "new@x.com",
+        writer.writerow({"name": "New Client", "vat": "BE0234567873", "email": "new@x.com",
                           "phone": "'0123", "Street": "Main St", "City": "Town", "Country": "BE"})
-        writer.writerow({"name": "Dupe", "vat": "DUPVAT", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
+        writer.writerow({"name": "Dupe", "vat": "BE0345678997", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
         writer.writerow({"name": "No Vat", "vat": "", "email": "", "phone": "", "Street": "", "City": "", "Country": ""})
 
     monkeypatch.setattr(
@@ -375,7 +377,7 @@ def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path
     real_init = client_screen_module.Client.__init__
 
     def flaky_init(self, *args, **kwargs):
-        if kwargs.get("vatNumber") == "BADVAT":
+        if kwargs.get("vatNumber") == "BE0456789034":  # "Bad Row"
             raise RuntimeError("boom")
         real_init(self, *args, **kwargs)
 
@@ -385,8 +387,9 @@ def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["name", "vat", "email", "phone", "Street", "City", "Country"])
         writer.writeheader()
-        writer.writerow({"name": "Bad Row", "vat": "BADVAT", "email": "", "phone": "", "Street": "Main St", "City": "Town", "Country": "BE"})
-        writer.writerow({"name": "Good Row", "vat": "GOODVAT", "email": "", "phone": "", "Street": "Main St", "City": "Town", "Country": "BE"})
+        # Valid VATs, so both rows get past the checksum and reach Client().
+        writer.writerow({"name": "Bad Row", "vat": "BE0456789034", "email": "", "phone": "", "Street": "Main St", "City": "Town", "Country": "BE"})
+        writer.writerow({"name": "Good Row", "vat": "BE0567890161", "email": "", "phone": "", "Street": "Main St", "City": "Town", "Country": "BE"})
 
     monkeypatch.setattr(
         "app.ui.client_screen.FileDialog",

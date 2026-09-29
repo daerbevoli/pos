@@ -65,13 +65,13 @@ def test_finalize_sale_deducts_stock(db_session):
 
 def test_finalize_sale_sale_number_format_and_sequence(db_session):
     product = _make_product(db_session)
-    today_str = date.today().strftime("%Y%m%d")
+    today_str = date.today().strftime("%d%m%y")
 
     sale1 = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
     sale2 = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
 
-    assert sale1.sale_number == f"S-{today_str}-0001"
-    assert sale2.sale_number == f"S-{today_str}-0002"
+    assert sale1.sale_number == f"S-{today_str}-001"
+    assert sale2.sale_number == f"S-{today_str}-002"
 
 
 def test_finalize_sale_computes_total_tax(db_session):
@@ -508,3 +508,37 @@ def test_generate_invoice_data_sends_frozen_client_country(db_session):
     db_session.commit()
 
     assert generate_invoice_data(invoice)["to"]["country"] == "NL"
+
+
+# ── invoice_lines ────────────────────────────────────────────────────────
+
+def _line(name, quantity, **flags):
+    return CartItem(product_id=1, product_name=name, product_barcode="",
+                    unit_price=10.0, quantity=quantity, tax_rate=21, **flags)
+
+
+def test_invoice_lines_leave_out_voided_pairs():
+    """A line voided on a reopened sale and its reversal net to zero, so
+    neither is sent — only the lines that were actually sold remain."""
+    from app.core.sales_service import invoice_lines
+    cart = _cart_with(
+        _line("Milk", 2, has_reversal=True),
+        _line("Bread", 1),
+        _line("Milk", -2, is_reversal=True),
+    )
+    lines = invoice_lines(Invoice(invoice_number="I-1", line_items_snapshot=cart.to_snapshot()))
+    assert [(l.product_name, l.quantity) for l in lines] == [("Bread", 1)]
+
+
+def test_credit_note_lines_leave_out_voided_pairs():
+    """On a credit note the refund lines are negative and a voided one's
+    reversal positive — the pair must drop out rather than both being
+    abs()'d into two credited lines."""
+    from app.core.sales_service import invoice_lines
+    cart = _cart_with(
+        _line("Milk", -2, has_reversal=True),
+        _line("Bread", -1),
+        _line("Milk", 2, is_reversal=True),
+    )
+    lines = invoice_lines(Invoice(invoice_number="CN-1", line_items_snapshot=cart.to_snapshot()))
+    assert [(l.product_name, l.quantity) for l in lines] == [("Bread", -1)]

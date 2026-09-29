@@ -1525,7 +1525,7 @@ class POSScreen(QWidget):
             ) != QMessageBox.StandardButton.Yes:
                 return
 
-        invoice_data = generate_invoice_data(invoice=invoice)
+            invoice_data = generate_invoice_data(invoice=invoice)
 
         # The session above is closed before starting the worker — ErpService's
         # HTTP calls are blocking (create_post_invoice + send_invoice is many

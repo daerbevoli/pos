@@ -61,7 +61,7 @@ def test_save_shows_confirmation_dialog(screen, monkeypatch):
 def test_test_print_shows_success_dialog(screen, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "app.ui.settings_screen.PrinterService.test_print",
+        "app.ui.settings_screen.ReceiptService.test_print",
         lambda vendor_id, product_id: None,
     )
     monkeypatch.setattr(
@@ -80,7 +80,7 @@ def test_test_print_shows_warning_on_failure(screen, monkeypatch):
     def _raise(vendor_id, product_id):
         raise PrinterError("Vendor ID is not configured. Set it in Settings.")
 
-    monkeypatch.setattr("app.ui.settings_screen.PrinterService.test_print", _raise)
+    monkeypatch.setattr("app.ui.settings_screen.ReceiptService.test_print", _raise)
     monkeypatch.setattr(
         "app.ui.settings_screen.QMessageBox.warning",
         lambda *a, **kw: calls.append(a),

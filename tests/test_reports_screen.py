@@ -149,12 +149,13 @@ def test_vat_breakdown_by_rate(screen):
 
     screen._load_report()
 
-    base_21, tax_21, total_21 = screen._vat_labels[21]
-    assert total_21.text() == "€12.10"
-    assert tax_21.text() == "€2.10"
-
-    base_6, tax_6, total_6 = screen._vat_labels[6]
-    assert total_6.text() == "€10.60"
+    # vat_table columns: Rate | Base (excl. tax) | Tax | Total (incl. tax)
+    rows = {
+        screen.vat_table.item(r, 0).text(): [screen.vat_table.item(r, c).text() for c in (1, 2, 3)]
+        for r in range(screen.vat_table.rowCount())
+    }
+    assert rows["21 %"] == ["10.00", "2.10", "12.10"]
+    assert rows["6 %"] == ["10.00", "0.60", "10.60"]
 
 
 def test_category_breakdown(screen):

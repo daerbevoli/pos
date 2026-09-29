@@ -229,7 +229,9 @@ def test_percent_discount_applies_to_last_item(screen):
     discounts = [e for e in screen.cart.entries if isinstance(e, DiscountEntry)]
     assert len(discounts) == 1
     assert discounts[0].amount == 1.0
-    assert discounts[0].label == "10%"
+    # The "MANUAL DISCOUNT" prefix is what invoice_lines() keys on to send
+    # it to the ERP, so it's part of the contract, not just display text.
+    assert discounts[0].label == "MANUAL DISCOUNT 10%"
 
 
 def test_amount_discount_capped_at_base(screen):

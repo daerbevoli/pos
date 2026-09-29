@@ -383,6 +383,11 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
         if isinstance(entry, CartItem):
             if entry.quantity is None:
                 continue
+            # A line voided on a reopened sale and its reversal net to zero
+            # (same price/VAT, negated quantity), so neither belongs on the
+            # document — and keeping them breaks the credit-note abs() below.
+            if entry.has_reversal or entry.is_reversal:
+                continue
             tax = calc_tax(entry.line_total, entry.tax_rate)
             gross = entry.unit_price * entry.quantity
             lines.append(InvoiceLine(

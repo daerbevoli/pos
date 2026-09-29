@@ -142,12 +142,14 @@ class ErpService:
 
         for invoiceLine in invoice_lines:
             if invoiceLine.is_discount:
+                tax_id = self.get_sale_tax_id(0)
                 lines.append((0, 0, {
                     "name": invoiceLine.product_name,
                     "quantity": invoiceLine.quantity,
                     "price_unit": (-1)*invoiceLine.unit_price_excl_tax,
                     "discount": 0,
-                    "account_id": account_id
+                    "account_id": account_id,
+                    "tax_ids": [(6, 0, [tax_id])]
                 }))
             else:
                 tax_id = self.get_sale_tax_id(invoiceLine.tax_rate)
@@ -354,13 +356,13 @@ class ErpService:
             context=context,
         )
 
-        # 5. Send (drop the context kwarg if your button() helper doesn't take one)
-        self.button(
-            "account.move.send.wizard",
-            "action_send_and_print",
-            [wizard_id],
-            context=context,
-        )
+        # # 5. Send (drop the context kwarg if your button() helper doesn't take one)
+        # self.button(
+        #     "account.move.send.wizard",
+        #     "action_send_and_print",
+        #     [wizard_id],
+        #     context=context,
+        # )
 
         # 6. Read back the Peppol state to confirm it was queued
         # if "peppol" in methods:
