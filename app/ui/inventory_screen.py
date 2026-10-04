@@ -16,16 +16,19 @@ from PyQt6.QtWidgets import (
     QHeaderView, QMessageBox, QComboBox, QFrame,
     QDoubleSpinBox, QAbstractSpinBox, QStackedWidget, QFileDialog
 )
-from PyQt6.QtCore import Qt, QEvent, QLocale, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QLocale, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 
 from app.core.database import get_session
 from app.core.label_service import LabelPrinterService
+from app.core.label_sheet_service import build_label_sheet_pdf
 from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError
 from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
     BUTTON_HEIGHT_XS,
@@ -115,6 +118,7 @@ class ArticleDetailPanel(QFrame):
         self.barcode.setPlaceholderText("")
         self.barcode.setMaxLength(14)
         self.barcode.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+
 
         self.name = QLineEdit()
         self.name.setMinimumHeight(INPUT_HEIGHT_COMPACT)
@@ -217,6 +221,9 @@ class ArticleDetailPanel(QFrame):
         self.btn_search_key = FunctionButton("Search by\nkey", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
+        self.barcode_generate_btn = FunctionButton("Generate \nBarcode", "secFunc")
+        self.btn_print_barcodes = FunctionButton("Print\nbarcodes", "secFunc")
+
 
         layout_map = [
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
@@ -226,7 +233,9 @@ class ArticleDetailPanel(QFrame):
             (self.btn_import, 1, 2), (self.btn_cancel, 1, 3),
 
             (self.btn_down, 2, 0), (self.btn_print_label, 2, 1),
-            (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3)
+            (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3),
+
+            (self.barcode_generate_btn, 3, 0), (self.btn_print_barcodes, 3, 1),
         ]
         for widget, r, c in layout_map:
             widget.setMinimumHeight(BUTTON_HEIGHT_XS)
@@ -252,6 +261,9 @@ class ArticleDetailPanel(QFrame):
         self.btn_down.clicked.connect(lambda: self._navigate(1))
         self.btn_export.clicked.connect(self._on_export)
         self.btn_import.clicked.connect(self._on_import)
+
+        self.barcode_generate_btn.clicked.connect(self._generate_barcode)
+        self.btn_print_barcodes.clicked.connect(self._on_print_barcodes)
 
         self._set_edit_mode(False)
 
@@ -593,6 +605,27 @@ class ArticleDetailPanel(QFrame):
                 self._show_overlay(str(e), kind="error")
                 return
 
+    def _on_print_barcodes(self):
+        if self.current_product_id is None:
+            return
+        dialog = LabelSheetDialog(self.name.text().strip(), self.barcode.text().strip(), parent=self)
+        if not dialog.exec():
+            return
+        data = dialog.get_data()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Barcode Labels", f"labels_{data['barcode']}.pdf", "PDF Files (*.pdf)"
+        )
+        if not path:
+            return
+
+        try:
+            build_label_sheet_pdf(path, dialog.labels_per_page, **data)
+        except (ValueError, OSError) as e:
+            self._show_overlay(f"Could not create labels: {e}", kind="error")
+            return
+        # Open in the default PDF viewer so it can be printed straight away.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()
         self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
@@ -710,6 +743,14 @@ class ArticleDetailPanel(QFrame):
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)
+
+
+    def _generate_barcode(self):
+        if self._mode == "display":
+            return
+        with get_session() as session:
+            generated_barcode = ProductService.generate_barcode(session, type="ean13")
+            self.barcode.setText(generated_barcode)
 
 
 class InventoryScreen(QWidget):

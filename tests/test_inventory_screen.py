@@ -483,3 +483,106 @@ def test_export_then_import_round_trip_restores_catalog(screen, monkeypatch, tmp
         assert restored.stock_quantity == 7
         assert restored.min_stock_level == 2
         assert restored.category.name == "Round Trip Cat"
+
+
+# ── Print barcodes (PDF label sheet) ─────────────────────────────────────
+
+def _patch_print_barcodes(monkeypatch, save_path, labels_per_page=24, fill=None):
+    """Stub the dialog's exec() to (optionally) fill fields and click a
+    layout button, the save dialog to return `save_path`, and opening the PDF.
+    Returns (opened urls, seen dialogs, captured build_label_sheet_pdf kwargs)."""
+    import app.ui.inventory_screen as inv
+    opened, dialogs, built = [], [], []
+
+    def fake_exec(dialog):
+        dialogs.append(dialog)
+        if labels_per_page is None:
+            return False
+        for field, value in (fill or {}).items():
+            getattr(dialog, field).setText(value)
+        dialog._choose(labels_per_page)
+        return dialog.labels_per_page is not None
+
+    real_build = inv.build_label_sheet_pdf
+
+    def spy_build(path, labels_per_page, **data):
+        built.append((labels_per_page, data))
+        real_build(path, labels_per_page, **data)
+
+    monkeypatch.setattr(inv.LabelSheetDialog, "exec", fake_exec)
+    monkeypatch.setattr(inv, "build_label_sheet_pdf", spy_build)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **kw: (str(save_path), "")))
+    monkeypatch.setattr(inv.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url)))
+    return opened, dialogs, built
+
+
+def _select(screen, product_id):
+    with get_session() as session:
+        screen.detail_panel.show_product(ProductService.get_by_id(session, product_id))
+
+
+def test_print_barcodes_prefills_name_and_barcode(screen, monkeypatch, tmp_path):
+    _, dialogs, _ = _patch_print_barcodes(monkeypatch, tmp_path / "labels.pdf", labels_per_page=None)
+    _select(screen, _add_product(name="Labelled", barcode="2060000000019"))
+
+    screen.detail_panel._on_print_barcodes()
+
+    dialog = dialogs[0]
+    assert dialog.name.text() == "Labelled"
+    assert dialog.barcode.text() == "2060000000019"
+    assert dialog.manufacturer.text() == ""
+    assert dialog.lot_number.text() == ""
+    assert dialog.expiry_date.text() == ""
+
+
+def test_print_barcodes_writes_pdf_with_dialog_data_and_opens_it(screen, monkeypatch, tmp_path):
+    out_path = tmp_path / "labels.pdf"
+    opened, _, built = _patch_print_barcodes(monkeypatch, out_path, labels_per_page=40, fill={
+        "manufacturer": "ACME", "lot_number": "L123", "expiry_date": "31/12/2026",
+    })
+    _select(screen, _add_product(name="Labelled", barcode="2060000000019"))
+
+    screen.detail_panel._on_print_barcodes()
+
+    assert built == [(40, {
+        "name": "Labelled", "manufacturer": "ACME", "lot_number": "L123",
+        "expiry_date": "31/12/2026", "barcode": "2060000000019",
+    })]
+    assert out_path.read_bytes().startswith(b"%PDF")
+    assert len(opened) == 1
+
+
+def test_print_barcodes_without_product_is_noop(screen, monkeypatch, tmp_path):
+    out_path = tmp_path / "labels.pdf"
+    opened, dialogs, _ = _patch_print_barcodes(monkeypatch, out_path)
+
+    screen.detail_panel._on_print_barcodes()
+
+    assert dialogs == []
+    assert not out_path.exists()
+    assert opened == []
+
+
+def test_print_barcodes_empty_barcode_blocks_layout_choice(screen, monkeypatch, tmp_path):
+    out_path = tmp_path / "labels.pdf"
+    opened, dialogs, _ = _patch_print_barcodes(monkeypatch, out_path)
+    _select(screen, _add_product(name="No Barcode"))
+
+    screen.detail_panel._on_print_barcodes()
+
+    assert dialogs[0].labels_per_page is None
+    assert not dialogs[0].error_label.isHidden()
+    assert not out_path.exists()
+    assert opened == []
+
+
+def test_print_barcodes_cancelled_dialog_writes_nothing(screen, monkeypatch, tmp_path):
+    out_path = tmp_path / "labels.pdf"
+    opened, _, built = _patch_print_barcodes(monkeypatch, out_path, labels_per_page=None)
+    _select(screen, _add_product(name="Labelled", barcode="2060000000019"))
+
+    screen.detail_panel._on_print_barcodes()
+
+    assert built == []
+    assert not out_path.exists()
+    assert opened == []

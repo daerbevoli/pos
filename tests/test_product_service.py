@@ -92,6 +92,77 @@ def test_deactivate_nonexistent_returns_false(db_session):
     assert ProductService.deactivate(db_session, 99999) is False
 
 
+# ── Barcode generation ───────────────────────────────────────────────────
+
+def _is_valid_ean13(code):
+    digits = [int(d) for d in code]
+    return len(code) == 13 and sum(d * (3 if i % 2 else 1) for i, d in enumerate(digits)) % 10 == 0
+
+
+def test_ean13_check_digit_known_codes():
+    assert ProductService._ean13_check_digit("400638133393") == "1"
+    assert ProductService._ean13_check_digit("590123412345") == "7"
+
+
+def test_generate_barcode_first_code_on_empty_db(db_session):
+    code = ProductService.generate_barcode(db_session)
+    assert code == "2060000000019"
+    assert _is_valid_ean13(code)
+
+
+def test_generate_barcode_skips_used_codes_including_inactive(db_session):
+    first = ProductService.generate_barcode(db_session)
+    p = _make_product(db_session, barcode=first)
+    ProductService.deactivate(db_session, p.id)
+
+    second = ProductService.generate_barcode(db_session)
+    assert second == "2060000000026"
+    assert _is_valid_ean13(second)
+
+
+def test_generate_barcode_continues_after_highest_internal_code(db_session):
+    _make_product(db_session, name="A", barcode="2060000000019")
+    _make_product(db_session, name="B", barcode="2060000000507")
+    assert ProductService.generate_barcode(db_session) == "2060000000514"
+
+
+def test_generate_barcode_ignores_non_internal_barcodes(db_session):
+    _make_product(db_session, name="Manufacturer", barcode="5901234123457")
+    _make_product(db_session, name="Short", barcode="2060123")
+    assert ProductService.generate_barcode(db_session) == "2060000000019"
+
+
+def test_generate_barcode_fills_gap_when_sequence_exhausted(db_session, monkeypatch):
+    # An 11-digit prefix leaves a 1-digit sequence (1-9), so it's quick to exhaust.
+    prefix = "20600000000"
+    monkeypatch.setattr(ProductService, "INTERNAL_BARCODE_PREFIX", prefix)
+    for seq in [1, 2, 4, 5, 6, 7, 8, 9]:
+        first12 = f"{prefix}{seq}"
+        _make_product(db_session, name=f"P{seq}",
+                      barcode=first12 + ProductService._ean13_check_digit(first12))
+
+    code = ProductService.generate_barcode(db_session)
+    assert code[:12] == f"{prefix}3"
+    assert _is_valid_ean13(code)
+
+
+def test_generate_barcode_raises_when_all_codes_used(db_session, monkeypatch):
+    prefix = "20600000000"
+    monkeypatch.setattr(ProductService, "INTERNAL_BARCODE_PREFIX", prefix)
+    for seq in range(1, 10):
+        first12 = f"{prefix}{seq}"
+        _make_product(db_session, name=f"P{seq}",
+                      barcode=first12 + ProductService._ean13_check_digit(first12))
+
+    with pytest.raises(RuntimeError):
+        ProductService.generate_barcode(db_session)
+
+
+def test_generate_barcode_unsupported_type(db_session):
+    with pytest.raises(ValueError):
+        ProductService.generate_barcode(db_session, type="code128")
+
+
 # ── Stock management ─────────────────────────────────────────────────────
 
 def test_adjust_stock_increases_and_records_movement(db_session):

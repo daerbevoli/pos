@@ -62,6 +62,42 @@ class ProductService:
         session.refresh(product)
         return product
 
+    INTERNAL_BARCODE_PREFIX = "2060"
+
+    @staticmethod
+    def _ean13_check_digit(first12: str) -> str:
+        total = sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(first12))
+        return str((10 - total % 10) % 10)
+
+    @staticmethod
+    def generate_barcode(session: Session, type: str = "ean13") -> str:
+        """Next free internal EAN-13 (INTERNAL_BARCODE_PREFIX + sequence +
+        check digit). Checks inactive products too, since `barcode` is
+        unique across the whole table."""
+        if type != "ean13":
+            raise ValueError(f"Unsupported barcode type: {type!r}")
+
+        prefix = ProductService.INTERNAL_BARCODE_PREFIX
+        body_len = 12 - len(prefix)
+        used = {
+            int(b[len(prefix):12])
+            for (b,) in session.query(Product.barcode)
+                               .filter(Product.barcode.startswith(prefix))
+            if len(b) == 13 and b.isdigit()
+        }
+
+        # Continue after the highest code issued so far; only if that runs
+        # off the end, fall back to the lowest gap.
+        max_seq = 10 ** body_len - 1
+        seq = max(used, default=0) + 1
+        if seq > max_seq:
+            seq = next((n for n in range(1, max_seq + 1) if n not in used), None)
+            if seq is None:
+                raise RuntimeError("No free internal barcodes left")
+
+        first12 = f"{prefix}{seq:0{body_len}d}"
+        return first12 + ProductService._ean13_check_digit(first12)
+
     @staticmethod
     def deactivate(session: Session, product_id: int) -> bool:
         """Soft delete — keeps sales history intact."""
