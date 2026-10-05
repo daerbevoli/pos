@@ -3,9 +3,9 @@ import pytest
 from PyQt6.QtCore import QDate
 
 from app.ui.reports_screen import ReportsScreen
-from app.core.report_service import _payment_breakdown, _amount_for_method
+from app.core.report_service import _payment_breakdown, _amount_for_method, _discounts_and_mistakes
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, CartItem, SalesService
+from app.core.sales_service import Cart, CartItem, DiscountEntry, SalesService
 from app.core.client_service import ClientService
 from app.core.database import get_session
 
@@ -71,6 +71,47 @@ def test_amount_for_method_sums_matching_legs():
     ]))
     assert _amount_for_method(sale, "cash") == 7.0
     assert _amount_for_method(sale, "card") == 3.0
+
+
+class _SnapshotSale:
+    def __init__(self, cart):
+        self.cart_snapshot = cart.to_snapshot()
+
+
+def _item(name, qty, price=2.0, **kw):
+    return CartItem(product_id=1, product_name=name, product_barcode="", unit_price=price, quantity=qty, **kw)
+
+
+def test_discounts_split_manual_and_promo():
+    sale = _SnapshotSale(Cart(entries=[
+        _item("A", 1), DiscountEntry(amount=0.5, label="Promo", is_promo=True),
+        DiscountEntry(amount=1.0, label="10%"),
+    ]))
+    discounts, mistakes = _discounts_and_mistakes([sale, sale])
+    assert discounts == {"manual": 2.0, "promo": 1.0}
+    assert mistakes == []
+
+
+def test_mistakes_list_reversal_lines_with_voided_amount():
+    original = _item("Cola", 3, price=1.5, has_reversal=True)
+    reversal = _item("Cola", -3, price=1.5, is_reversal=True)
+    sale = _SnapshotSale(Cart(entries=[original, _item("Bread", 1), reversal]))
+    _, mistakes = _discounts_and_mistakes([sale])
+    assert mistakes == [{"name": "Cola", "quantity": 3, "unit": "pcs", "amount": 4.5}]
+
+
+def test_refund_lines_are_not_mistakes():
+    sale = _SnapshotSale(Cart(entries=[_item("Cola", -2)], is_refund=True))
+    _, mistakes = _discounts_and_mistakes([sale])
+    assert mistakes == []
+
+
+def test_discounts_and_mistakes_skip_missing_or_bad_snapshot():
+    class _Bad:
+        cart_snapshot = "not json"
+    class _Empty:
+        cart_snapshot = None
+    assert _discounts_and_mistakes([_Bad(), _Empty()]) == ({"manual": 0.0, "promo": 0.0}, [])
 
 
 # ── Screen behavior ──────────────────────────────────────────────────────
@@ -352,6 +393,29 @@ def test_invoice_orphaned_by_an_earlier_z_report_does_not_block(patched_db):
         assert XZReportService.unsent_invoice_numbers(session) == []
 
 
+
+def test_close_z_report_stores_discounts_and_mistakes(patched_db):
+    """The Z report purges its sales, so discounts/mistakes must be kept on
+    the ZReport row itself to be printable."""
+    import json
+    from app.core.report_service import XZReportService
+    with get_session() as session:
+        product = _make_product(session, price=2.0)
+    with get_session() as session:
+        def line(qty, **kw):
+            return CartItem(product_id=product.id, product_name="Cola", product_barcode="",
+                            unit_price=2.0, quantity=qty, tax_rate=21, **kw)
+        cart = Cart(entries=[
+            line(2, has_reversal=True), line(1),
+            DiscountEntry(amount=0.5, label="10%"), line(-2, is_reversal=True),
+        ])
+        SalesService.finalize_sale(session, cart, payment_method="cash")
+
+    with get_session() as session:
+        z = XZReportService.close_z_report(session)
+        assert json.loads(z.discounts) == {"manual": 0.5, "promo": 0.0}
+        assert json.loads(z.mistakes) == [{"name": "Cola", "quantity": 2, "unit": "pcs", "amount": 4.0}]
+
 def test_z_report_button_warns_and_skips_confirmation_when_unsent(screen, monkeypatch):
     from app.models.models import ZReport
     from PyQt6.QtWidgets import QMessageBox
@@ -368,3 +432,208 @@ def test_z_report_button_warns_and_skips_confirmation_when_unsent(screen, monkey
         assert session.query(ZReport).count() == 0
 
 
+
+
+def test_x_report_number_matches_the_z_report_that_closes_its_period(patched_db):
+    """X reports share their period's number however often they're printed;
+    the closing Z report takes that number, and the next period moves on."""
+    from app.core.report_service import XZReportService
+    with get_session() as session:
+        assert XZReportService.generate_x_report(session)["report_number"] == "X-0001"
+        assert XZReportService.generate_x_report(session)["report_number"] == "X-0001"
+        assert XZReportService.close_z_report(session).report_number == "Z-0001"
+    with get_session() as session:
+        assert XZReportService.generate_x_report(session)["report_number"] == "X-0002"
+
+
+# ── Mark invoice sent manually ───────────────────────────────────────────
+
+def _select_sale_row(screen, sale_id):
+    screen._load_report()
+    row = next(r for r, sid in screen._sales_row_ids.items() if sid == sale_id)
+    screen.sales_table.setCurrentCell(row, 0)
+
+
+def test_mark_sent_confirmed_locks_the_invoice(screen, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    _select_sale_row(screen, invoice.sale_id)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+
+    screen._mark_invoice_sent()
+
+    with get_session() as session:
+        assert session.get(Invoice, invoice.id).sent_at is not None
+
+
+def test_mark_sent_cancelled_leaves_the_invoice_unsent(screen, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    _select_sale_row(screen, invoice.sale_id)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+
+    screen._mark_invoice_sent()
+
+    with get_session() as session:
+        assert session.get(Invoice, invoice.id).sent_at is None
+
+
+def test_mark_sent_on_a_plain_sale_does_not_ask(screen, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    with get_session() as session:
+        product = _make_product(session)
+    sale = _finalize_sale(product)
+    _select_sale_row(screen, sale.id)
+    infos, questions = [], []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: infos.append(a))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: questions.append(a))
+
+    screen._mark_invoice_sent()
+
+    assert len(infos) == 1 and questions == []
+
+
+# ── Invoices view reads the invoices table ───────────────────────────────
+
+def test_invoices_view_still_lists_invoices_after_z_report(screen):
+    """A Z report purges sales but keeps invoices (sale_id -> NULL); the
+    Invoices view must still show them from their own snapshot."""
+    from app.core.report_service import XZReportService
+    invoice = _make_invoice()
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+    with get_session() as session:
+        XZReportService.close_z_report(session)
+
+    screen._invoices_only()
+
+    assert screen.sales_table.rowCount() == 1
+    assert screen.sales_table.item(0, 0).text() == invoice.invoice_number
+    assert screen.sales_table.item(0, 2).text() == "Acme"
+    assert screen.sales_table.item(0, 4).text() == "1"
+    assert screen.sales_table.item(0, 5).text() == "/"
+    assert screen.card_transactions._value_label.text() == "1"
+    assert screen._sales_row_ids == {}
+
+
+def test_purged_invoice_cannot_be_opened_on_pos(screen, qtbot, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from app.core.report_service import XZReportService
+    invoice = _make_invoice()
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+    with get_session() as session:
+        XZReportService.close_z_report(session)
+    screen._invoices_only()
+    screen.sales_table.setCurrentCell(0, 0)
+    infos, selected, navigated = [], [], []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: infos.append(a))
+    screen.sale_selected.connect(selected.append)
+    screen.navigate.connect(navigated.append)
+
+    screen._confirm()
+
+    assert len(infos) == 1 and selected == [] and navigated == []
+
+
+def test_mark_sent_works_on_invoice_without_sale(screen, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    with get_session() as session:
+        session.get(Invoice, invoice.id).sale_id = None
+        session.commit()
+    screen._invoices_only()
+    screen.sales_table.setCurrentCell(0, 0)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+
+    screen._mark_invoice_sent()
+
+    with get_session() as session:
+        assert session.get(Invoice, invoice.id).sent_at is not None
+
+
+def test_invoices_filter_survives_range_buttons_and_load(screen):
+    with get_session() as session:
+        product = _make_product(session)
+    _finalize_sale(product)
+    _make_invoice()
+
+    screen._invoices_only()
+    assert screen.invoices_btn.isChecked()
+    assert screen.sales_table.rowCount() == 1
+
+    screen._set_range(7)
+    assert screen.sales_table.rowCount() == 1
+    screen._load_report()
+    assert screen.sales_table.rowCount() == 1
+
+    screen._invoices_only()
+    assert not screen.invoices_btn.isChecked()
+    assert screen.sales_table.rowCount() == 2
+
+
+def test_invoice_vat_breakdown_survives_z_report(screen):
+    from app.core.report_service import XZReportService
+    invoice = _make_invoice()  # one 10.00 line at 21%
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+    with get_session() as session:
+        XZReportService.close_z_report(session)
+
+    screen._invoices_only()
+
+    rows = {screen.vat_table.item(r, 0).text(): (screen.vat_table.item(r, 1).text(),
+            screen.vat_table.item(r, 2).text(), screen.vat_table.item(r, 3).text())
+            for r in range(screen.vat_table.rowCount())}
+    assert rows["21 %"] == ("8.26", "1.74", "10.00")
+    assert rows["6 %"] == ("0.00", "0.00", "0.00")
+
+
+def test_invoice_vat_breakdown_matches_sale_based_breakdown(patched_db):
+    from app.core.report_service import XZReportService, invoice_vat_breakdown
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    with get_session() as session:
+        inv = session.get(Invoice, invoice.id)
+        assert invoice_vat_breakdown([inv]) == XZReportService.compute_totals(session, [inv.sale])["vat_breakdown"]
+
+
+def test_invoice_categories_survive_z_report(screen):
+    from app.core.report_service import XZReportService
+    from app.models.models import Category
+    with get_session() as session:
+        category = Category(name="Drinks")
+        session.add(category)
+        session.commit()
+        category_id = category.id
+    with get_session() as session:
+        product = _make_product(session, name="Cola", category_id=category_id)
+    with get_session() as session:
+        client = ClientService.create(session, name="Acme", vatNumber="BE0123456749",
+                                      street="1 Main St", zip_code="1000", city="Brussels")
+        client_id = client.id
+    invoice = _finalize_sale(product, quantity=3, client_id=client_id)
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+    with get_session() as session:
+        XZReportService.close_z_report(session)
+
+    screen._invoices_only()
+
+    rows = {screen.categories_table.item(r, 0).text(): (screen.categories_table.item(r, 1).text(),
+            screen.categories_table.item(r, 2).text())
+            for r in range(screen.categories_table.rowCount())}
+    assert rows == {"Drinks": ("3", "30.00")}
+
+
+def test_invoice_category_breakdown_matches_sale_based_breakdown(patched_db):
+    from app.core.report_service import XZReportService, invoice_category_breakdown
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    with get_session() as session:
+        inv = session.get(Invoice, invoice.id)
+        assert invoice_category_breakdown(session, [inv]) == \
+            XZReportService.compute_totals(session, [inv.sale])["category_breakdown"]

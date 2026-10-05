@@ -834,6 +834,56 @@ def test_removing_the_reversal_line_uncaps_the_original(screen):
     assert screen.cart.entries[0].has_reversal is False
 
 
+
+def test_void_and_unvoid_survive_any_number_of_reopen_cycles(screen):
+    """Reopen → void → pay → reopen → delete the reversal → pay → … as many
+    times as needed: the reversal's link to its original is saved with the
+    sale, so deleting it after a reopen still un-voids the original."""
+    pid, barcode, _ = _add_product(barcode="rev_cycle", price=5.0, stock_quantity=50)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+
+    for _ in range(3):
+        screen._reopen_ticket()
+        screen.cart_table.selectRow(screen._row_to_entry.index(0))
+        screen._remove_selected()  # void the original
+        assert [e.quantity for e in screen.cart.entries] == [1, -1]
+        screen._open_payment("cash")
+        assert screen.cart.total == 0.0
+
+        screen._reopen_ticket()
+        screen.cart_table.selectRow(screen._row_to_entry.index(1))
+        screen._remove_selected()  # delete the reversal again
+        assert len(screen.cart.entries) == 1
+        assert screen.cart.entries[0].has_reversal is False
+        screen._open_payment("cash")
+        assert screen.cart.total == 5.0
+
+    with get_session() as session:
+        assert session.query(Sale).filter_by(status="completed").count() == 1
+
+
+def test_unvoid_after_reopen_restores_the_promo_discount(screen):
+    pid, barcode, _ = _add_product(barcode="rev_promo", price=10.0, stock_quantity=50)
+    with get_session() as session:
+        promo = ProductService.create_promo(session, "Promo")
+        ProductService.set_promo_items(
+            session, promo.id, [{"product_id": pid, "discount_type": "percent", "discount_value": 10.0}]
+        )
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+    screen.cart_table.selectRow(screen._row_to_entry.index(0))
+    screen._remove_selected()
+    screen._open_payment("cash")
+
+    screen._reopen_ticket()
+    reversal_idx = next(i for i, e in enumerate(screen.cart.entries) if isinstance(e, CartItem) and e.is_reversal)
+    screen.cart_table.selectRow(screen._row_to_entry.index(reversal_idx))
+    screen._remove_selected()
+
+    assert screen.cart.total == 9.0  # original back, with its 10% promo line
+
 def test_repaying_a_reopened_ticket_overwrites_the_same_sale(screen):
     pid, barcode, _ = _add_product(barcode="rev4", price=5.0, stock_quantity=50)
     _scan(screen, barcode)

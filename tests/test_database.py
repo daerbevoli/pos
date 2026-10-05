@@ -142,11 +142,18 @@ def test_migrations_add_missing_columns(monkeypatch):
                 is_active BOOLEAN DEFAULT 1
             )
         """)
+        conn.exec_driver_sql("""
+            CREATE TABLE z_reports (
+                id INTEGER PRIMARY KEY,
+                report_number TEXT UNIQUE NOT NULL
+            )
+        """)
         conn.commit()
 
     database._run_migrations()
 
     with engine.connect() as conn:
+        z_report_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(z_reports)")}
         sales_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)")}
         sale_item_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sale_items)")}
         client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
@@ -154,6 +161,7 @@ def test_migrations_add_missing_columns(monkeypatch):
     assert {"cart_snapshot", "payment_breakdown"} <= sales_cols
     assert {"tax_rate", "tax_amount"} <= sale_item_cols
     assert "ux_clients_name_active" in client_indexes
+    assert {"discounts", "mistakes"} <= z_report_cols
 
 
 def test_migrations_are_noop_when_columns_already_present(monkeypatch):

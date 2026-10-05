@@ -12,7 +12,8 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.models import Invoice, Sale, ZReport
+from app.core.sales_service import Cart, calc_tax
+from app.models.models import Invoice, Product, Sale, ZReport
 
 VAT_RATES = (0, 6, 21)
 
@@ -32,6 +33,99 @@ def _amount_for_method(sale, method: str) -> float:
     return sum(leg.get("amount", 0.0) for leg in _payment_breakdown(sale) if leg.get("method") == method)
 
 
+def _vat_breakdown(lines) -> dict:
+    """{"0"/"6"/"21": {"base", "tax", "total"}} from (tax_rate, tax_amount,
+    line_total) tuples; an unknown rate is counted under 0%."""
+    vat_totals = {rate: [0.0, 0.0] for rate in VAT_RATES}  # rate -> [tax_sum, total_sum]
+    for tax_rate, tax_amount, line_total in lines:
+        rate = tax_rate if tax_rate in vat_totals else 0
+        vat_totals[rate][0] += tax_amount
+        vat_totals[rate][1] += line_total
+    return {
+        str(rate): {
+            "base": round(total_sum - tax_sum, 2),
+            "tax": round(tax_sum, 2),
+            "total": round(total_sum, 2),
+        }
+        for rate, (tax_sum, total_sum) in vat_totals.items()
+    }
+
+
+def invoice_vat_breakdown(invoices) -> dict:
+    """VAT breakdown rebuilt from each invoice's frozen line_items_snapshot,
+    so it still works after a Z report has purged the invoices' sales.
+    Uses the same discounted line amounts as checkout (Cart.net_line_totals),
+    so it matches the sale-based breakdown."""
+    lines = []
+    for invoice in invoices:
+        try:
+            cart = Cart.from_snapshot(invoice.line_items_snapshot)
+        except (ValueError, TypeError, KeyError):
+            continue
+        for entry, net_total in cart.net_line_totals():
+            if entry.quantity is None:
+                continue
+            lines.append((entry.tax_rate, calc_tax(net_total, entry.tax_rate), net_total))
+    return _vat_breakdown(lines)
+
+
+def invoice_category_breakdown(session: Session, invoices) -> dict:
+    """{category: [qty, amount]} rebuilt from each invoice's frozen
+    line_items_snapshot, like compute_totals() does from SaleItems — so it
+    still works after a Z report has purged the invoices' sales. Amounts are
+    the discounted line totals (Cart.net_line_totals). The category is the
+    product's current one: categories aren't frozen on the invoice, and
+    products are only ever deactivated, never deleted."""
+    category_names: dict[int, str] = {}
+    breakdown: dict[str, list[float]] = {}
+    for invoice in invoices:
+        try:
+            cart = Cart.from_snapshot(invoice.line_items_snapshot)
+        except (ValueError, TypeError, KeyError):
+            continue
+        for entry, net_total in cart.net_line_totals():
+            if entry.quantity is None:
+                continue
+            if entry.product_id not in category_names:
+                product = session.get(Product, entry.product_id)
+                category_names[entry.product_id] = (
+                    product.category.name if product is not None and product.category else "Uncategorized"
+                )
+            name = category_names[entry.product_id]
+            qty_sum, amount_sum = breakdown.get(name, [0.0, 0.0])
+            breakdown[name] = [qty_sum + entry.quantity, round(amount_sum + net_total, 2)]
+    return breakdown
+
+
+def _discounts_and_mistakes(sales) -> tuple[dict, list[dict]]:
+    """Read off each sale's cart_snapshot (the receipt as printed):
+    discounts split into manual vs promo, and "mistakes" — lines voided on
+    a reopened sale / unsent invoice (reversal lines). Refund-mode and
+    credit-note lines are ordinary negative-quantity items, not reversals,
+    so they never count as mistakes. A mistake's qty/amount are those of
+    the line it voided."""
+    discounts = {"manual": 0.0, "promo": 0.0}
+    mistakes = []
+    for sale in sales:
+        try:
+            entries = json.loads(sale.cart_snapshot) if sale.cart_snapshot else []
+        except (ValueError, TypeError):
+            continue
+        for raw in entries:
+            kind = raw.get("type")
+            if kind == "discount":
+                discounts["promo" if raw.get("is_promo") else "manual"] += raw.get("amount", 0.0)
+            elif kind == "item" and raw.get("is_reversal") and raw.get("quantity") is not None:
+                qty = -raw["quantity"]
+                mistakes.append({
+                    "name": raw.get("product_name", ""),
+                    "quantity": qty,
+                    "unit": raw.get("unit", "pcs"),
+                    "amount": round(raw.get("unit_price", 0.0) * qty, 2),
+                })
+    return {k: round(v, 2) for k, v in discounts.items()}, mistakes
+
+
 class XZReportService:
 
     @staticmethod
@@ -47,25 +141,15 @@ class XZReportService:
         total_amount = round(final_amount - tax_amount, 2)
         transaction_count = len(sales)
 
-        vat_totals = {rate: [0.0, 0.0] for rate in VAT_RATES}  # rate -> [tax_sum, total_sum]
         category_breakdown = {}
         for sale in sales:
             for item in sale.items:
-                rate = item.tax_rate if item.tax_rate in vat_totals else 0
-                vat_totals[rate][0] += item.tax_amount
-                vat_totals[rate][1] += item.line_total
-
                 category_name = item.product.category.name if item.product.category else "Uncategorized"
                 qty_sum, amount_sum = category_breakdown.get(category_name, [0.0, 0.0])
                 category_breakdown[category_name] = [qty_sum + item.quantity, amount_sum + item.line_total]
-        vat_breakdown = {
-            str(rate): {
-                "base": round(total_sum - tax_sum, 2),
-                "tax": round(tax_sum, 2),
-                "total": round(total_sum, 2),
-            }
-            for rate, (tax_sum, total_sum) in vat_totals.items()
-        }
+        vat_breakdown = _vat_breakdown(
+            (item.tax_rate, item.tax_amount, item.line_total) for sale in sales for item in sale.items
+        )
 
         payment_totals: dict[str, float] = {}
         for sale in sales:
@@ -77,7 +161,11 @@ class XZReportService:
             for method, amount in payment_totals.items()
         ]
 
+        discounts, mistakes = _discounts_and_mistakes(sales)
+
         return {
+            "discounts": discounts,
+            "mistakes": mistakes,
             "transaction_count": transaction_count,
             "total_amount": total_amount,
             "tax_amount": tax_amount,
@@ -88,10 +176,18 @@ class XZReportService:
         }
 
     @staticmethod
+    def current_period_number(session: Session) -> int:
+        """Sequence number of the open period: 1 before the first Z report,
+        +1 after each close. Every X report of a period shares it, and the
+        Z report closing that period takes it too."""
+        return (session.query(func.count(ZReport.id)).scalar() or 0) + 1
+
+    @staticmethod
     def generate_x_report(session: Session) -> dict:
         """Read-only preview — no persistence, no deletion."""
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
         totals = XZReportService.compute_totals(session, sales)
+        totals["report_number"] = f"X-{XZReportService.current_period_number(session):04d}"
         totals["period_start"] = sales[0].created_at if sales else datetime.now()
         totals["period_end"] = datetime.now()
         return totals
@@ -128,8 +224,7 @@ class XZReportService:
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
         totals = XZReportService.compute_totals(session, sales)
 
-        count = session.query(func.count(ZReport.id)).scalar() or 0
-        report_number = f"Z-{count + 1:04d}"
+        report_number = f"Z-{XZReportService.current_period_number(session):04d}"
 
         last_report = session.query(ZReport).order_by(ZReport.id.desc()).first()
         if last_report is not None:
@@ -151,6 +246,8 @@ class XZReportService:
             vat_breakdown=json.dumps(totals["vat_breakdown"]),
             category_breakdown=json.dumps(totals["category_breakdown"]),
             payment_breakdown=json.dumps(totals["payment_breakdown"]),
+            discounts=json.dumps(totals["discounts"]),
+            mistakes=json.dumps(totals["mistakes"]),
         )
         session.add(z_report)
 

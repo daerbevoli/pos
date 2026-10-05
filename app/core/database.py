@@ -132,6 +132,17 @@ _COLUMN_MIGRATIONS = [
         "totals (feat: X and Z report)."
     ),
     _ColumnMigration(
+        "z_reports", "discounts", "TEXT",
+        "The X/Z report shows total discounts given, split into manual and "
+        "promo; the Z report must keep them since its sales are purged."
+    ),
+    _ColumnMigration(
+        "z_reports", "mistakes", "TEXT",
+        "The X/Z report lists lines voided on reopened sales / unsent "
+        "invoices (not refunds or credit notes); the Z report must keep "
+        "them since its sales are purged."
+    ),
+    _ColumnMigration(
         "open_tickets", "is_refund", "BOOLEAN NOT NULL DEFAULT 0",
         "A V-tab left in RF/CN (refund / credit note) mode must come back "
         "in that mode after a crash, or lines added afterward would go in "

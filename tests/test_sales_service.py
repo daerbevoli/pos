@@ -542,3 +542,51 @@ def test_credit_note_lines_leave_out_voided_pairs():
     )
     lines = invoice_lines(Invoice(invoice_number="CN-1", line_items_snapshot=cart.to_snapshot()))
     assert [(l.product_name, l.quantity) for l in lines] == [("Bread", -1)]
+
+
+# ── VAT on the discounted amount ─────────────────────────────────────────
+
+def test_vat_is_charged_on_the_discounted_line_amount(db_session):
+    from app.core.sales_service import DiscountEntry
+    product = _make_product(db_session, price=12.10, tax=21)
+    cart = _cart_with(_item_for(product), DiscountEntry(amount=2.10, label="MANUAL DISCOUNT 2.10"))
+
+    sale = SalesService.finalize_sale(db_session, cart)
+
+    assert sale.final_amount == 10.0
+    assert sale.tax_amount == 1.74  # VAT in 10.00, not in 12.10 (2.10)
+    item = sale.items[0]
+    assert (item.line_total, item.discount, item.tax_amount) == (10.0, 2.10, 1.74)
+
+
+def test_section_discount_vat_is_split_per_rate(db_session):
+    from app.core.sales_service import DiscountEntry, SubtotalMarker
+    food = _make_product(db_session, name="Food", price=10.60, tax=6)
+    drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
+    cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker(),
+                      DiscountEntry(amount=2.27, label="MANUAL DISCOUNT 10%"))
+
+    sale = SalesService.finalize_sale(db_session, cart)
+
+    by_rate = {item.tax_rate: item for item in sale.items}
+    assert (by_rate[6].line_total, by_rate[21].line_total) == (9.54, 10.89)
+    assert sale.tax_amount == round(0.54 + 1.89, 2)
+    assert round(sum(i.line_total for i in sale.items), 2) == sale.final_amount
+
+
+def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
+    from app.core.client_service import ClientService
+    from app.core.sales_service import DiscountEntry, SubtotalMarker, invoice_lines
+    client = ClientService.create(db_session, name="C", vatNumber="V9", street="s", zip_code="1000", city="Brussels")
+    food = _make_product(db_session, name="Food", price=10.60, tax=6)
+    drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
+    cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker(),
+                      DiscountEntry(amount=2.27, label="MANUAL DISCOUNT 10%"))
+
+    invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
+    lines = invoice_lines(invoice)
+
+    assert [line.is_discount for line in lines] == [False, False]
+    assert [line.discount_percent for line in lines] == [10.0, 10.0]
+    assert [line.line_total_excl_tax for line in lines] == [9.0, 9.0]
+    assert invoice.tax_amount == round(0.54 + 1.89, 2)

@@ -4,6 +4,8 @@ Reports Screen
 - Vat breakdown, category breakdown
 - X report and Z report.
 """
+import json
+
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -17,7 +19,10 @@ from PyQt6.QtWidgets import QMessageBox
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.receipt_service import ReceiptService, PrinterError
-from app.core.report_service import XZReportService
+from app.core.report_service import (
+    XZReportService, invoice_category_breakdown, invoice_vat_breakdown,
+)
+from app.models.models import Invoice, Sale
 from app.utils.utils import FunctionButton
 from app.constants import BUTTON_HEIGHT, ROW_HEIGHT
 
@@ -47,10 +52,11 @@ class ReportsScreen(QWidget):
 
     def __init__(self):
         super().__init__()
+        # Invoices filter: once on, every reload (range buttons, Load Report,
+        # Z report, Mark sent) stays on invoices until toggled off.
+        self.invoices_only = False
         self._build_ui()
         self._load_today()
-
-        self.invoices_only = False
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -105,7 +111,7 @@ class ReportsScreen(QWidget):
         load_btn = QPushButton("Load Report")
         load_btn.setObjectName("primaryBtn")
         load_btn.setFixedHeight(BUTTON_HEIGHT)
-        load_btn.clicked.connect(self._load_report)
+        load_btn.clicked.connect(lambda: self._load_report())
         controls.addWidget(load_btn)
 
         self.sales_btn = FunctionButton("Sales", "salesBtn")
@@ -133,6 +139,11 @@ class ReportsScreen(QWidget):
         self.invoices_btn.setFixedHeight(BUTTON_HEIGHT)
         self.invoices_btn.setCheckable(True)
         controls.addWidget(self.invoices_btn)
+
+        mark_sent_btn = FunctionButton("Mark sent", "InvBtn")
+        mark_sent_btn.setFixedHeight(BUTTON_HEIGHT)
+        mark_sent_btn.clicked.connect(self._mark_invoice_sent)
+        controls.addWidget(mark_sent_btn)
 
         x_report_btn = FunctionButton("X Report", "XRBtn")
         x_report_btn.setFixedHeight(BUTTON_HEIGHT)
@@ -239,66 +250,53 @@ class ReportsScreen(QWidget):
         self.date_from.setDate(QDate.currentDate().toPyDate())
         self.date_to.setDate(QDate.currentDate().toPyDate())
         self._show_table("sales")
+        self.invoices_only = False
+        self.invoices_btn.setChecked(False)
         self._load_report()
         self.sales_btn.setChecked(True)
-        if self.invoices_btn.isChecked():
-            self.invoices_btn.setChecked(False)
         self.today_btn.setChecked(True)
 
 
-    def _load_report(self, invoices: bool = False):
+    def _load_report(self):
         start = self.date_from.date().toPyDate()
         end = self.date_to.date().toPyDate()
 
         with get_session() as session:
-            all_sales = SalesService.get_sales_range(session, start, end)
+            self.sales_table.setRowCount(0)
+            self._sales_row_ids = {}
+            self._invoice_row_ids = {}
 
-            sales = all_sales
-            if invoices:
-                sales = [sale for sale in all_sales if sale.invoice is not None]
+            if self.invoices_only:
+                # Read from the invoices table: a Z report purges sales but
+                # keeps their invoices, which then have no sale to list them by.
+                invoice_rows = SalesService.get_invoices_range(session, start, end)
+                for invoice in invoice_rows:
+                    self._add_row(invoice.sale, invoice)
+                # The payment split only exists on the sale, so it covers just
+                # the invoices whose sale hasn't been purged yet; VAT and
+                # categories are rebuilt from every invoice's own line items.
+                sales = [invoice.sale for invoice in invoice_rows if invoice.sale is not None]
+                totals = XZReportService.compute_totals(session, sales)
+                totals["vat_breakdown"] = invoice_vat_breakdown(invoice_rows)
+                totals["category_breakdown"] = invoice_category_breakdown(session, invoice_rows)
+                revenue = round(sum(invoice.final_amount or 0.0 for invoice in invoice_rows), 2)
+                transaction_count = len(invoice_rows)
+            else:
+                sales = SalesService.get_sales_range(session, start, end)
+                for sale in sales:
+                    self._add_row(sale, sale.invoice)
+                totals = XZReportService.compute_totals(session, sales)
+                revenue = totals["final_amount"]
+                transaction_count = totals["transaction_count"]
 
-            totals = XZReportService.compute_totals(session, sales)
-            transaction_count = totals["transaction_count"]
-            avg = totals["final_amount"] / transaction_count if transaction_count else 0
+            avg = revenue / transaction_count if transaction_count else 0
             payment_totals = {leg["method"]: leg["amount"] for leg in totals["payment_breakdown"]}
 
-            self.card_revenue._value_label.setText(f"{totals['final_amount']:.2f}")
+            self.card_revenue._value_label.setText(f"{revenue:.2f}")
             self.card_transactions._value_label.setText(str(transaction_count))
             self.card_avg._value_label.setText(f"{avg:.2f}")
             self.card_cash._value_label.setText(f"{payment_totals.get('cash', 0.0):.2f}")
             self.card_card._value_label.setText(f"{payment_totals.get('card', 0.0):.2f}")
-
-            self.sales_table.setRowCount(0)
-            self._sales_row_ids = {}
-
-            inv_sent_font = QFont()
-            inv_sent_font.setBold(True)
-
-            for sale in sales:
-                row = self.sales_table.rowCount()
-                self.sales_table.insertRow(row)
-                self._sales_row_ids[row] = sale.id
-                display_number = sale.invoice.invoice_number if sale.invoice else sale.sale_number
-                self.sales_table.setItem(row, 0, QTableWidgetItem(display_number))
-                self.sales_table.setItem(row, 1, QTableWidgetItem(
-                    sale.created_at.strftime("%d/%m/%Y %H:%M")
-                ))
-
-                client_name = (sale.invoice.client_name if sale.invoice else None) or "/"
-                self.sales_table.setItem(row, 2, QTableWidgetItem(client_name))
-                vat_num = (sale.invoice.client_vat_number if sale.invoice else None) or "/"
-                self.sales_table.setItem(row, 3, QTableWidgetItem(vat_num))
-                self.sales_table.setItem(row, 4, QTableWidgetItem(str(len(sale.items))))
-                self.sales_table.setItem(row, 5, QTableWidgetItem(sale.payment_method.upper()))
-                self.sales_table.setItem(row, 6, QTableWidgetItem(f"{sale.final_amount:.2f}"))
-                updated_at = "/" if sale.updated_at is None else sale.updated_at.strftime("%d/%m/%Y %H:%M")
-                self.sales_table.setItem(row, 7, QTableWidgetItem(updated_at))
-
-                if sale.invoice is not None and sale.invoice.sent_at is not None:
-                    for col in range(self.sales_table.columnCount()):
-                        self.sales_table.item(row, col).setFont(inv_sent_font)
-
-                self.sales_table.setRowHeight(row, ROW_HEIGHT)
 
             self.vat_table.setRowCount(0)
             for rate, amounts in totals["vat_breakdown"].items():
@@ -318,6 +316,51 @@ class ReportsScreen(QWidget):
                 self.categories_table.setItem(row, 1, QTableWidgetItem(f"{qty_sum:g}"))
                 self.categories_table.setItem(row, 2, QTableWidgetItem(f"{amount_sum:.2f}"))
                 self.categories_table.setRowHeight(row, ROW_HEIGHT)
+
+    def _add_row(self, sale: Sale | None, invoice: Invoice | None):
+        """One sales_table row for a sale and/or its invoice. Either may be
+        missing: a plain sale has no invoice, and an invoice whose sale a Z
+        report purged has no sale — it's shown from its own frozen snapshot."""
+        row = self.sales_table.rowCount()
+        self.sales_table.insertRow(row)
+        if sale is not None:
+            self._sales_row_ids[row] = sale.id
+        if invoice is not None:
+            self._invoice_row_ids[row] = invoice.id
+
+        def fmt(dt):
+            return "/" if dt is None else dt.strftime("%d/%m/%Y %H:%M")
+
+        if invoice is not None:
+            number = invoice.invoice_number
+            created = invoice.issued_at
+            client_name = invoice.client_name or "/"
+            vat_num = invoice.client_vat_number or "/"
+            final_amount = invoice.final_amount or 0.0
+        else:
+            number, created, client_name, vat_num = sale.sale_number, sale.created_at, "/", "/"
+            final_amount = sale.final_amount
+        if sale is not None:
+            item_count = len(sale.items)
+            payment = sale.payment_method.upper()
+            updated_at = sale.updated_at
+        else:
+            snapshot = json.loads(invoice.line_items_snapshot) if invoice.line_items_snapshot else []
+            item_count = sum(1 for entry in snapshot if entry.get("type") == "item")
+            payment, updated_at = "/", None
+
+        values = [number, fmt(created), client_name, vat_num, str(item_count), payment,
+                  f"{final_amount:.2f}", fmt(updated_at)]
+        for col, value in enumerate(values):
+            self.sales_table.setItem(row, col, QTableWidgetItem(value))
+
+        if invoice is not None and invoice.sent_at is not None:
+            sent_font = QFont()
+            sent_font.setBold(True)
+            for col in range(self.sales_table.columnCount()):
+                self.sales_table.item(row, col).setFont(sent_font)
+
+        self.sales_table.setRowHeight(row, ROW_HEIGHT)
 
     def _print_x_report(self):
         with get_session() as session:
@@ -358,7 +401,38 @@ class ReportsScreen(QWidget):
                     f"Z report {z_report.report_number} was saved successfully, "
                     f"but printing failed:\n{e}"
                 )
-        self._load_report(invoices=self.invoices_only)
+        self._load_report()
+
+    def _mark_invoice_sent(self):
+        """Manually lock the selected invoice as sent — for one delivered
+        outside the ERP flow. Same effect as a successful send: it can no
+        longer be reopened/edited, and stops blocking the Z report."""
+        row = self.sales_table.currentRow()
+        if row == -1:
+            QMessageBox.information(self, "Mark Invoice Sent", "Select an invoice first.")
+            return
+        invoice_id = self._invoice_row_ids.get(row)
+        if invoice_id is None:
+            QMessageBox.information(self, "Mark Invoice Sent", "The selected sale is not an invoice.")
+            return
+        with get_session() as session:
+            invoice = session.get(Invoice, invoice_id)
+            if invoice.sent_at is not None:
+                QMessageBox.information(self, "Mark Invoice Sent", f"{invoice.invoice_number} is already sent.")
+                return
+            invoice_number = invoice.invoice_number
+
+        reply = QMessageBox.question(
+            self, "Mark Invoice Sent",
+            f"Are you sure you want to mark {invoice_number} as sent?\n\n"
+            "It will no longer be editable — corrections will need a credit note.",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        with get_session() as session:
+            SalesService.mark_invoice_id_sent(session, invoice_id)
+        self._load_report()
 
     def _warn_unsent_invoices(self, invoice_numbers: list[str]):
         QMessageBox.warning(
@@ -370,13 +444,14 @@ class ReportsScreen(QWidget):
         )
 
     def _confirm(self):
-        if self.sales_table.currentRow() != -1:
-            self._display_sale()
+        if self.sales_table.currentRow() != -1 and not self._display_sale():
+            return
         self.navigate.emit(0)
 
     def _invoices_only(self):
         self.invoices_only = not self.invoices_only
-        self._load_report(invoices=self.invoices_only)
+        self.invoices_btn.setChecked(self.invoices_only)
+        self._load_report()
 
     def _show_table(self, table: str):
         tables_list = [
@@ -391,10 +466,19 @@ class ReportsScreen(QWidget):
             else:
                 table_item.hide()
 
-    def _display_sale(self):
+    def _display_sale(self) -> bool:
+        """Show the selected row's sale on the POS. False (nothing shown) for
+        an invoice whose sale a Z report has already purged."""
         row = self.sales_table.currentRow()
         sale_id = self._sales_row_ids.get(row)
+        if sale_id is None and row in self._invoice_row_ids:
+            QMessageBox.information(
+                self, "Invoice",
+                "This invoice's sale was cleared by a Z report, so it can't be opened on the POS. Open it in the ERP.",
+            )
+            return False
         if sale_id is not None:
             self.sale_selected.emit(sale_id)
         self.sales_table.setCurrentCell(-1, -1)
+        return True
 

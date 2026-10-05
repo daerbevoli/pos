@@ -688,3 +688,89 @@ def test_calc_tax_extracts_vat_from_tax_inclusive_total():
 def test_calc_tax_rounds_to_2dp():
     result = calc_tax(10.0, 6)
     assert result == round(result, 2)
+
+
+# ── net_line_totals: discounts lower each line's taxable amount ──────────
+
+def _line(price, qty=1, tax=21, **kw):
+    return CartItem(product_id=1, product_name="X", product_barcode="", unit_price=price,
+                    quantity=qty, tax_rate=tax, **kw)
+
+
+def test_net_line_totals_without_discounts_are_line_totals():
+    a, b = _line(10.0), _line(5.0, qty=2)
+    assert Cart(entries=[a, b]).net_line_totals() == [(a, 10.0), (b, 10.0)]
+
+
+def test_item_discount_comes_off_that_item_only():
+    a, b = _line(10.0), _line(5.0)
+    cart = Cart(entries=[a, DiscountEntry(amount=2.0, label="promo", is_promo=True), b])
+    assert cart.net_line_totals() == [(a, 8.0), (b, 5.0)]
+
+
+def test_manual_discount_after_promo_still_targets_the_item():
+    a = _line(10.0)
+    cart = Cart(entries=[a, DiscountEntry(amount=1.0, label="promo", is_promo=True),
+                         DiscountEntry(amount=2.0, label="MANUAL DISCOUNT 2.00")])
+    assert cart.net_line_totals() == [(a, 7.0)]
+
+
+def test_section_discount_is_split_pro_rata_across_rates():
+    food, drink = _line(30.0, tax=6), _line(10.0, tax=21)
+    cart = Cart(entries=[food, drink, SubtotalMarker(), DiscountEntry(amount=4.0, label="MANUAL DISCOUNT 10%")])
+    assert cart.net_line_totals() == [(food, 27.0), (drink, 9.0)]
+
+
+def test_section_discount_only_covers_its_own_section():
+    a, b, c = _line(10.0), _line(10.0), _line(20.0)
+    cart = Cart(entries=[a, SubtotalMarker(), b, c, SubtotalMarker(),
+                         DiscountEntry(amount=3.0, label="MANUAL DISCOUNT 3.00")])
+    assert cart.net_line_totals() == [(a, 10.0), (b, 9.0), (c, 18.0)]
+
+
+def test_section_discount_rounding_remainder_keeps_the_total_exact():
+    items = [_line(1.0), _line(1.0), _line(1.0)]
+    cart = Cart(entries=[*items, SubtotalMarker(), DiscountEntry(amount=1.0, label="MANUAL DISCOUNT 1.00")])
+    nets = [net for _, net in cart.net_line_totals()]
+    assert nets == [0.67, 0.67, 0.66]
+    assert round(sum(nets), 2) == cart.total
+
+
+def test_refund_promo_discount_reduces_the_negative_line():
+    a = _line(10.0, qty=-1)
+    cart = Cart(entries=[a, DiscountEntry(amount=-2.0, label="promo", is_promo=True)], is_refund=True)
+    assert cart.net_line_totals() == [(a, -8.0)]
+
+
+# ── reversal links survive the snapshot round-trip ───────────────────────
+
+def test_snapshot_round_trip_keeps_reversal_link():
+    a, b = _line(5.0), _line(3.0)
+    a.has_reversal = True
+    reversal = _line(5.0, qty=-1, is_reversal=True, reversal_of=a)
+    cart = Cart.from_snapshot(Cart(entries=[a, b, reversal]).to_snapshot())
+    restored_a, _, restored_reversal = cart.entries
+    assert restored_reversal.reversal_of is restored_a
+
+
+def test_legacy_snapshot_without_link_is_matched_to_its_original():
+    a, b = _line(5.0), _line(3.0)
+    a.has_reversal = True
+    reversal = _line(5.0, qty=-1, is_reversal=True)
+    data = json.loads(Cart(entries=[a, b, reversal]).to_snapshot())
+    for raw in data:
+        raw.pop("reversal_of", None)
+    restored_a, _, restored_reversal = Cart.from_snapshot(json.dumps(data)).entries
+    assert restored_reversal.reversal_of is restored_a
+
+
+def test_legacy_identical_lines_each_get_their_own_reversal():
+    a1, a2 = _line(5.0), _line(5.0)
+    a1.has_reversal = a2.has_reversal = True
+    r1, r2 = _line(5.0, qty=-1, is_reversal=True), _line(5.0, qty=-1, is_reversal=True)
+    data = json.loads(Cart(entries=[a1, a2, r1, r2]).to_snapshot())
+    for raw in data:
+        raw.pop("reversal_of", None)
+    x1, x2, y1, y2 = Cart.from_snapshot(json.dumps(data)).entries
+    assert (y1.reversal_of, y2.reversal_of) == (x1, x2)
+    assert y1.reversal_of is x1 and y2.reversal_of is x2

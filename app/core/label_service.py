@@ -58,15 +58,39 @@ def _open(vendor_id: str, product_id: str):
         raise PrinterError(f"Could not connect to label printer: {e}") from e
 
 
-def _build_zpl(name: str, barcode: str, price: str, unit: str) -> str:
+def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | None = None) -> str:
     """
     Builds a ZPL label: name at top, EAN-13 barcode in middle, price at bottom.
     Label size: 56mm x 32mm @ 203dpi (448 x 256 dots).
     barcode must be exactly 12 digits (EAN-13 auto-computes the check digit).
+
+    With `promo` ({"price": new price text}), the bottom row becomes
+    "PROMO" on the left in a different font (^AD at 2x, vs the regular
+    ^A0), and on the right, flush with the label edge, the old price
+    struck through above the promo price — leaving the middle empty.
     """
     barcode_data = barcode[:12]
 
     unit_data = f" / {unit}" if unit in {"kg", "g", "l", "ml"} else ""
+    if promo is None:
+        barcode_y = 100
+        bottom = f"^FO30,210^A0N,40,40^FD{price}{unit_data}^FS"
+    else:
+        barcode_y = 88  # moved up to make room for the taller promo row
+        # Both prices are right-aligned (^FB ...,R) in one block; move or
+        # resize the block here and the strike line follows, since it's
+        # anchored to the block's right end where the old price ends. The
+        # unit only goes on the promo price, set narrower (34 wide) to fit.
+        price_x = LABEL_WIDTH_DOTS - 20 - 248  # block's left edge
+        price_block_width = 200
+        price_right = price_x + price_block_width  # where both prices end
+        strike_width = len(price) * 12  # ~12 dots/char at ^A0 24pt
+        bottom = f"""
+^FO20,203^ADN,36,20^FDPROMO^FS
+^FO{price_x},178^FB{price_block_width},1,0,R,0^A0N,24,24^FD{price}^FS
+^FO{price_right - strike_width},189^GB{strike_width},3,3^FS
+^FO{price_x},206^FB{price_block_width},1,0,R,0^A0N,44,34^FD{promo["price"]}{unit_data}^FS"""
+
     return f"""
 ^XA
 ^CI28
@@ -77,13 +101,27 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str) -> str:
 
 ^FO30,15^A0N,30,30^FB408,2,4,L,0^FD{name}^FS
 
-^FO60,100^BY3^BEN,45,Y,N^FD{barcode_data}^FS
-
-^FO30,210^A0N,40,40^FD{price}{unit_data}^FS
+^FO60,{barcode_y}^BY3^BEN,45,Y,N^FD{barcode_data}^FS
+{bottom}
 
 ^PQ1
 ^XZ
 """
+
+
+def promo_label_data(product: Product, currency: str) -> dict | None:
+    """{"price"} for the product's running promo, or None. The
+    promo price uses the same rule as the till (CartItem.promo_discount):
+    percent off, or a fixed amount off per unit, never below 0."""
+    promo_item = product.active_promo_item
+    if promo_item is None:
+        return None
+    value = promo_item.discount_value
+    if promo_item.discount_type == "percent":
+        new_price = round(product.price * (1 - value / 100), 2)
+    else:
+        new_price = round(max(product.price - value, 0.0), 2)
+    return {"price": f"{currency} {new_price:.2f}"}
 
 
 class LabelPrinterService:
@@ -111,5 +149,8 @@ class LabelPrinterService:
         currency = settings.get("currency_symbol", "€")
         vendor_id = settings.get("label_printer_vendor_id", "")
         product_id = settings.get("label_printer_product_id", "")
-        zpl = _build_zpl(product.name, product.barcode or "", f"{currency} {product.price:.2f}", product.unit)
+        zpl = _build_zpl(
+            product.name, product.barcode or "", f"{currency} {product.price:.2f}", product.unit,
+            promo=promo_label_data(product, currency),
+        )
         LabelPrinterService._print_zpl(vendor_id, product_id, zpl)

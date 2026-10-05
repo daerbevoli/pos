@@ -142,12 +142,10 @@ class POSScreen(QWidget):
             return True
         return False
 
-    def _guard_reopened_ticket(self) -> bool:
-        """Blocks quantity changes on a reopened ticket.
-        Returns True (and shows an overlay) if the action should be blocked."""
-        if self.reopened_ticket:
-            return True
-        return False
+    def _guard_locked_line(self, entry) -> bool:
+        """Blocks quantity changes on a line already saved on a reopened sale.
+        Returns True if the action should be blocked."""
+        return isinstance(entry, CartItem) and entry.locked
 
     # ── Setup ────────────────────────────────────────────────────────────
 
@@ -871,9 +869,12 @@ class POSScreen(QWidget):
         if self.payment_in_progress and not isinstance(entry, PaymentEntry):
             self._show_overlay("Finish or remove the pending payment first", kind="error")
             return
+        # Only lines already saved on the reopened sale need a reversal;
+        # anything added since reopening isn't on the record yet, so it's
+        # just deleted.
         needs_reversal = (
-            self._current_sale_id is not None
-            and isinstance(entry, CartItem)
+            isinstance(entry, CartItem)
+            and entry.locked
             and entry.quantity is not None
             and not entry.is_reversal
         )
@@ -1395,6 +1396,11 @@ class POSScreen(QWidget):
                 )
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
+            # Lines already on the saved sale keep their quantity; only
+            # items added after reopening can be increased/decreased.
+            for entry in self.cart.entries:
+                if isinstance(entry, CartItem):
+                    entry.locked = True
 
         self.sale_finished     = False
         self._frozen_breakdown = []
@@ -1584,12 +1590,14 @@ class POSScreen(QWidget):
         return entry.product_id if isinstance(entry, CartItem) else None
 
     def _increase_product(self):
-        if self._guard_payment_in_progress() or self._guard_reopened_ticket():
+        if self._guard_payment_in_progress():
             return
         idx = self._get_selected_entry_index()
         if idx is None:
             return
         entry = self.cart.entries[idx]
+        if self._guard_locked_line(entry):
+            return
         if isinstance(entry, CartItem) and entry.quantity is not None and not entry.is_reversal and not entry.has_reversal:
             if entry.unit in WEIGHT_UNITS:
                 return
@@ -1599,12 +1607,14 @@ class POSScreen(QWidget):
             self._refresh_cart()
 
     def _decrease_product(self):
-        if self._guard_payment_in_progress() or self._guard_reopened_ticket():
+        if self._guard_payment_in_progress():
             return
         idx = self._get_selected_entry_index()
         if idx is None:
             return
         entry = self.cart.entries[idx]
+        if self._guard_locked_line(entry):
+            return
         if (isinstance(entry, CartItem) and entry.quantity is not None
                 and not entry.is_reversal and abs(entry.quantity) > 1):
             if entry.unit in WEIGHT_UNITS:

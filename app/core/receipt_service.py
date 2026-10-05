@@ -112,6 +112,22 @@ def _print_logo(printer, settings: dict):
     except Exception:
         logger.exception("Failed to print logo image at %s", logo_path)
 
+def _left_right(left: str, right: str, width: int = LINE_WIDTH) -> str:
+    """One line with `left` flush left and `right` flush right; truncates `left` if both don't fit."""
+    left = left[: max(0, width - len(right) - 1)]
+    return f"{left:<{width - len(right)}}{right}\n"
+
+
+def _print_receipt_header(printer, sale: Sale):
+    printer.set(align="left", bold=False, width=1, height=1, custom_size=True)
+    doc_number = sale.invoice.invoice_number if sale.invoice else sale.sale_number
+    printer.text(_left_right(doc_number, sale.created_at.strftime('%d-%m-%Y %H:%M')))
+    if sale.invoice:
+        printer.set(bold=True)
+        printer.text("THIS IS NOT AN INVOICE\n")
+        printer.set(bold=False)
+    printer.text("-" * LINE_WIDTH + "\n")
+
 
 def _wrap_name(name: str) -> list[str]:
     """Wrap a name to fit NAME_COL, preferring word breaks; overflow spills to extra lines."""
@@ -177,6 +193,7 @@ def _print_line_items(printer, cart: Cart):
             )
             for extra in label_lines[1:]:
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")
+            printer.set(bold=False)
     printer.text("-" * LINE_WIDTH + "\n")
 
 
@@ -200,16 +217,13 @@ def _print_payment_breakdown(printer, sale: Sale):
     printer.text("-" * LINE_WIDTH + "\n")
 
 
-def _print_footer(printer, document_number: str, created_at, footer_text: str):
+def _print_footer(printer, footer_text: str):
     printer.set(align="center")
-    printer.text(f"\n{document_number}\n{created_at.strftime('%d-%m-%Y %H:%M')}\n")
     if footer_text:
         printer.text(f"\n{footer_text}\n")
     printer.text("\n")
 
 def _print_company_info(printer, settings):
-    printer.set(align="center", bold=True, width=1, height=1, custom_size=True)
-    printer.text(f"{settings.get('store_name', '')}\n")
     printer.set(align="center", bold=False, width=1, height=1, custom_size=True)
     if settings.get("store_address"):
         printer.text(f"{settings['store_address']}\n")
@@ -223,11 +237,10 @@ AMT_COL = (LINE_WIDTH - RATE_COL) // 3  # 14 — Base / Tax / Total (incl.) colu
 
 
 def _print_report_header(printer, title: str, report_number, period_start, period_end):
-    printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
-    printer.text(f"{title}\n")
+    printer.set(align="left", bold=True, width=1, height=1, custom_size=True)
+    printer.text(_left_right(title, str(report_number)))
+    printer.text("-" * LINE_WIDTH + "\n")
     printer.set(align="left", bold=False, width=1, height=1, custom_size=True)
-    if report_number:
-        printer.text(f"{report_number}\n")
     printer.text(
         f"{period_start.strftime('%d/%m/%Y %H:%M')}\n{period_end.strftime('%d/%m/%Y %H:%M')}\n"
     )
@@ -241,10 +254,13 @@ def _print_report_totals(printer, totals: dict):
     printer.text(f"{'Payment':<{LABEL_COL}}{'Amount':>{TOTAL_COL}}\n")
     printer.set(bold=False)
     printer.text(f"{'TOTAL':<{LABEL_COL}} {totals['final_amount']:>10.2f}\n")
+    # Cash and Card always print, in that order (0.00 if unused); any other
+    # method that was actually used follows them.
+    amounts = {"cash": 0.0, "card": 0.0}
     for leg in totals["payment_breakdown"]:
-        printer.text(
-            f"{leg['method'].capitalize():<{LABEL_COL}}{leg['amount']:>{TOTAL_COL}.2f}\n"
-        )
+        amounts[leg["method"]] = amounts.get(leg["method"], 0.0) + leg["amount"]
+    for method, amount in amounts.items():
+        printer.text(f"{method.capitalize():<{LABEL_COL}}{amount:>{TOTAL_COL}.2f}\n")
     printer.text("-" * LINE_WIDTH + "\n")
 
     printer.set(bold=True)
@@ -252,22 +268,20 @@ def _print_report_totals(printer, totals: dict):
     printer.text("-" * LINE_WIDTH + "\n")
 
     printer.text(f"{'Rate':<{RATE_COL}}{'Base':>{AMT_COL}}{'Tax':>{AMT_COL}}{'Total':>{AMT_COL}}\n")
-    printer.set(bold=False)
-    total_base = total_tax = total_incl = 0.0
-    for rate, amounts in totals["vat_breakdown"].items():
-        total_base += amounts["base"]
-        total_tax += amounts["tax"]
-        total_incl += amounts["total"]
-        printer.text(
-            f"{rate + '%':<{RATE_COL}}{amounts['base']:>{AMT_COL}.2f}"
-            f"{amounts['tax']:>{AMT_COL}.2f}{amounts['total']:>{AMT_COL}.2f}\n"
-        )
-    printer.set(bold=True)
+    vat_rows = totals["vat_breakdown"].items()
+    total_base = sum(amounts["base"] for _, amounts in vat_rows)
+    total_tax = sum(amounts["tax"] for _, amounts in vat_rows)
+    total_incl = sum(amounts["total"] for _, amounts in vat_rows)
     printer.text(
         f"{'Total':<{RATE_COL}}{total_base:>{AMT_COL}.2f}"
         f"{total_tax:>{AMT_COL}.2f}{total_incl:>{AMT_COL}.2f}\n"
     )
     printer.set(bold=False)
+    for rate, amounts in vat_rows:
+        printer.text(
+            f"{rate + '%':<{RATE_COL}}{amounts['base']:>{AMT_COL}.2f}"
+            f"{amounts['tax']:>{AMT_COL}.2f}{amounts['total']:>{AMT_COL}.2f}\n"
+        )
     printer.text("-" * LINE_WIDTH + "\n")
 
     _print_categories(printer, totals)
@@ -290,14 +304,43 @@ def _print_categories(printer, totals: dict):
     printer.text("-" * LINE_WIDTH + "\n")
 
 
+def _print_discounts(printer, totals: dict):
+    discounts = totals["discounts"]
+    printer.set(bold=True)
+    printer.text(f"{'Discounts':<{LABEL_COL}}{'Amount':>{TOTAL_COL}}\n")
+    printer.set(bold=False)
+    printer.text(f"{'Manual':<{LABEL_COL}}{-discounts['manual']:>{TOTAL_COL}.2f}\n")
+    printer.text(f"{'Promo':<{LABEL_COL}}{-discounts['promo']:>{TOTAL_COL}.2f}\n")
+    printer.set(bold=True)
+    printer.text(f"{'Total':<{LABEL_COL}}{-(discounts['manual'] + discounts['promo']):>{TOTAL_COL}.2f}\n")
+    printer.set(bold=False)
+    printer.text("-" * LINE_WIDTH + "\n")
+
+
+def _print_mistakes(printer, totals: dict):
+    """Lines voided on reopened sales / unsent invoices — not refunds or credit notes."""
+    printer.set(bold=True)
+    printer.text(f"{'Mistakes':<{CAT_NAME_COL}}{'Qty':>{CAT_QTY_COL}}{'Amount':>{CAT_AMT_COL}}\n")
+    printer.set(bold=False)
+    total = 0.0
+    for m in totals["mistakes"]:
+        qty = f"{m['quantity']:g}{m['unit']}" if m["unit"] in WEIGHT_UNITS else f"{m['quantity']:g}"
+        printer.text(
+            f"{m['name'][:CAT_NAME_COL - 1]:<{CAT_NAME_COL}}{qty:>{CAT_QTY_COL}}{-m['amount']:>{CAT_AMT_COL}.2f}\n"
+        )
+        total += m["amount"]
+    printer.set(bold=True)
+    printer.text(f"{'Total':<{CAT_NAME_COL + CAT_QTY_COL}}{-total:>{CAT_AMT_COL}.2f}\n")
+    printer.set(bold=False)
+    printer.text("-" * LINE_WIDTH + "\n")
+
+
 def _print_b2b_info(printer, invoice: Invoice):
     printer.set(align="left", bold=True, width=1, height=1)
     printer.text(f"{invoice.client_name}\n")
     printer.text(f"{invoice.full_address}\n")
     printer.text(f"{invoice.client_vat_number}\n")
-    printer.text("-" * LINE_WIDTH + "\n")
-    doc_label = "Credit note" if invoice.is_credit_note else "Invoice"
-    printer.text(f"{doc_label}: {invoice.invoice_number}\nTHIS IS NOT AN INVOICE")
+    printer.set(bold=False)
     printer.text("-" * LINE_WIDTH + "\n")
 
 
@@ -337,11 +380,11 @@ class ReceiptService:
             _print_logo(printer, settings)
             if sale.invoice:
                 _print_b2b_info(printer, sale.invoice)
-            ticket_num = sale.invoice.invoice_number if sale.invoice else sale.sale_number
+            _print_receipt_header(printer, sale)
             _print_line_items(printer, Cart.from_snapshot(sale.cart_snapshot))
             _print_totals(printer, sale.tax_amount, sale.final_amount)
             _print_payment_breakdown(printer, sale)
-            _print_footer(printer, ticket_num, sale.created_at, settings.get("receipt_footer", ""))
+            _print_footer(printer, settings.get("receipt_footer", ""))
             _print_company_info(printer, settings)
 
             printer.cut(mode="PART")
@@ -358,17 +401,20 @@ class ReceiptService:
         settings = SettingsService.get_all(session)
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
-            _print_company_info(printer, settings)
-            printer.text("\n")
-            _print_report_header(printer, "X REPORT", None, totals["period_start"], totals["period_end"])
+            _print_report_header(printer, "X-REPORT", totals["report_number"], totals["period_start"], totals["period_end"])
             _print_report_totals(printer, totals)
+            _print_discounts(printer, totals)
+            _print_mistakes(printer, totals)
+            printer.text("\n")
             printer.text("\n")
 
-            printer.cut()
+            printer.text(f"Printed on {totals["period_end"]}")
+
+            printer.cut(mode="PART")
         except PrinterError:
             raise
         except Exception as e:
-            logger.exception("Failed to print X report")
+            logger.exception("Failed to print X-report")
             raise PrinterError(f"Printer connected but failed to print: {e}") from e
         finally:
             printer.close()
@@ -385,18 +431,25 @@ class ReceiptService:
                 "vat_breakdown": json.loads(z_report.vat_breakdown) if z_report.vat_breakdown else {},
                 "category_breakdown": json.loads(z_report.category_breakdown) if z_report.category_breakdown else {},
                 "payment_breakdown": json.loads(z_report.payment_breakdown) if z_report.payment_breakdown else [],
+                # Z reports closed before these columns existed have NULL here.
+                "discounts": json.loads(z_report.discounts) if z_report.discounts else {"manual": 0.0, "promo": 0.0},
+                "mistakes": json.loads(z_report.mistakes) if z_report.mistakes else [],
             }
-            _print_company_info(printer, settings)
             printer.text("\n")
-            _print_report_header(printer, "Z REPORT", z_report.report_number, z_report.period_start, z_report.period_end)
+            _print_report_header(printer, "Z-REPORT", z_report.report_number, z_report.period_start, z_report.period_end)
             _print_report_totals(printer, totals)
+            _print_discounts(printer, totals)
+            _print_mistakes(printer, totals)
+            printer.text("\n")
             printer.text("\n")
 
-            printer.cut()
+            printer.text(f"Printed on {totals["period_end"]}")
+
+            printer.cut(mode="PART")
         except PrinterError:
             raise
         except Exception as e:
-            logger.exception("Failed to print Z report %s", z_report.report_number)
+            logger.exception("Failed to print Z-report %s", z_report.report_number)
             raise PrinterError(f"Printer connected but failed to print: {e}") from e
         finally:
             printer.close()

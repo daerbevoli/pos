@@ -30,7 +30,8 @@ class CartItem(ReceiptEntry):
     base_unit_price: float = 0.0  # the domestic (VAT-incl.) price; unit_price may be netted down by retax_for_client()
     is_reversal: bool = False  # True for a line that reverses an earlier line on a reopened sale
     has_reversal: bool = False  # True once this original line has been reversed (blocks reversing it again)
-    reversal_of: "CartItem | None" = None  # the original line this reverses; live-session only, not persisted
+    reversal_of: "CartItem | None" = None  # the original line this reverses; saved by position in to_snapshot()
+    locked: bool = False  # True for a line already saved on a reopened sale (qty can't change); live-session only, not persisted
     is_open_price: bool = False  # True = unit_price is typed in per sale rather than fixed on the product
     promo_name: str | None = None    # label of the Promo attached to the product when this line was added, if any
     promo_type: str | None = None    # "percent" | "fixed" | None — copied from Promo.discount_type
@@ -128,6 +129,44 @@ class Cart:
     @property
     def remaining_due(self) -> float:
         return round(self.total - self.paid_total, 2)
+
+    def net_line_totals(self) -> list[tuple["CartItem", float]]:
+        """Every CartItem with its line total after the discounts that apply
+        to it — the amount VAT is actually due on (a discount the customer
+        gets lowers the taxable amount; EU VAT Directive art. 79(b)).
+
+        Mirrors how POSScreen._get_discount_base() aims a discount: one
+        right after an item (promo or manual, skipping earlier discount
+        rows) comes off that item; one right after a SubtotalMarker is
+        spread over that section's items in proportion to their amounts,
+        the last item taking the rounding remainder. The nets therefore
+        always sum to exactly self.total."""
+        items = [e for e in self.entries if isinstance(e, CartItem)]
+        net = {id(item): item.line_total for item in items}
+        section: list[CartItem] = []
+        target: list[CartItem] = []  # what the next DiscountEntry applies to
+        for entry in self.entries:
+            if isinstance(entry, CartItem):
+                section.append(entry)
+                target = [entry]
+            elif isinstance(entry, SubtotalMarker):
+                target, section = section, []
+            elif isinstance(entry, DiscountEntry):
+                recipients = target or items  # a discount with nothing before it: spread over the cart
+                if not recipients:
+                    continue
+                base = sum(net[id(item)] for item in recipients)
+                remaining = round(entry.amount, 2)
+                for i, item in enumerate(recipients):
+                    if i == len(recipients) - 1:
+                        share = remaining
+                    elif base:
+                        share = round(entry.amount * net[id(item)] / base, 2)
+                    else:
+                        share = round(entry.amount / len(recipients), 2)
+                    net[id(item)] = round(net[id(item)] - share, 2)
+                    remaining = round(remaining - share, 2)
+        return [(item, net[id(item)]) for item in items]
 
     @property
     def item_count(self) -> int:
@@ -232,7 +271,13 @@ class Cart:
         self.entries.clear()
 
     def to_snapshot(self) -> str:
-        """Serialize entries in order, exactly as displayed, for later replay."""
+        """Serialize entries in order, exactly as displayed, for later replay.
+        A reversal's link to the line it voids is saved as that line's
+        position among the items ("reversal_of"), so a reopened ticket can
+        still delete the reversal and un-void the original."""
+        item_positions = {
+            id(e): i for i, e in enumerate(e for e in self.entries if isinstance(e, CartItem))
+        }
         data = []
         for entry in self.entries:
             if isinstance(entry, CartItem):
@@ -249,6 +294,7 @@ class Cart:
                     "base_unit_price": entry.base_unit_price,
                     "is_reversal": entry.is_reversal,
                     "has_reversal": entry.has_reversal,
+                    "reversal_of": item_positions.get(id(entry.reversal_of)),
                     "is_open_price": entry.is_open_price,
                     "promo_name": entry.promo_name,
                     "promo_type": entry.promo_type,
@@ -267,10 +313,12 @@ class Cart:
     def from_snapshot(cls, snapshot: str) -> "Cart":
         """Rebuild a cart from a string produced by to_snapshot()."""
         entries: list[ReceiptEntry] = []
+        items: list[CartItem] = []
+        reversal_links: list[tuple[CartItem, int | None]] = []
         for raw in json.loads(snapshot) if snapshot else []:
             kind = raw.get("type")
             if kind == "item":
-                entries.append(CartItem(
+                item = CartItem(
                     product_id=raw["product_id"],
                     product_name=raw["product_name"],
                     product_barcode=raw["product_barcode"],
@@ -286,14 +334,47 @@ class Cart:
                     promo_name=raw.get("promo_name"),
                     promo_type=raw.get("promo_type"),
                     promo_value=raw.get("promo_value", 0.0),
-                ))
+                )
+                entries.append(item)
+                items.append(item)
+                if item.is_reversal:
+                    reversal_links.append((item, raw.get("reversal_of")))
             elif kind == "discount":
                 entries.append(DiscountEntry(
                     amount=raw["amount"], label=raw["label"], is_promo=raw.get("is_promo", False),
                 ))
             elif kind == "subtotal":
                 entries.append(SubtotalMarker())
+        _relink_reversals(items, reversal_links)
         return cls(entries=entries)
+
+
+def _relink_reversals(items: list[CartItem], links: list[tuple[CartItem, int | None]]):
+    """Restore each reversal's reversal_of after from_snapshot(). Uses the
+    saved position when there is one; snapshots saved before it existed
+    fall back to the earliest still-unclaimed reversed line with the same
+    product, price and opposite quantity — identical lines are
+    interchangeable, so whichever one is picked voids the same amount."""
+    claimed: set[int] = set()
+    for reversal, position in links:
+        original = None
+        if position is not None and 0 <= position < len(items) and items[position].has_reversal:
+            original = items[position]
+        else:
+            original = next(
+                (
+                    item for item in items
+                    if item.has_reversal and not item.is_reversal and id(item) not in claimed
+                    and item.product_id == reversal.product_id
+                    and item.unit_price == reversal.unit_price
+                    and item.quantity is not None and reversal.quantity is not None
+                    and item.quantity == -reversal.quantity
+                ),
+                None,
+            )
+        if original is not None:
+            reversal.reversal_of = original
+            claimed.add(id(original))
 
 
 @dataclass
@@ -377,40 +458,33 @@ class InvoiceLine:
     is_discount: bool = False
 
 def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
+    """One line per item, at its full unit price with every discount that
+    applies to it — promo and its share of manual ones — folded into
+    discount_percent, so the ERP computes VAT on the discounted amount, the
+    same as the POS (Cart.net_line_totals). Manual discounts therefore no
+    longer go out as separate lines."""
     cart = Cart.from_snapshot(invoice.line_items_snapshot)
     lines = []
-    for entry in cart.entries:
-        if isinstance(entry, CartItem):
-            if entry.quantity is None:
-                continue
-            # A line voided on a reopened sale and its reversal net to zero
-            # (same price/VAT, negated quantity), so neither belongs on the
-            # document — and keeping them breaks the credit-note abs() below.
-            if entry.has_reversal or entry.is_reversal:
-                continue
-            tax = calc_tax(entry.line_total, entry.tax_rate)
-            gross = entry.unit_price * entry.quantity
-            lines.append(InvoiceLine(
-                product_name=entry.product_name,
-                quantity=entry.quantity,
-                unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 2),
-                unit=entry.unit,
-                tax_rate=entry.tax_rate,
-                line_total_excl_tax=round(entry.line_total - tax, 2),
-                discount_percent=round(entry.promo_discount / gross * 100, 2) if gross else 0.0,
-                is_discount=False
-            ))
-        elif isinstance(entry, DiscountEntry) and entry.label.startswith("MANUAL DISCOUNT"):
-            lines.append(InvoiceLine(
-                product_name=entry.label,
-                quantity=1,
-                unit_price_excl_tax=entry.amount,
-                unit="pcs",
-                tax_rate=0,
-                line_total_excl_tax=entry.amount,
-                discount_percent=0.0,
-                is_discount=True
-            ))
+    for entry, net_total in cart.net_line_totals():
+        if entry.quantity is None:
+            continue
+        # A line voided on a reopened sale and its reversal net to zero
+        # (same price/VAT, negated quantity), so neither belongs on the
+        # document — and keeping them breaks the credit-note abs() below.
+        if entry.has_reversal or entry.is_reversal:
+            continue
+        tax = calc_tax(net_total, entry.tax_rate)
+        gross = entry.line_total
+        lines.append(InvoiceLine(
+            product_name=entry.product_name,
+            quantity=entry.quantity,
+            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 2),
+            unit=entry.unit,
+            tax_rate=entry.tax_rate,
+            line_total_excl_tax=round(net_total - tax, 2),
+            discount_percent=round((gross - net_total) / gross * 100, 2) if gross else 0.0,
+            is_discount=False
+        ))
     return lines
 
 
@@ -498,14 +572,23 @@ class SalesService:
         session.add(sale)
         session.flush()  # Get sale.id without committing
 
-        total_tax = 0.0
-        for entry in cart.entries:
+        sale.tax_amount = SalesService._add_sale_items(session, sale, cart)
+        session.commit()
+        session.refresh(sale)
+        return sale
 
-            if not isinstance(entry, CartItem):
-                continue
-            tax_amount = calc_tax(entry.line_total, entry.tax_rate)
+    @staticmethod
+    def _add_sale_items(session: Session, sale: Sale, cart: Cart) -> float:
+        """Adds a SaleItem per cart line and moves its stock; returns the
+        sale's total VAT. Each line's VAT is on its amount after the
+        discounts that apply to it (Cart.net_line_totals) — a discount the
+        customer gets lowers the VAT due — so line_total is that net amount
+        and discount everything taken off it (promo + its share of manual)."""
+        total_tax = 0.0
+        for entry, net_total in cart.net_line_totals():
+            tax_amount = calc_tax(net_total, entry.tax_rate)
             total_tax += tax_amount
-            sale_item = SaleItem(
+            session.add(SaleItem(
                 sale_id=sale.id,
                 product_id=entry.product_id,
                 product_name=entry.product_name,
@@ -514,24 +597,17 @@ class SalesService:
                 unit_price=entry.unit_price,
                 tax_rate=entry.tax_rate,
                 tax_amount=tax_amount,
-                discount=entry.promo_discount,
-                line_total=entry.line_total
-            )
-            session.add(sale_item)
-
-            # Deduct stock
+                discount=round(entry.line_total - net_total, 2),
+                line_total=net_total,
+            ))
             ProductService.adjust_stock(
                 session,
                 product_id=entry.product_id,
                 quantity_change=-entry.quantity,
                 movement_type="sale",
-                reference=sale_number
+                reference=sale.sale_number,
             )
-
-        sale.tax_amount = round(total_tax, 2)
-        session.commit()
-        session.refresh(sale)
-        return sale
+        return round(total_tax, 2)
 
     @staticmethod
     def _new_invoice(sale: Sale, client: Client, cart: Cart) -> Invoice:
@@ -616,35 +692,7 @@ class SalesService:
         if notes:
             sale.notes = notes
 
-        total_tax = 0.0
-        for entry in cart.entries:
-            if not isinstance(entry, CartItem):
-                continue
-            tax_amount = calc_tax(entry.line_total, entry.tax_rate)
-            total_tax += tax_amount
-            sale_item = SaleItem(
-                sale_id=sale.id,
-                product_id=entry.product_id,
-                product_name=entry.product_name,
-                product_barcode=entry.product_barcode,
-                quantity=entry.quantity,
-                unit_price=entry.unit_price,
-                tax_rate=entry.tax_rate,
-                tax_amount=tax_amount,
-                discount=entry.promo_discount,
-                line_total=entry.line_total
-            )
-            session.add(sale_item)
-
-            ProductService.adjust_stock(
-                session,
-                product_id=entry.product_id,
-                quantity_change=-entry.quantity,
-                movement_type="sale",
-                reference=sale.sale_number,
-            )
-
-        sale.tax_amount = round(total_tax, 2)
+        sale.tax_amount = SalesService._add_sale_items(session, sale, cart)
         sale.updated_at = datetime.now()
 
         # Not-yet-sent invoice: keep its frozen snapshot in step with the
@@ -682,12 +730,21 @@ class SalesService:
         sale = session.query(Sale).filter_by(id=sale_id).first()
         if not sale or not sale.invoice:
             raise ValueError(f"Sale {sale_id} has no invoice.")
-        if sale.invoice.sent_at is not None:
-            return sale.invoice
-        sale.invoice.sent_at = datetime.now()
+        return SalesService.mark_invoice_id_sent(session, sale.invoice.id)
+
+    @staticmethod
+    def mark_invoice_id_sent(session: Session, invoice_id: int) -> Invoice:
+        """mark_invoice_sent() by the invoice's own id — for an invoice whose
+        sale a Z report has already purged (sale_id is NULL)."""
+        invoice = session.get(Invoice, invoice_id)
+        if invoice is None:
+            raise ValueError(f"Invoice {invoice_id} not found.")
+        if invoice.sent_at is not None:
+            return invoice
+        invoice.sent_at = datetime.now()
         session.commit()
-        session.refresh(sale.invoice)
-        return sale.invoice
+        session.refresh(invoice)
+        return invoice
 
     @staticmethod
     def void_sale(session: Session, sale_id: int, notes: str = None) -> bool:
@@ -749,36 +806,7 @@ class SalesService:
         session.add(sale)
         session.flush()
 
-        total_tax = 0.0
-        for entry in cart.entries:
-
-            if not isinstance(entry, CartItem):
-                continue
-            tax_amount = calc_tax(entry.line_total, entry.tax_rate)
-            total_tax += tax_amount
-            sale_item = SaleItem(
-                sale_id=sale.id,
-                product_id=entry.product_id,
-                product_name=entry.product_name,
-                product_barcode=entry.product_barcode,
-                quantity=entry.quantity,
-                unit_price=entry.unit_price,
-                tax_rate=entry.tax_rate,
-                tax_amount=tax_amount,
-                discount=entry.promo_discount,
-                line_total=entry.line_total
-            )
-
-            session.add(sale_item)
-            ProductService.adjust_stock(
-                session,
-                product_id=entry.product_id,
-                quantity_change=-entry.quantity,
-                movement_type="sale",
-                reference=sale_number
-            )
-
-        sale.tax_amount = round(total_tax, 2)
+        sale.tax_amount = SalesService._add_sale_items(session, sale, cart)
 
         invoice = SalesService._new_invoice(sale, client, cart)
         session.add(invoice)
@@ -814,6 +842,21 @@ class SalesService:
             "cash_sales": sum(s.final_amount for s in sales if s.payment_method == "cash"),
             "card_sales": sum(s.final_amount for s in sales if s.payment_method == "card"),
         }
+
+    @staticmethod
+    def get_invoices_range(session: Session, start: date, end: date) -> list[Invoice]:
+        """Invoices/credit notes issued in [start, end], newest first. Read
+        from the invoices table itself, not through sales: a Z report purges
+        the sales but keeps the invoices (their sale_id becomes NULL)."""
+        return (
+            session.query(Invoice)
+            .filter(
+                func.date(Invoice.issued_at) >= start,
+                func.date(Invoice.issued_at) <= end,
+            )
+            .order_by(Invoice.issued_at.desc())
+            .all()
+        )
 
     @staticmethod
     def get_sales_range(session: Session, start: date, end: date) -> list[Sale]:

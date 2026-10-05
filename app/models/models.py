@@ -260,6 +260,8 @@ class ZReport(Base):
     vat_breakdown = Column(Text, nullable=True)      # JSON: {"0": {"base":.., "tax":..}, "6": {...}, "21": {...}}
     category_breakdown = Column(Text, nullable=True)
     payment_breakdown = Column(Text, nullable=True)  # JSON: [{"method": "cash", "amount": ..}, ...]
+    discounts = Column(Text, nullable=True)  # JSON: {"manual": .., "promo": ..}
+    mistakes = Column(Text, nullable=True)   # JSON: [{"name", "quantity", "unit", "amount"}, ...] — lines voided on reopened sales
 
     def __repr__(self):
         return f"<ZReport {self.report_number} €{self.final_amount:.2f}>"
