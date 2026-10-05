@@ -5,9 +5,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from app.constants import (
-    BUTTON_HEIGHT_SM,
-    DIALOG_WIDTH_SM,
-    NUMPAD_KEY_HEIGHT,
+    NUMPAD_DIALOG_KEY_HEIGHT,
+    NUMPAD_DIALOG_OK_HEIGHT,
+    NUMPAD_DIALOG_WIDTH,
     SPACING_MD,
     SPACING_SM,
 )
@@ -21,7 +21,7 @@ class NumpadDialog(QDialog):
     def __init__(self, title="Enter value", initial="", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setMinimumWidth(DIALOG_WIDTH_SM)
+        self.setMinimumWidth(NUMPAD_DIALOG_WIDTH)
         self.value = None
         self._build_ui(initial)
         self.enter_pressed.connect(self._confirm)
@@ -40,7 +40,7 @@ class NumpadDialog(QDialog):
         self.display = QLineEdit(initial)
         self.display.setObjectName("amountInput")
         self.display.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.display.setMinimumHeight(NUMPAD_KEY_HEIGHT)
+        self.display.setMinimumHeight(NUMPAD_DIALOG_KEY_HEIGHT)
         layout.addWidget(self.display)
 
         grid = QGridLayout()
@@ -55,7 +55,7 @@ class NumpadDialog(QDialog):
         for label, r, c in keys:
             btn = QPushButton(label)
             btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
-            btn.setMinimumHeight(NUMPAD_KEY_HEIGHT)
+            btn.setMinimumHeight(NUMPAD_DIALOG_KEY_HEIGHT)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.clicked.connect(lambda _, l=label: self._press(l))
             grid.addWidget(btn, r, c)
@@ -74,7 +74,7 @@ class NumpadDialog(QDialog):
 
         ok = QPushButton("OK")
         ok.setObjectName("okBtn")
-        ok.setMinimumHeight(BUTTON_HEIGHT_SM)
+        ok.setMinimumHeight(NUMPAD_DIALOG_OK_HEIGHT)
         ok.clicked.connect(self._confirm)
         btn_row.addWidget(ok)
 

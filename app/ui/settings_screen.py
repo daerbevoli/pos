@@ -15,7 +15,7 @@ from app.core.label_service import LabelPrinterService
 from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.settings_service import SettingsService
-from app.constants import BUTTON_HEIGHT_LG, COLOR_BORDER_LIGHT, LOGO_PREVIEW_SIZE
+from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_OK_BUTTON_HEIGHT
 from app.ui.dialogs.category_dialog import CategoryDialog
 from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
@@ -87,7 +87,7 @@ class SettingsScreen(QWidget):
         self.logo_preview = QLabel()
         self.logo_preview.setFixedSize(*LOGO_PREVIEW_SIZE)
         self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logo_preview.setStyleSheet(f"border: 1px solid {COLOR_BORDER_LIGHT};")
+        self.logo_preview.setStyleSheet(f"border: 1px solid {COLOR_LOGO_PREVIEW_BORDER};")
 
         logo_row = QHBoxLayout()
         logo_row.addWidget(self.browse_logo)
@@ -220,7 +220,7 @@ class SettingsScreen(QWidget):
         erp_row.addWidget(erp_group)
 
         ok_btn = FunctionButton("OK", "okBtn")
-        ok_btn.setFixedHeight(BUTTON_HEIGHT_LG)
+        ok_btn.setFixedHeight(SETTINGS_OK_BUTTON_HEIGHT)
         ok_btn.clicked.connect(self._on_ok)
         layout.addWidget(ok_btn)
         layout.addStretch()

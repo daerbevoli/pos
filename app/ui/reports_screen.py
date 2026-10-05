@@ -24,7 +24,7 @@ from app.core.report_service import (
 )
 from app.models.models import Invoice, Sale
 from app.utils.utils import FunctionButton
-from app.constants import BUTTON_HEIGHT, ROW_HEIGHT
+from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT
 
 
 def _make_card(title: str, value: str, bold: bool = False) -> QGroupBox:
@@ -69,13 +69,13 @@ class ReportsScreen(QWidget):
         controls.addWidget(QLabel("From:"))
         self.date_from = QDateEdit(QDate.currentDate())
         self.date_from.setCalendarPopup(True)
-        self.date_from.setFixedHeight(BUTTON_HEIGHT)
+        self.date_from.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         controls.addWidget(self.date_from)
 
         controls.addWidget(QLabel("To:"))
         self.date_to = QDateEdit(QDate.currentDate())
         self.date_to.setCalendarPopup(True)
-        self.date_to.setFixedHeight(BUTTON_HEIGHT)
+        self.date_to.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         controls.addWidget(self.date_to)
 
         self._range_group = QButtonGroup(self)
@@ -85,7 +85,7 @@ class ReportsScreen(QWidget):
         self.today_btn.setObjectName("salesBtn")
         self.today_btn.setCheckable(True)
         self.today_btn.setChecked(True)
-        self.today_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.today_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.today_btn.clicked.connect(lambda: self._set_range(0))
         self._range_group.addButton(self.today_btn)
         controls.addWidget(self.today_btn)
@@ -94,7 +94,7 @@ class ReportsScreen(QWidget):
         last_7_days_btn.setObjectName("salesBtn")
         last_7_days_btn.setCheckable(True)
         last_7_days_btn.setChecked(False)
-        last_7_days_btn.setFixedHeight(BUTTON_HEIGHT)
+        last_7_days_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         last_7_days_btn.clicked.connect(lambda: self._set_range(7))
         self._range_group.addButton(last_7_days_btn)
         controls.addWidget(last_7_days_btn)
@@ -103,30 +103,30 @@ class ReportsScreen(QWidget):
         last_30_days_btn.setObjectName("salesBtn")
         last_30_days_btn.setCheckable(True)
         last_30_days_btn.setChecked(False)
-        last_30_days_btn.setFixedHeight(BUTTON_HEIGHT)
+        last_30_days_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         last_30_days_btn.clicked.connect(lambda: self._set_range(30))
         self._range_group.addButton(last_30_days_btn)
         controls.addWidget(last_30_days_btn)
 
         load_btn = QPushButton("Load Report")
         load_btn.setObjectName("primaryBtn")
-        load_btn.setFixedHeight(BUTTON_HEIGHT)
+        load_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         load_btn.clicked.connect(lambda: self._load_report())
         controls.addWidget(load_btn)
 
         self.sales_btn = FunctionButton("Sales", "salesBtn")
-        self.sales_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.sales_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.sales_btn.setCheckable(True)
         self.sales_btn.setChecked(True)
         controls.addWidget(self.sales_btn)
 
         vat_btn = FunctionButton("VAT breakdown", "salesBtn")
-        vat_btn.setFixedHeight(BUTTON_HEIGHT)
+        vat_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         vat_btn.setCheckable(True)
         controls.addWidget(vat_btn)
 
         cats_btn = FunctionButton("Categories", "salesBtn")
-        cats_btn.setFixedHeight(BUTTON_HEIGHT)
+        cats_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         cats_btn.setCheckable(True)
         controls.addWidget(cats_btn)
 
@@ -136,27 +136,27 @@ class ReportsScreen(QWidget):
             self._view_group.addButton(btn)
 
         self.invoices_btn = FunctionButton("Invoices", "InvBtn")
-        self.invoices_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.invoices_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.invoices_btn.setCheckable(True)
         controls.addWidget(self.invoices_btn)
 
         mark_sent_btn = FunctionButton("Mark sent", "InvBtn")
-        mark_sent_btn.setFixedHeight(BUTTON_HEIGHT)
+        mark_sent_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         mark_sent_btn.clicked.connect(self._mark_invoice_sent)
         controls.addWidget(mark_sent_btn)
 
         x_report_btn = FunctionButton("X Report", "XRBtn")
-        x_report_btn.setFixedHeight(BUTTON_HEIGHT)
+        x_report_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         x_report_btn.clicked.connect(self._print_x_report)
         controls.addWidget(x_report_btn)
 
         z_report_btn = FunctionButton("Z Report", "ZRBtn")
-        z_report_btn.setFixedHeight(BUTTON_HEIGHT)
+        z_report_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         z_report_btn.clicked.connect(self._print_z_report)
         controls.addWidget(z_report_btn)
 
         self.btn_ok = FunctionButton("OK", "okBtn")
-        self.btn_ok.setFixedHeight(BUTTON_HEIGHT)
+        self.btn_ok.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.btn_ok.clicked.connect(self._confirm)
         controls.addWidget(self.btn_ok)
 
@@ -306,7 +306,7 @@ class ReportsScreen(QWidget):
                 self.vat_table.setItem(row, 1, QTableWidgetItem(f"{amounts['base']:.2f}"))
                 self.vat_table.setItem(row, 2, QTableWidgetItem(f"{amounts['tax']:.2f}"))
                 self.vat_table.setItem(row, 3, QTableWidgetItem(f"{amounts['total']:.2f}"))
-                self.vat_table.setRowHeight(row, ROW_HEIGHT)
+                self.vat_table.setRowHeight(row, REPORT_ROW_HEIGHT)
 
             self.categories_table.setRowCount(0)
             for category_name, (qty_sum, amount_sum) in sorted(totals["category_breakdown"].items()):
@@ -315,7 +315,7 @@ class ReportsScreen(QWidget):
                 self.categories_table.setItem(row, 0, QTableWidgetItem(category_name))
                 self.categories_table.setItem(row, 1, QTableWidgetItem(f"{qty_sum:g}"))
                 self.categories_table.setItem(row, 2, QTableWidgetItem(f"{amount_sum:.2f}"))
-                self.categories_table.setRowHeight(row, ROW_HEIGHT)
+                self.categories_table.setRowHeight(row, REPORT_ROW_HEIGHT)
 
     def _add_row(self, sale: Sale | None, invoice: Invoice | None):
         """One sales_table row for a sale and/or its invoice. Either may be
@@ -360,7 +360,7 @@ class ReportsScreen(QWidget):
             for col in range(self.sales_table.columnCount()):
                 self.sales_table.item(row, col).setFont(sent_font)
 
-        self.sales_table.setRowHeight(row, ROW_HEIGHT)
+        self.sales_table.setRowHeight(row, REPORT_ROW_HEIGHT)
 
     def _print_x_report(self):
         with get_session() as session:

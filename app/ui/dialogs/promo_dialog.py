@@ -20,7 +20,7 @@ from PyQt6.QtCore import Qt, QDate
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.constants import BUTTON_HEIGHT, DIALOG_WIDTH_XL
+from app.constants import DIALOG_BUTTON_HEIGHT, PROMO_DIALOG_MIN_SIZE
 from app.utils.utils import FunctionButton
 
 # Column indices for the products table.
@@ -40,7 +40,7 @@ class PromoDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Promo")
-        self.setMinimumSize(DIALOG_WIDTH_XL + 340, 520)
+        self.setMinimumSize(*PROMO_DIALOG_MIN_SIZE)
 
         self._existing = {n.strip().lower() for n in (existing_names or [])}
         self._original = promo_name.strip().lower()
@@ -153,10 +153,10 @@ class PromoDialog(QDialog):
 
         btn_row = QHBoxLayout()
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.cancel_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.cancel_btn.clicked.connect(self.reject)
         self.ok_btn = FunctionButton("OK", "okBtn")
-        self.ok_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.ok_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.ok_btn.clicked.connect(self.on_ok)
         btn_row.addStretch()
         btn_row.addWidget(self.cancel_btn)

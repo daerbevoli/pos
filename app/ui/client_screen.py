@@ -24,9 +24,9 @@ from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.utils.validators import is_valid_vat
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.constants import (
-    BUTTON_HEIGHT_XS,
-    INPUT_HEIGHT,
-    INPUT_HEIGHT_COMPACT,
+    FORM_FIELD_HEIGHT,
+    LIST_ACTION_BUTTON_HEIGHT,
+    LIST_FILTER_HEIGHT,
     SPACING_MD,
     SPACING_XS,
 )
@@ -80,30 +80,30 @@ class ClientDetailPanel(QFrame):
         field_col.addLayout(title_row)
 
         self.name = QLineEdit()
-        self.name.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.name.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.street = QLineEdit()
-        self.street.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.street.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.zip_code = QLineEdit()
-        self.zip_code.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.zip_code.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.city = QLineEdit()
-        self.city.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.city.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.country = QComboBox()
-        self.country.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.country.setMinimumHeight(FORM_FIELD_HEIGHT)
         for code, name in sorted(COUNTRY_NAMES.items(), key=lambda kv: kv[1]):
             self.country.addItem(name, code)
 
         self.vatNumber = QLineEdit()
-        self.vatNumber.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.vatNumber.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.phone = QLineEdit()
-        self.phone.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.phone.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.email = QLineEdit()
-        self.email.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.email.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         rows_spec = [
             ("Name *",       self.name),
@@ -158,7 +158,7 @@ class ClientDetailPanel(QFrame):
             (self.btn_ok, 2, 3),
         ]
         for widget, r, c in layout_map:
-            widget.setMinimumHeight(BUTTON_HEIGHT_XS)
+            widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
             grid.addWidget(widget, r, c)
 
         for c in range(4):
@@ -603,7 +603,7 @@ class ClientScreen(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by name or VAT…")
-        self.search_input.setFixedHeight(INPUT_HEIGHT)
+        self.search_input.setFixedHeight(LIST_FILTER_HEIGHT)
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=1)
 

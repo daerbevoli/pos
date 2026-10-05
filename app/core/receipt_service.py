@@ -40,7 +40,7 @@ class PrinterError(Exception):
 
 
 def _get_backend():
-    """Lazily resolve the libusb1 backend, patching pyusb's global find() so
+    """Lazily resolve the libusb1 backend, patching PyUSB's global find() so
     python-escpos's internal usb.core.find() calls use it too. The `libusb`
     pip package nests DLLs in per-arch subfolders and pyusb won't find them
     via PATH alone (see Zadig/WinUSB setup)."""
@@ -109,7 +109,7 @@ def _print_logo(printer, settings: dict):
             printer.image(img, center=True)
             printer.text("-" * LINE_WIDTH + "\n")
             printer.set(align="left")
-    except Exception:
+    except PrinterError:
         logger.exception("Failed to print logo image at %s", logo_path)
 
 def _left_right(left: str, right: str, width: int = LINE_WIDTH) -> str:

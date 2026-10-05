@@ -5,28 +5,27 @@ All business logic for managing Clients and stock.
 from sqlalchemy.orm import Session
 from app.models.models import Client
 
-
 class ClientService:
 
     # ── Client CRUD ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_all(session: Session, active_only=True) -> list[type[Client]]:
+    def get_all(session: Session, active_only=True) -> list[Client]:
         q = session.query(Client)
         if active_only:
             q = q.filter(Client.is_active == True)
         return q.order_by(Client.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, client_id: int) -> type[Client] | None:
+    def get_by_id(session: Session, client_id: int) -> Client | None:
         return session.query(Client).filter_by(id=client_id).first()
 
     @staticmethod
-    def get_by_name(session: Session, name: str) -> type[Client] | None:
+    def get_by_name(session: Session, name: str) -> Client | None:
         return session.query(Client).filter_by(name=name, is_active=True).first()
 
     @staticmethod
-    def search(session: Session, query: str) -> list[type[Client]]:
+    def search(session: Session, query: str) -> list[Client]:
         """Search by name or vat."""
         term = f"%{query}%"
         return (
@@ -49,7 +48,7 @@ class ClientService:
         return client
 
     @staticmethod
-    def update(session: Session, client_id: int, **kwargs) -> type[Client] | None:
+    def update(session: Session, client_id: int, **kwargs) -> Client | None:
         client = session.query(Client).filter_by(id=client_id).first()
         if not client:
             return None

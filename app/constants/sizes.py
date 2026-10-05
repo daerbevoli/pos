@@ -1,78 +1,87 @@
-"""Widget dimension constants (heights, widths, fixed sizes) shared across the UI."""
+"""Widget dimension constants (heights, widths, fixed sizes) shared across the UI.
 
-# Square icon buttons (edit/delete actions in list rows)
-ICON_BUTTON_SIZE = 36
+Grouped by the screen/widget that uses them; each name says what it sizes and
+each comment lists the exact rows/buttons/fields it is applied to. Values are pixels.
+"""
 
-# Input fields
-INPUT_HEIGHT = 30
-INPUT_HEIGHT_COMPACT = 24
-INPUT_HEIGHT_LARGE = 40
-CART_LABEL_HEIGHT = 20
-NUMPAD_KEY_HEIGHT = 48
+# ── Main window ──────────────────────────────────────────────────────────
+MAIN_WINDOW_WIDTH = 1366               # fixed window width
+MAIN_WINDOW_HEIGHT = 768               # fixed window height
+HEADER_MIN_HEIGHT = 50                 # top header bar (cashier, clock, RF/CN badge) — min height
+HEADER_MAX_HEIGHT = 70                 # top header bar — max height
+TAB_BAR_MIN_HEIGHT = 44                # V-tab button bar — min height
+TAB_BAR_MAX_HEIGHT = 56                # V-tab button bar — max height
+VTAB_BUTTON_HEIGHT = 40                # each V-tab button (TicketTab) — min height
 
-# Buttons
-BUTTON_HEIGHT = 40
-BUTTON_HEIGHT_SM = 44
-BUTTON_HEIGHT_XS = 26
-BUTTON_HEIGHT_COMPACT = 36
-BUTTON_HEIGHT_LG = 40
-BUTTON_HEIGHT_XL = 54
+# ── POS screen: cart / ticket ────────────────────────────────────────────
+CART_ROW_HEIGHT = 21                   # every cart row: items, discount, subtotal, paid, payment & change rows
+CART_INFO_BAR_HEIGHT = 21              # client label, running total label, scan/amount input and paid-ticket footer under the cart — min height
 
-# Table row heights
-ROW_HEIGHT_COMPACT = 30
-ROW_HEIGHT = 30
-ROW_HEIGHT_LARGE = 50
+# ── Shared buttons (app/utils/utils.py) ──────────────────────────────────
+FUNCTION_BUTTON_HEIGHT = 36            # every FunctionButton (POS, Inventory, Clients, Reports, Settings, dialogs), every
+                                       # CategoryButton (POS shortcut selector & product slots) and the POS numpad keys — min height
 
-# Main window chrome
-MAIN_WINDOW_MIN_WIDTH = 1366
-MAIN_WINDOW_MIN_HEIGHT = 768
-HEADER_MIN_HEIGHT = 50
-HEADER_MAX_HEIGHT = 70
-TAB_BAR_MIN_HEIGHT = 44
-TAB_BAR_MAX_HEIGHT = 56
+# ── Inventory / Clients screens ──────────────────────────────────────────
+LIST_ACTION_BUTTON_HEIGHT = 26         # action-button grid beside the list (new/modify/delete, up/down, search, OK, …) — min height
+LIST_FILTER_HEIGHT = 30                # search box, category filter and "low stock" toggle above the list
+FORM_FIELD_HEIGHT = 24                 # article & client edit-form inputs and FormField inputs — min height
+FORM_LABEL_WIDTH = 100                 # label column of a FormField row (label left, input right)
 
-# Dialog widths
-DIALOG_WIDTH_SM = 300
-DIALOG_WIDTH_MD = 400
-DIALOG_WIDTH_LG = 420
-DIALOG_WIDTH_XL = 480
+# ── Reports screen ───────────────────────────────────────────────────────
+REPORTS_BUTTON_HEIGHT = 40             # date pickers, quick-range buttons, report-type buttons, X/Z report & OK buttons
+REPORT_ROW_HEIGHT = 30                 # rows of the sales, VAT and categories tables
 
-# Misc field/panel sizes
-FIELD_WIDTH_SM = 100
-FIELD_WIDTH_MD = 120
-LIST_PANEL_MIN_WIDTH = 360
-LIST_PANEL_MAX_WIDTH = 520
-LOGO_PREVIEW_SIZE = (120, 60)
+# ── Settings screen ──────────────────────────────────────────────────────
+SETTINGS_OK_BUTTON_HEIGHT = 40         # OK (save) button at the bottom of the screen
+LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height)
+
+# ── Dialogs ──────────────────────────────────────────────────────────────
+DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut and promo dialogs
+NUMPAD_DIALOG_WIDTH = 300              # numpad dialog — min width
+NUMPAD_DIALOG_KEY_HEIGHT = 48          # numpad dialog keys and its display field — min height
+NUMPAD_DIALOG_OK_HEIGHT = 44           # numpad dialog OK button — min height
+PAYMENT_DIALOG_WIDTH = 400             # payment dialog — min width
+PAYMENT_AMOUNT_INPUT_HEIGHT = 40       # payment dialog tendered-amount input
+PAYMENT_METHOD_BUTTON_HEIGHT = 44      # payment dialog cash/card method buttons
+PAYMENT_CONFIRM_BUTTON_HEIGHT = 54     # payment dialog Confirm button
+STOCK_ADJUST_DIALOG_WIDTH = 420        # stock adjustment dialog — min width
+SHORTCUT_DIALOG_MIN_SIZE = (680, 460)  # shortcut dialog — min (width, height)
+PROMO_DIALOG_MIN_SIZE = (820, 520)     # promo dialog — min (width, height)
+
+# ── Tap-to-dismiss overlay (app/utils/utils.py) ──────────────────────────
+OVERLAY_CARD_MIN_WIDTH = 360           # message card shown over a screen (e.g. "Enter an amount first") — min width
+OVERLAY_CARD_MAX_WIDTH = 520           # same card — max width
 
 __all__ = [
-    "ICON_BUTTON_SIZE",
-    "INPUT_HEIGHT",
-    "INPUT_HEIGHT_COMPACT",
-    "INPUT_HEIGHT_LARGE",
-    "CART_LABEL_HEIGHT",
-    "NUMPAD_KEY_HEIGHT",
-    "BUTTON_HEIGHT",
-    "BUTTON_HEIGHT_SM",
-    "BUTTON_HEIGHT_XS",
-    "BUTTON_HEIGHT_COMPACT",
-    "BUTTON_HEIGHT_LG",
-    "BUTTON_HEIGHT_XL",
-    "ROW_HEIGHT_COMPACT",
-    "ROW_HEIGHT",
-    "ROW_HEIGHT_LARGE",
-    "MAIN_WINDOW_MIN_WIDTH",
-    "MAIN_WINDOW_MIN_HEIGHT",
+    "MAIN_WINDOW_WIDTH",
+    "MAIN_WINDOW_HEIGHT",
     "HEADER_MIN_HEIGHT",
     "HEADER_MAX_HEIGHT",
     "TAB_BAR_MIN_HEIGHT",
     "TAB_BAR_MAX_HEIGHT",
-    "DIALOG_WIDTH_SM",
-    "DIALOG_WIDTH_MD",
-    "DIALOG_WIDTH_LG",
-    "DIALOG_WIDTH_XL",
-    "FIELD_WIDTH_SM",
-    "FIELD_WIDTH_MD",
-    "LIST_PANEL_MIN_WIDTH",
-    "LIST_PANEL_MAX_WIDTH",
+    "VTAB_BUTTON_HEIGHT",
+    "CART_ROW_HEIGHT",
+    "CART_INFO_BAR_HEIGHT",
+    "FUNCTION_BUTTON_HEIGHT",
+    "LIST_ACTION_BUTTON_HEIGHT",
+    "LIST_FILTER_HEIGHT",
+    "FORM_FIELD_HEIGHT",
+    "FORM_LABEL_WIDTH",
+    "REPORTS_BUTTON_HEIGHT",
+    "REPORT_ROW_HEIGHT",
+    "SETTINGS_OK_BUTTON_HEIGHT",
     "LOGO_PREVIEW_SIZE",
+    "DIALOG_BUTTON_HEIGHT",
+    "NUMPAD_DIALOG_WIDTH",
+    "NUMPAD_DIALOG_KEY_HEIGHT",
+    "NUMPAD_DIALOG_OK_HEIGHT",
+    "PAYMENT_DIALOG_WIDTH",
+    "PAYMENT_AMOUNT_INPUT_HEIGHT",
+    "PAYMENT_METHOD_BUTTON_HEIGHT",
+    "PAYMENT_CONFIRM_BUTTON_HEIGHT",
+    "STOCK_ADJUST_DIALOG_WIDTH",
+    "SHORTCUT_DIALOG_MIN_SIZE",
+    "PROMO_DIALOG_MIN_SIZE",
+    "OVERLAY_CARD_MIN_WIDTH",
+    "OVERLAY_CARD_MAX_WIDTH",
 ]

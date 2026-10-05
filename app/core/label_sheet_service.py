@@ -2,8 +2,7 @@
 Label Sheet Service
 Builds an A4 PDF of barcode labels (name, manufacturer, lot number, expiry
 date + barcode) for printing on standard adhesive label sheets with an
-ordinary printer — unlike label_service.py, which drives the dedicated ZPL
-shelf-label printer.
+ordinary printer.
 """
 from reportlab.graphics import renderPDF
 from reportlab.graphics.barcode import createBarcodeDrawing
@@ -15,10 +14,11 @@ from reportlab.pdfgen import canvas
 # Labels per page -> (columns, rows). The grids divide A4 edge to edge, which
 # matches common margin-less sheets (e.g. 24 = 70 x 37 mm, 40 = 52.5 x 29.7 mm).
 LABEL_LAYOUTS = {
+    8:  (2, 4),
     16: (2, 8),
-    21: (3, 7),
     24: (3, 8),
     40: (4, 10),
+    64: (5, 13)
 }
 
 _PADDING = 2 * mm

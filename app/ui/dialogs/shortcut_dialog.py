@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt
 
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.constants import BUTTON_HEIGHT, DIALOG_WIDTH_XL
+from app.constants import DIALOG_BUTTON_HEIGHT, SHORTCUT_DIALOG_MIN_SIZE
 from app.utils.utils import FunctionButton
 
 
@@ -22,7 +22,7 @@ class ShortcutDialog(QDialog):
     def __init__(self, parent=None, sc_name: str = "", product_ids=None, existing_names=None):
         super().__init__(parent)
         self.setWindowTitle("Shortcut")
-        self.setMinimumSize(DIALOG_WIDTH_XL + 200, 460)
+        self.setMinimumSize(*SHORTCUT_DIALOG_MIN_SIZE)
 
         self._existing = {n.strip().lower() for n in (existing_names or [])}
         self._original = sc_name.strip().lower()
@@ -91,10 +91,10 @@ class ShortcutDialog(QDialog):
 
         btn_row = QHBoxLayout()
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.cancel_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.cancel_btn.clicked.connect(self.reject)
         self.ok_btn = FunctionButton("OK", "okBtn")
-        self.ok_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.ok_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.ok_btn.clicked.connect(self.on_ok)
         btn_row.addStretch()
         btn_row.addWidget(self.cancel_btn)

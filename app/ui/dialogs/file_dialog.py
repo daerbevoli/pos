@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QLineEdit, QPushButton, QHBoxLayout, QFileDialog, QDialog, QLabel, QVBoxLayout
 
-from app.constants import BUTTON_HEIGHT
+from app.constants import DIALOG_BUTTON_HEIGHT
 from app.utils.utils import FunctionButton
 
 
@@ -17,7 +17,7 @@ class FileDialog(QDialog):
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.clicked.connect(self.browse)
         self.ok_btn = FunctionButton("OK", "okBtn")
-        self.ok_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.ok_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.ok_btn.clicked.connect(self.on_ok)
 
         label = QLabel("Select File to import: ")

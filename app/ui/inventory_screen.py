@@ -28,12 +28,12 @@ from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.ui.dialogs.file_dialog import FileDialog
-from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
+# from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
-    BUTTON_HEIGHT_XS,
-    INPUT_HEIGHT,
-    INPUT_HEIGHT_COMPACT,
+    FORM_FIELD_HEIGHT,
+    LIST_ACTION_BUTTON_HEIGHT,
+    LIST_FILTER_HEIGHT,
     SPACING_MD,
     SPACING_XS,
 )
@@ -117,17 +117,17 @@ class ArticleDetailPanel(QFrame):
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("")
         self.barcode.setMaxLength(14)
-        self.barcode.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.barcode.setMinimumHeight(FORM_FIELD_HEIGHT)
 
 
         self.name = QLineEdit()
-        self.name.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.name.setMinimumHeight(FORM_FIELD_HEIGHT)
 
         self.price = QDoubleSpinBox()
         self.price.setLocale(QLocale.c())
         self.price.setMaximum(99999.99)
         self.price.setDecimals(2)
-        self.price.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.price.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.price.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.price_mode_display = PickerDisplay("Fixed price")
@@ -138,7 +138,7 @@ class ArticleDetailPanel(QFrame):
         self.stock.setLocale(QLocale.c())
         self.stock.setMaximum(999999)
         self.stock.setDecimals(2)
-        self.stock.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.stock.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.min_stock = QDoubleSpinBox()
@@ -146,7 +146,7 @@ class ArticleDetailPanel(QFrame):
         self.min_stock.setMaximum(999999)
         self.min_stock.setDecimals(2)
         self.min_stock.setValue(5)
-        self.min_stock.setMinimumHeight(INPUT_HEIGHT_COMPACT)
+        self.min_stock.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.min_stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.unit_display = PickerDisplay(self._unit_val)
@@ -238,7 +238,7 @@ class ArticleDetailPanel(QFrame):
             (self.barcode_generate_btn, 3, 0), (self.btn_print_barcodes, 3, 1),
         ]
         for widget, r, c in layout_map:
-            widget.setMinimumHeight(BUTTON_HEIGHT_XS)
+            widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
             grid.addWidget(widget, r, c)
 
         for c in range(4):
@@ -606,25 +606,26 @@ class ArticleDetailPanel(QFrame):
                 return
 
     def _on_print_barcodes(self):
-        if self.current_product_id is None:
-            return
-        dialog = LabelSheetDialog(self.name.text().strip(), self.barcode.text().strip(), parent=self)
-        if not dialog.exec():
-            return
-        data = dialog.get_data()
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Barcode Labels", f"labels_{data['barcode']}.pdf", "PDF Files (*.pdf)"
-        )
-        if not path:
-            return
-
-        try:
-            build_label_sheet_pdf(path, dialog.labels_per_page, **data)
-        except (ValueError, OSError) as e:
-            self._show_overlay(f"Could not create labels: {e}", kind="error")
-            return
-        # Open in the default PDF viewer so it can be printed straight away.
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        # if self.current_product_id is None:
+        #     return
+        # dialog = LabelSheetDialog(self.name.text().strip(), self.barcode.text().strip(), parent=self)
+        # if not dialog.exec():
+        #     return
+        # data = dialog.get_data()
+        # path, _ = QFileDialog.getSaveFileName(
+        #     self, "Save Barcode Labels", f"labels_{data['barcode']}.pdf", "PDF Files (*.pdf)"
+        # )
+        # if not path:
+        #     return
+        #
+        # try:
+        #     build_label_sheet_pdf(path, dialog.labels_per_page, **data)
+        # except (ValueError, OSError) as e:
+        #     self._show_overlay(f"Could not create labels: {e}", kind="error")
+        #     return
+        # # Open in the default PDF viewer so it can be printed straight away.
+        # QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        pass
 
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()
@@ -792,20 +793,20 @@ class InventoryScreen(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("")
-        self.search_input.setFixedHeight(INPUT_HEIGHT)
+        self.search_input.setFixedHeight(LIST_FILTER_HEIGHT)
         self.search_input.returnPressed.connect(self._on_barcode_scan)
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=1)
 
         self.category_filter = QComboBox()
-        self.category_filter.setFixedHeight(INPUT_HEIGHT)
+        self.category_filter.setFixedHeight(LIST_FILTER_HEIGHT)
         self.category_filter.addItem("All Categories", None)
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 
         self.low_stock_btn = QPushButton("Low Stock")
         self.low_stock_btn.setCheckable(True)
-        self.low_stock_btn.setFixedHeight(INPUT_HEIGHT)
+        self.low_stock_btn.setFixedHeight(LIST_FILTER_HEIGHT)
         self.low_stock_btn.toggled.connect(self.refresh)
         toolbar.addWidget(self.low_stock_btn)
 

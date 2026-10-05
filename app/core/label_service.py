@@ -57,10 +57,11 @@ def _open(vendor_id: str, product_id: str):
     except usb.core.USBError as e:
         raise PrinterError(f"Could not connect to label printer: {e}") from e
 
+#TODO: check EAN-8 barcodes by scanning one in Notepad, then decide whether to use leading 0s or make label print EAN-8
 
 def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | None = None) -> str:
     """
-    Builds a ZPL label: name at top, EAN-13 barcode in middle, price at bottom.
+    Builds a ZPL label: name at top, barcode in middle, price at bottom.
     Label size: 56mm x 32mm @ 203dpi (448 x 256 dots).
     barcode must be exactly 12 digits (EAN-13 auto-computes the check digit).
 

@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QLocale
 from app.models.models import Product
-from app.constants import DIALOG_WIDTH_LG
+from app.constants import STOCK_ADJUST_DIALOG_WIDTH
 
 
 class StockAdjustmentDialog(QDialog):
@@ -17,7 +17,7 @@ class StockAdjustmentDialog(QDialog):
         super().__init__(parent)
         self.product = product
         self.setWindowTitle(f"Stock Adjustment — {product.name}")
-        self.setMinimumWidth(DIALOG_WIDTH_LG)
+        self.setMinimumWidth(STOCK_ADJUST_DIALOG_WIDTH)
         self._build_ui()
 
     def _build_ui(self):

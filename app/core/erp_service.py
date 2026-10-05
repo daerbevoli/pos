@@ -1,8 +1,6 @@
 from typing import Any
 import requests
-
 from app.core.sales_service import InvoiceLine
-
 
 class ErpService:
     """
@@ -44,11 +42,9 @@ class ErpService:
 
         return data
 
-    def connect(self):
+    def connect(self) -> bool:
         """
-        Validate JSON-2 API access.
-        JSON-2 does NOT authenticate or return a uid.
-        We verify access by calling a lightweight endpoint.
+        Validate JSON-2 API access. Verify access by calling a lightweight endpoint.
         """
         user_context = self._call(
             model="res.users",
@@ -62,25 +58,25 @@ class ErpService:
 
 
     # ORM helpers
-    def search(self, model, domain, limit = 1):
+    def search(self, model, domain, limit = 1) -> Any:
         payload = {"domain": domain}
         if limit:
             payload["limit"] = limit
         return self._call(model, "search", payload)
 
-    def read(self, model, ids, fields):
+    def read(self, model, ids, fields) -> Any:
         return self._call(model, "read", {
             "ids": ids,
             "fields": fields,
         })
 
-    def create(self, model, vals, **kwargs):
+    def create(self, model, vals, **kwargs) -> Any:
         payload = {"vals_list": [vals]}
         payload.update(kwargs)
         ids = self._call(model, "create", payload)
         return ids[0]
 
-    def button(self, model, method, ids, **kwargs):
+    def button(self, model, method, ids, **kwargs) -> Any:
         payload = {"ids": ids, "context": {}}
         payload.update(kwargs)
         return self._call(model, method, payload)
@@ -134,7 +130,7 @@ class ErpService:
         """
         Create invoice lines based on totals.
         :param invoice_lines: the separate line items of the invoice
-        :return: invoice lines
+        :return: lines
         """
         account_id = self.get_sales_account_id()  # Default 700000
 
@@ -361,7 +357,7 @@ class ErpService:
         #     "account.move.send.wizard",
         #     "action_send_and_print",
         #     [wizard_id],
-        #     context=context,
+        #     context=context
         # )
 
         # 6. Read back the Peppol state to confirm it was queued

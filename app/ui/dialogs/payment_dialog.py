@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from app.core.sales_service import Cart
-from app.constants import BUTTON_HEIGHT_LG, BUTTON_HEIGHT_SM, BUTTON_HEIGHT_XL, DIALOG_WIDTH_MD
+from app.constants import PAYMENT_AMOUNT_INPUT_HEIGHT, PAYMENT_CONFIRM_BUTTON_HEIGHT, PAYMENT_DIALOG_WIDTH, PAYMENT_METHOD_BUTTON_HEIGHT
 
 
 class PaymentDialog(QDialog):
@@ -19,7 +19,7 @@ class PaymentDialog(QDialog):
         self.currency = currency
         self.amount_tendered = cart.total  # default: exact amount
         self.setWindowTitle("Payment")
-        self.setMinimumWidth(DIALOG_WIDTH_MD)
+        self.setMinimumWidth(PAYMENT_DIALOG_WIDTH)
         self._build_ui()
 
     def _build_ui(self):
@@ -35,7 +35,7 @@ class PaymentDialog(QDialog):
         if self.method == "cash":
             layout.addWidget(QLabel("Amount Tendered:"))
             self.tendered_input = QLineEdit(f"{self.cart.total:.2f}")
-            self.tendered_input.setFixedHeight(BUTTON_HEIGHT_LG)
+            self.tendered_input.setFixedHeight(PAYMENT_AMOUNT_INPUT_HEIGHT)
             self.tendered_input.textChanged.connect(self._update_change)
             layout.addWidget(self.tendered_input)
 
@@ -44,7 +44,7 @@ class PaymentDialog(QDialog):
             common_amounts = [5, 10, 20, 50, 100]
             for i, amount in enumerate(common_amounts):
                 btn = QPushButton(f"{self.currency}{amount}")
-                btn.setFixedHeight(BUTTON_HEIGHT_SM)
+                btn.setFixedHeight(PAYMENT_METHOD_BUTTON_HEIGHT)
                 btn.clicked.connect(lambda _, a=amount: self._set_tendered(a))
                 quick.addWidget(btn, 0, i)
             layout.addLayout(quick)
@@ -66,7 +66,7 @@ class PaymentDialog(QDialog):
 
         confirm_btn = QPushButton("✓ Confirm Payment")
         confirm_btn.setObjectName("primaryBtn")
-        confirm_btn.setFixedHeight(BUTTON_HEIGHT_XL)
+        confirm_btn.setFixedHeight(PAYMENT_CONFIRM_BUTTON_HEIGHT)
         confirm_btn.clicked.connect(self._confirm)
         btn_row.addWidget(confirm_btn)
         layout.addLayout(btn_row)

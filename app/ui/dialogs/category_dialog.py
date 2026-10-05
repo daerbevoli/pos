@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLineEdit, QLabel, QHBoxLayout, QMessageBox, QPushButton, QGridLayout
 )
 
-from app.constants import BUTTON_HEIGHT
+from app.constants import DIALOG_BUTTON_HEIGHT
 from app.utils.utils import FunctionButton
 
 
@@ -22,11 +22,11 @@ class CategoryDialog(QDialog):
         self.line_edit.returnPressed.connect(self.on_ok)
 
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.cancel_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.cancel_btn.clicked.connect(self.on_cancel)
 
         self.ok_btn = FunctionButton("OK", "okBtn")
-        self.ok_btn.setFixedHeight(BUTTON_HEIGHT)
+        self.ok_btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
         self.ok_btn.clicked.connect(self.on_ok)
 
         label = QLabel("Choose name: ")

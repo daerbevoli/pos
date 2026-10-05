@@ -23,8 +23,8 @@ from app.utils.utils import TicketTab
 from app.constants import (
     HEADER_MAX_HEIGHT,
     HEADER_MIN_HEIGHT,
-    MAIN_WINDOW_MIN_HEIGHT,
-    MAIN_WINDOW_MIN_WIDTH,
+    MAIN_WINDOW_HEIGHT,
+    MAIN_WINDOW_WIDTH,
     SPACING_XS,
     TAB_BAR_MAX_HEIGHT,
     TAB_BAR_MIN_HEIGHT,
@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SKBC")
-        self.setFixedSize(MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT)
+        self.setFixedSize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
 
         self._active_vtab = 1
         # Per V-tab: which QStackedWidget index (screen) was last active

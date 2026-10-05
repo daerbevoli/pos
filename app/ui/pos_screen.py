@@ -30,17 +30,18 @@ from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
 from app.core.erp_worker import InvoiceSendWorker
 from app.constants import (
-    BUTTON_HEIGHT_COMPACT,
-    CART_LABEL_HEIGHT,
-    COLOR_ROW_DISCOUNT,
+    CART_INFO_BAR_HEIGHT,
+    CART_ROW_HEIGHT,
+    COLOR_ROW_CHANGE,
     COLOR_ROW_DIVIDER,
+    COLOR_ROW_DIVIDER_FROZEN,
+    COLOR_ROW_FROZEN,
     COLOR_ROW_PAYMENT,
-    COLOR_ROW_PAYMENT_DARK,
     COLOR_ROW_PENDING,
-    FONT_SIZE_CART_ITEM,
-    FONT_SIZE_CART_ROW,
-    FONT_SIZE_FOOTER_TOTAL,
-    ROW_HEIGHT_COMPACT,
+    COLOR_ROW_SUMMARY,
+    FONT_SIZE_CART,
+    FONT_SIZE_PAID_FOOTER,
+    FUNCTION_BUTTON_HEIGHT,
     SPACING_SM,
     SPACING_XS,
 )
@@ -52,6 +53,14 @@ ADMIN_CODE = "2060"
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
 TABS = 8
+
+
+def _cart_font(bold: bool) -> QFont:
+    """The one font every cart row is drawn with, so all rows share a size."""
+    font = QFont()
+    font.setPixelSize(FONT_SIZE_CART)
+    font.setBold(bold)
+    return font
 
 
 class _TabState:
@@ -67,6 +76,7 @@ class _TabState:
         self.frozen_change    = 0.0
         self.frozen_total     = 0.0
         self.sale_id          = None   # DB Sale.id this frozen ticket was saved as, if any
+        self.active_shortcut_id = None  # DB Shortcut.id selected in this tab's product grid, if any
 
 class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
@@ -220,11 +230,13 @@ class POSScreen(QWidget):
         self.cart_table.horizontalHeader().setVisible(False)
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cart_table.verticalHeader().setVisible(False)
+        # Per-pixel so scrolling to the last row lands it fully at the bottom edge.
+        self.cart_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         self.client_label = QLabel("")
         self.client_label.setObjectName("clientLabel")
-        self.client_label.setMinimumHeight(CART_LABEL_HEIGHT)
+        self.client_label.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         self.client_label.hide()
         col.addWidget(self.client_label)
 
@@ -237,12 +249,12 @@ class POSScreen(QWidget):
 
         self.ticket_total_lbl = QLabel("")
         self.ticket_total_lbl.setObjectName("ticketTotalLbl")
-        self.ticket_total_lbl.setMinimumHeight(CART_LABEL_HEIGHT)
+        self.ticket_total_lbl.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         self.ticket_total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.combined_input = QLineEdit()
         self.combined_input.setObjectName("combinedInput")
-        self.combined_input.setMinimumHeight(CART_LABEL_HEIGHT)
+        self.combined_input.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         self.combined_input.setValidator(
             QRegularExpressionValidator(QRegularExpression(r'-?[0-9]*[.,]?[0-9]*'))
         )
@@ -250,14 +262,14 @@ class POSScreen(QWidget):
 
         self.payment_footer = QWidget()
         self.payment_footer.setObjectName("paymentFooter")
-        self.payment_footer.setMinimumHeight(CART_LABEL_HEIGHT)
+        self.payment_footer.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         _fl = QHBoxLayout(self.payment_footer)
         _fl.setContentsMargins(10, 4, 10, 4)
         self.footer_total_lbl  = QLabel()
         self.footer_change_lbl = QLabel()
         _footer_font = QFont()
         _footer_font.setBold(True)
-        _footer_font.setPixelSize(FONT_SIZE_FOOTER_TOTAL)
+        _footer_font.setPixelSize(FONT_SIZE_PAID_FOOTER)
         self.footer_total_lbl.setFont(_footer_font)
         self.footer_change_lbl.setFont(_footer_font)
         self.footer_total_lbl.setObjectName("footerTotalLabel")
@@ -449,7 +461,7 @@ class POSScreen(QWidget):
         for label, r, c in keys:
             btn = QPushButton(label)
             btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
-            btn.setMinimumHeight(BUTTON_HEIGHT_COMPACT)
+            btn.setMinimumHeight(FUNCTION_BUTTON_HEIGHT)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.clicked.connect(lambda _, l=label: self._numpad_press(l))
@@ -556,6 +568,7 @@ class POSScreen(QWidget):
         s.frozen_change    = self._frozen_change
         s.frozen_total     = self._frozen_total
         s.sale_id          = self._current_sale_id
+        s.active_shortcut_id = self._active_shortcut_id
 
     def _load_tab_state(self, idx: int):
         s = self._tab_states[idx]
@@ -589,6 +602,15 @@ class POSScreen(QWidget):
         else:
             self.input_stack.setCurrentIndex(0)
             self._tick_time(override=True)
+
+        # Each tab keeps its own selected shortcut; drop it if it was deleted
+        # (reload_shortcuts() only prunes the tab on screen at the time).
+        if s.active_shortcut_id in {sid for sid, _ in self._shortcuts}:
+            self._show_shortcut(s.active_shortcut_id)
+        else:
+            self._active_shortcut_id = None
+            self._clear_slots()
+            self._sync_active_shortcut_style()
 
         self.ticket_title.setText(f"V {idx}")
         self._refresh_cart()
@@ -1021,21 +1043,27 @@ class POSScreen(QWidget):
             QTableWidgetItem(""),
             QTableWidgetItem(f"{total:.2f}"),
         ]
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(FONT_SIZE_CART_ROW)
+        font = _cart_font(bold=True)
         for col, cell in enumerate(cells):
             cell.setFont(font)
-            cell.setBackground(QBrush(QColor(*COLOR_ROW_PENDING)))
+            cell.setBackground(self._row_brush(COLOR_ROW_SUMMARY))
             self.cart_table.setItem(row, col, cell)
-        self.cart_table.setRowHeight(row, ROW_HEIGHT_COMPACT)
+        self.cart_table.setRowHeight(row, CART_ROW_HEIGHT)
+
+    def _cart_frozen(self) -> bool:
+        # _set_frozen_style() always runs before the _refresh_cart() that follows it.
+        return bool(self.cart_table.property("frozen"))
+
+    def _row_brush(self, color: tuple[int, int, int]) -> QBrush:
+        """Background for a highlighted cart row; a frozen ticket is one flat colour."""
+        return QBrush(QColor(*(COLOR_ROW_FROZEN if self._cart_frozen() else color)))
 
     def _insert_divider_row(self):
         r = self.cart_table.rowCount()
         self.cart_table.insertRow(r)
         for c in range(4):
             cell = QTableWidgetItem("")
-            cell.setBackground(QBrush(QColor(*COLOR_ROW_DIVIDER)))
+            cell.setBackground(QBrush(QColor(*(COLOR_ROW_DIVIDER_FROZEN if self._cart_frozen() else COLOR_ROW_DIVIDER))))
             self.cart_table.setItem(r, c, cell)
         self.cart_table.setRowHeight(r, 3)
         self._row_to_entry.append(None)
@@ -1060,6 +1088,16 @@ class POSScreen(QWidget):
             QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
         )
         sel_model.setCurrentIndex(top_left, QItemSelectionModel.SelectionFlag.Current)
+        # Rows were just inserted and the scroll range isn't recalculated until the
+        # event loop runs, so scrolling now stops short and leaves the row half
+        # visible — scroll again once layout has caught up.
+        self.cart_table.scrollTo(top_left)
+        QTimer.singleShot(0, lambda: self._scroll_to_row(row))
+
+    def _scroll_to_row(self, row: int):
+        model = self.cart_table.model()
+        if model is not None and 0 <= row < model.rowCount():
+            self.cart_table.scrollTo(model.index(row, 0))
 
     def _refresh_cart(self, select_last=False):
         prev_idx = self._get_selected_entry_index()
@@ -1071,8 +1109,8 @@ class POSScreen(QWidget):
         section_has_items = False
         prev_subtotal = 0.0
         payment_divider_shown = False
-        font_bold = QFont(); font_bold.setPixelSize(FONT_SIZE_CART_ROW); font_bold.setBold(True)
-        font_item = QFont(); font_item.setPixelSize(FONT_SIZE_CART_ITEM); font_item.setBold(False)
+        font_bold = _cart_font(bold=True)
+        font_item = _cart_font(bold=False)
         for i, entry in enumerate(self.cart.entries):
             if isinstance(entry, CartItem):
                 r = self.cart_table.rowCount()
@@ -1106,9 +1144,9 @@ class POSScreen(QWidget):
                     cell = QTableWidgetItem(text)
                     cell.setFont(font_item)
                     if pending:
-                        cell.setBackground(QBrush(QColor(*COLOR_ROW_PENDING)))
+                        cell.setBackground(self._row_brush(COLOR_ROW_PENDING))
                     self.cart_table.setItem(r, col, cell)
-                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
+                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
                 section_total += entry.line_total
                 section_count += count_contribution
                 section_has_items = True
@@ -1125,9 +1163,9 @@ class POSScreen(QWidget):
                 ]
                 for c, cell in enumerate(cells):
                     cell.setFont(font_bold)
-                    cell.setBackground(QBrush(QColor(*COLOR_ROW_DISCOUNT)))
+                    cell.setBackground(self._row_brush(COLOR_ROW_SUMMARY))
                     self.cart_table.setItem(r, c, cell)
-                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
+                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
                 section_total += entry.line_total   # negative
 
             elif isinstance(entry, SubtotalMarker):
@@ -1156,13 +1194,13 @@ class POSScreen(QWidget):
                 ]
                 for c, cell in enumerate(cells):
                     cell.setFont(font_bold)
-                    cell.setBackground(QBrush(QColor(*COLOR_ROW_PAYMENT)))
+                    cell.setBackground(self._row_brush(COLOR_ROW_PAYMENT))
                     self.cart_table.setItem(r, c, cell)
-                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
+                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
 
         # ── Payment rows (frozen state) ──────────────────────────────────
         if self.sale_finished and self._frozen_breakdown:
-            font_pay = QFont(); font_pay.setBold(True); font_pay.setPixelSize(FONT_SIZE_CART_ROW)
+            font_pay = _cart_font(bold=True)
             self._insert_divider_row()
             for leg in self._frozen_breakdown:
                 r = self.cart_table.rowCount()
@@ -1173,9 +1211,9 @@ class POSScreen(QWidget):
                 for ci, text in enumerate(["", method_label, "", leg_str]):
                     cell = QTableWidgetItem(text)
                     cell.setFont(font_pay)
-                    cell.setBackground(QBrush(QColor(*COLOR_ROW_PAYMENT)))
+                    cell.setBackground(self._row_brush(COLOR_ROW_PAYMENT))
                     self.cart_table.setItem(r, ci, cell)
-                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
+                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
             if self._frozen_change > 0:
                 r = self.cart_table.rowCount()
                 self.cart_table.insertRow(r)
@@ -1184,9 +1222,9 @@ class POSScreen(QWidget):
                 for ci, text in enumerate(["", "Change", "", change_str]):
                     cell = QTableWidgetItem(text)
                     cell.setFont(font_pay)
-                    cell.setBackground(QBrush(QColor(*COLOR_ROW_PAYMENT_DARK)))
+                    cell.setBackground(self._row_brush(COLOR_ROW_CHANGE))
                     self.cart_table.setItem(r, ci, cell)
-                self.cart_table.setRowHeight(r, ROW_HEIGHT_COMPACT)
+                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
 
         # ── Row selection ────────────────────────────────────────────────
         if select_last or not self.cart.entries or self.sale_finished:
@@ -1255,9 +1293,11 @@ class POSScreen(QWidget):
         total     = self.cart.total
         remaining = self.cart.remaining_due
         typed     = self._read_amount_input()
-        tendered  = round(remaining if typed is None else typed, 2)
+        tendered  = round(max(remaining, 0.0) if typed is None else typed, 2)
 
-        if tendered <= 0:
+        # A zero tender is fine when nothing is due (e.g. every line of a
+        # reopened ticket was reversed) — it settles the ticket at 0.00.
+        if tendered < 0 or (tendered == 0 and remaining > 0.005):
             self._show_overlay("Enter an amount first", kind="error")
             return
 

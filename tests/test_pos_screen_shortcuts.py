@@ -126,3 +126,40 @@ def test_deleted_shortcut_clears_active_selection_on_reload(screen):
     assert screen._active_shortcut_id is None
     assert screen._slot_product_ids == [None] * screen.SLOT_COUNT
     assert not screen.shortcut_buttons[0].isEnabled()
+
+
+def test_selected_shortcut_is_per_vtab(screen):
+    p = _make_products(["A", "B"])
+    one = _shortcut("One", [p["A"]])
+    two = _shortcut("Two", [p["B"]])
+    screen.reload_shortcuts()
+    screen._on_shortcut_pressed(0)  # "One" on V1
+
+    screen.set_active_tab(2)
+    assert screen._active_shortcut_id is None
+    assert screen._slot_product_ids == [None] * screen.SLOT_COUNT
+
+    screen._on_shortcut_pressed(1)  # "Two" on V2
+    screen.set_active_tab(1)
+    assert screen._active_shortcut_id == one
+    assert screen._slot_product_ids[0] == p["A"]
+
+    screen.set_active_tab(2)
+    assert screen._active_shortcut_id == two
+    assert screen._slot_product_ids[0] == p["B"]
+
+
+def test_shortcut_deleted_while_on_other_tab_is_dropped(screen):
+    p = _make_products(["A"])
+    sc_id = _shortcut("Temp", [p["A"]])
+    screen.reload_shortcuts()
+    screen._on_shortcut_pressed(0)
+    screen.set_active_tab(2)
+
+    with get_session() as session:
+        ProductService.delete_shortcut(session, sc_id)
+    screen.reload_shortcuts()
+    screen.set_active_tab(1)
+
+    assert screen._active_shortcut_id is None
+    assert screen._slot_product_ids == [None] * screen.SLOT_COUNT

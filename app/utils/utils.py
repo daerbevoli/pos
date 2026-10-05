@@ -3,12 +3,12 @@ from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFra
 from sqlalchemy.orm import Session
 
 from app.constants import (
-    BUTTON_HEIGHT,
-    BUTTON_HEIGHT_COMPACT,
-    LIST_PANEL_MAX_WIDTH,
-    LIST_PANEL_MIN_WIDTH,
+    FUNCTION_BUTTON_HEIGHT,
     MARGIN_NONE,
+    OVERLAY_CARD_MAX_WIDTH,
+    OVERLAY_CARD_MIN_WIDTH,
     SPACING_MD,
+    VTAB_BUTTON_HEIGHT,
 )
 from app.core.settings_service import SettingsService
 
@@ -75,7 +75,7 @@ class TicketTab(QPushButton):
         self.index = index
         self.setObjectName("ticketTab")
         self.setCheckable(True)
-        self.setMinimumHeight(BUTTON_HEIGHT)
+        self.setMinimumHeight(VTAB_BUTTON_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._set_label(f"V {index}", "")
 
@@ -88,7 +88,7 @@ class FunctionButton(QPushButton):
     def __init__(self, label: str, role: str = "func"):
         super().__init__(label)
         self.setObjectName(role)
-        self.setMinimumHeight(BUTTON_HEIGHT_COMPACT)
+        self.setMinimumHeight(FUNCTION_BUTTON_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -99,7 +99,7 @@ class CategoryButton(QPushButton):
     def __init__(self, label: str, role: str):
         super().__init__(label)
         self.setObjectName(role)
-        self.setMinimumHeight(BUTTON_HEIGHT_COMPACT)
+        self.setMinimumHeight(FUNCTION_BUTTON_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -124,8 +124,8 @@ class TapToDismissOverlay(QWidget):
 
         self.card = QFrame(self)
         self.card.setObjectName("tapDismissCard")
-        self.card.setMinimumWidth(LIST_PANEL_MIN_WIDTH)
-        self.card.setMaximumWidth(LIST_PANEL_MAX_WIDTH)
+        self.card.setMinimumWidth(OVERLAY_CARD_MIN_WIDTH)
+        self.card.setMaximumWidth(OVERLAY_CARD_MAX_WIDTH)
 
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(28, 24, 28, 24)

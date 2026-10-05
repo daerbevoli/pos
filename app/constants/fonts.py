@@ -3,14 +3,14 @@
 Font family/size rules driven by resources/styles/main.qss are not
 duplicated here; this covers only fonts set programmatically (e.g. on
 the cart table and payment footer, which QSS cannot target per-item).
+Values are pixels.
 """
 
-FONT_SIZE_CART_ROW = 15
-FONT_SIZE_CART_ITEM = 20
-FONT_SIZE_FOOTER_TOTAL = 30
+# ── POS screen ───────────────────────────────────────────────────────────
+FONT_SIZE_CART = 18         # every cart row: items, discount, subtotal, paid, payment & change rows
+FONT_SIZE_PAID_FOOTER = 30  # "Total" and "Change" labels in the footer under a paid ticket
 
 __all__ = [
-    "FONT_SIZE_CART_ROW",
-    "FONT_SIZE_CART_ITEM",
-    "FONT_SIZE_FOOTER_TOTAL",
+    "FONT_SIZE_CART",
+    "FONT_SIZE_PAID_FOOTER",
 ]

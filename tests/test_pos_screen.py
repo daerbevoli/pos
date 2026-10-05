@@ -1196,3 +1196,20 @@ def test_reopen_and_browse_do_not_change_rf_cn_mode(screen):
     assert screen.cart.is_refund is True
     screen._reopen_ticket()
     assert screen.cart.is_refund is True
+
+
+def test_adding_past_visible_rows_scrolls_last_row_fully_into_view(screen, qtbot):
+    screen.resize(1000, 700)
+    screen.show()
+    qtbot.waitExposed(screen)
+    for i in range(40):
+        pid, _, _ = _add_product(name=f"P{i}", barcode=f"BC{i:04d}")
+        screen.add_product_by_id(pid)
+    qtbot.wait(20)  # let the deferred scroll run
+
+    table = screen.cart_table
+    last = table.model().index(table.rowCount() - 1, 0)
+    rect = table.visualRect(last)
+    assert table.verticalScrollBar().value() > 0
+    assert rect.top() >= 0
+    assert rect.bottom() <= table.viewport().height()

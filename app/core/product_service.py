@@ -6,30 +6,27 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo, PromoItem
-from app.core.database import get_session
-
 
 class ProductService:
 
     # ── Product CRUD ──────────────────────────────────────────────────────────
-
     @staticmethod
-    def get_all(session: Session, active_only=True) -> list[type[Product]]:
+    def get_all(session: Session, active_only=True) -> list[Product]:
         q = session.query(Product)
         if active_only:
             q = q.filter(Product.is_active == True)
         return q.order_by(Product.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, product_id: int) -> type[Product] | None:
+    def get_by_id(session: Session, product_id: int) -> Product | None:
         return session.query(Product).filter_by(id=product_id).first()
 
     @staticmethod
-    def get_by_barcode(session: Session, barcode: str) -> type[Product] | None:
+    def get_by_barcode(session: Session, barcode: str) -> Product | None:
         return session.query(Product).filter_by(barcode=barcode, is_active=True).first()
 
     @staticmethod
-    def search(session: Session, query: str) -> list[type[Product]]:
+    def search(session: Session, query: str) -> list[Product]:
         """Search by name or barcode."""
         term = f"%{query}%"
         return (
@@ -52,7 +49,7 @@ class ProductService:
         return product
 
     @staticmethod
-    def update(session: Session, product_id: int, **kwargs) -> type[Product] | None:
+    def update(session: Session, product_id: int, **kwargs) -> Product | None:
         product = session.query(Product).filter_by(id=product_id).first()
         if not product:
             return None
@@ -62,6 +59,16 @@ class ProductService:
         session.refresh(product)
         return product
 
+    @staticmethod
+    def deactivate(session: Session, product_id: int) -> bool:
+        """Soft delete — keeps sales history intact."""
+        product = session.query(Product).filter_by(id=product_id).first()
+        if not product:
+            return False
+        product.is_active = False
+        session.commit()
+        return True
+
     INTERNAL_BARCODE_PREFIX = "2060"
 
     @staticmethod
@@ -70,12 +77,12 @@ class ProductService:
         return str((10 - total % 10) % 10)
 
     @staticmethod
-    def generate_barcode(session: Session, type: str = "ean13") -> str:
+    def generate_barcode(session: Session, barcode_type: str = "ean13") -> str:
         """Next free internal EAN-13 (INTERNAL_BARCODE_PREFIX + sequence +
         check digit). Checks inactive products too, since `barcode` is
         unique across the whole table."""
-        if type != "ean13":
-            raise ValueError(f"Unsupported barcode type: {type!r}")
+        if barcode_type != "ean13":
+            raise ValueError(f"Unsupported barcode type: {barcode_type!r}")
 
         prefix = ProductService.INTERNAL_BARCODE_PREFIX
         body_len = 12 - len(prefix)
@@ -98,15 +105,6 @@ class ProductService:
         first12 = f"{prefix}{seq:0{body_len}d}"
         return first12 + ProductService._ean13_check_digit(first12)
 
-    @staticmethod
-    def deactivate(session: Session, product_id: int) -> bool:
-        """Soft delete — keeps sales history intact."""
-        product = session.query(Product).filter_by(id=product_id).first()
-        if not product:
-            return False
-        product.is_active = False
-        session.commit()
-        return True
 
     # ── Stock Management ──────────────────────────────────────────────────────
 
@@ -145,7 +143,7 @@ class ProductService:
         return movement
 
     @staticmethod
-    def get_low_stock_products(session: Session) -> list[type[Product]]:
+    def get_low_stock_products(session: Session) -> list[Product]:
         return (
             session.query(Product)
             .filter(
@@ -157,7 +155,7 @@ class ProductService:
         )
 
     @staticmethod
-    def get_stock_movements(session: Session, product_id: int) -> list[type[StockMovement]]:
+    def get_stock_movements(session: Session, product_id: int) -> list[StockMovement]:
         return (
             session.query(StockMovement)
             .filter_by(product_id=product_id)
@@ -169,7 +167,7 @@ class ProductService:
     # ── Categories ────────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_all_categories(session: Session) -> list[type[Category]]:
+    def get_all_categories(session: Session) -> list[Category]:
         return session.query(Category).order_by(Category.name).all()
 
     @staticmethod
@@ -239,7 +237,7 @@ class ProductService:
     # ── Promos ────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_all_promos(session: Session) -> list[type[Promo]]:
+    def get_all_promos(session: Session) -> list[Promo]:
         return session.query(Promo).order_by(Promo.name).all()
 
     @staticmethod
@@ -310,7 +308,7 @@ class ProductService:
         return session.query(PromoItem).filter_by(product_id=product_id).first()
 
     @staticmethod
-    def get_promo_items(session: Session, promo_id: int) -> list[type[PromoItem]]:
+    def get_promo_items(session: Session, promo_id: int) -> list[PromoItem]:
         """This promo's per-product discounts, with each item's product
         eagerly usable (same session) and ordered by product name."""
         return (
@@ -355,7 +353,7 @@ class ProductService:
         session.commit()
 
     @staticmethod
-    def get_all_shortcuts(session: Session) -> list[type[Shortcut]]:
+    def get_all_shortcuts(session: Session) -> list[Shortcut]:
         return session.query(Shortcut).order_by(Shortcut.name).all()
 
     @staticmethod
