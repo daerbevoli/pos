@@ -20,7 +20,6 @@ CART_INFO_BAR_HEIGHT = 21              # client label, running total label, scan
 # ── Shared buttons (app/utils/utils.py) ──────────────────────────────────
 FUNCTION_BUTTON_HEIGHT = 36            # every FunctionButton (POS, Inventory, Clients, Reports, Settings, dialogs), every
                                        # CategoryButton (POS shortcut selector & product slots) and the POS numpad keys — min height
-
 # ── Inventory / Clients screens ──────────────────────────────────────────
 LIST_ACTION_BUTTON_HEIGHT = 26         # action-button grid beside the list (new/modify/delete, up/down, search, OK, …) — min height
 LIST_FILTER_HEIGHT = 30                # search box, category filter and "low stock" toggle above the list
@@ -36,7 +35,8 @@ SETTINGS_OK_BUTTON_HEIGHT = 40         # OK (save) button at the bottom of the s
 LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height)
 
 # ── Dialogs ──────────────────────────────────────────────────────────────
-DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut and promo dialogs
+DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut and promo dialogs;
+                                       # labels-per-page and Cancel buttons of the label sheet dialog
 NUMPAD_DIALOG_WIDTH = 300              # numpad dialog — min width
 NUMPAD_DIALOG_KEY_HEIGHT = 48          # numpad dialog keys and its display field — min height
 NUMPAD_DIALOG_OK_HEIGHT = 44           # numpad dialog OK button — min height
@@ -47,6 +47,8 @@ PAYMENT_CONFIRM_BUTTON_HEIGHT = 54     # payment dialog Confirm button
 STOCK_ADJUST_DIALOG_WIDTH = 420        # stock adjustment dialog — min width
 SHORTCUT_DIALOG_MIN_SIZE = (680, 460)  # shortcut dialog — min (width, height)
 PROMO_DIALOG_MIN_SIZE = (820, 520)     # promo dialog — min (width, height)
+LABEL_SHEET_DIALOG_WIDTH = 480         # label sheet (print barcodes) dialog — min width
+LABEL_SHEET_FIELD_HEIGHT = 24          # label sheet dialog name/manufacturer/lot/expiry/barcode inputs — min height
 
 # ── Tap-to-dismiss overlay (app/utils/utils.py) ──────────────────────────
 OVERLAY_CARD_MIN_WIDTH = 360           # message card shown over a screen (e.g. "Enter an amount first") — min width
@@ -82,6 +84,8 @@ __all__ = [
     "STOCK_ADJUST_DIALOG_WIDTH",
     "SHORTCUT_DIALOG_MIN_SIZE",
     "PROMO_DIALOG_MIN_SIZE",
+    "LABEL_SHEET_DIALOG_WIDTH",
+    "LABEL_SHEET_FIELD_HEIGHT",
     "OVERLAY_CARD_MIN_WIDTH",
     "OVERLAY_CARD_MAX_WIDTH",
 ]

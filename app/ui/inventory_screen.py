@@ -28,7 +28,7 @@ from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.ui.dialogs.file_dialog import FileDialog
-# from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
+from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
     FORM_FIELD_HEIGHT,
@@ -606,26 +606,25 @@ class ArticleDetailPanel(QFrame):
                 return
 
     def _on_print_barcodes(self):
-        # if self.current_product_id is None:
-        #     return
-        # dialog = LabelSheetDialog(self.name.text().strip(), self.barcode.text().strip(), parent=self)
-        # if not dialog.exec():
-        #     return
-        # data = dialog.get_data()
-        # path, _ = QFileDialog.getSaveFileName(
-        #     self, "Save Barcode Labels", f"labels_{data['barcode']}.pdf", "PDF Files (*.pdf)"
-        # )
-        # if not path:
-        #     return
-        #
-        # try:
-        #     build_label_sheet_pdf(path, dialog.labels_per_page, **data)
-        # except (ValueError, OSError) as e:
-        #     self._show_overlay(f"Could not create labels: {e}", kind="error")
-        #     return
-        # # Open in the default PDF viewer so it can be printed straight away.
-        # QDesktopServices.openUrl(QUrl.fromLocalFile(path))
-        pass
+        if self.current_product_id is None:
+            return
+        dialog = LabelSheetDialog(self.name.text().strip(), self.barcode.text().strip(), parent=self)
+        if not dialog.exec():
+            return
+        data = dialog.get_data()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Barcode Labels", f"labels_{data['barcode']}.pdf", "PDF Files (*.pdf)"
+        )
+        if not path:
+            return
+
+        try:
+            build_label_sheet_pdf(path, dialog.labels_per_page, **data)
+        except (ValueError, OSError) as e:
+            self._show_overlay(f"Could not create labels: {e}", kind="error")
+            return
+        # Open in the default PDF viewer so it can be printed straight away.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()
@@ -750,7 +749,7 @@ class ArticleDetailPanel(QFrame):
         if self._mode == "display":
             return
         with get_session() as session:
-            generated_barcode = ProductService.generate_barcode(session, type="ean13")
+            generated_barcode = ProductService.generate_barcode(session, barcode_type="ean13")
             self.barcode.setText(generated_barcode)
 
 
