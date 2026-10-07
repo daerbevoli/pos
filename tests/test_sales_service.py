@@ -70,8 +70,8 @@ def test_finalize_sale_sale_number_format_and_sequence(db_session):
     sale1 = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
     sale2 = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
 
-    assert sale1.sale_number == f"S-{today_str}-001"
-    assert sale2.sale_number == f"S-{today_str}-002"
+    assert sale1.sale_number == f"S-{today_str}-0001"
+    assert sale2.sale_number == f"S-{today_str}-0002"
 
 
 def test_finalize_sale_computes_total_tax(db_session):
@@ -163,35 +163,6 @@ def test_update_sale_missing_sale_raises(db_session):
         SalesService.update_sale(db_session, 99999, _cart_with(_item_for(product, quantity=1)))
 
 
-# ── void_sale ────────────────────────────────────────────────────────────
-
-def test_void_sale_restores_stock_and_marks_voided(db_session):
-    product = _make_product(db_session, stock_quantity=50)
-    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=5)))
-    db_session.refresh(product)
-    assert product.stock_quantity == 45
-
-    result = SalesService.void_sale(db_session, sale.id, notes="customer changed mind")
-
-    assert result is True
-    db_session.refresh(product)
-    assert product.stock_quantity == 50
-    db_session.refresh(sale)
-    assert sale.status == "voided"
-    assert "customer changed mind" in sale.notes
-
-
-def test_void_sale_nonexistent_returns_false(db_session):
-    assert SalesService.void_sale(db_session, 99999) is False
-
-
-def test_void_sale_cannot_void_twice(db_session):
-    product = _make_product(db_session)
-    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
-    assert SalesService.void_sale(db_session, sale.id) is True
-    assert SalesService.void_sale(db_session, sale.id) is False
-
-
 # ── finalize_invoice ─────────────────────────────────────────────────────
 
 def test_finalize_invoice_creates_sale_and_invoice(db_session):
@@ -218,14 +189,20 @@ def test_finalize_invoice_empty_cart_raises(db_session):
         SalesService.finalize_invoice(db_session, Cart())
 
 
-def test_finalize_invoice_number_mirrors_sale_number(db_session):
+def test_finalize_invoice_numbers_its_own_sequence(db_session):
+    """Invoices count separately from sales: a plain sale in between
+    doesn't use up an invoice number."""
     from app.core.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
-    invoice = SalesService.finalize_invoice(
-        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id
-    )
-    assert invoice.invoice_number == invoice.sale.sale_number.replace("S-", "I-", 1)
+    first = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+    SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    second = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+
+    today = date.today().strftime("%d%m%y")
+    assert first.invoice_number == f"I-{today}-001"
+    assert second.invoice_number == f"I-{today}-002"
+    assert second.sale.sale_number == f"S-{today}-0003"
 
 
 def test_finalize_invoice_snapshots_client_and_amounts(db_session):
@@ -252,6 +229,21 @@ def test_finalize_invoice_snapshots_client_and_amounts(db_session):
     snapshot = json.loads(invoice.line_items_snapshot)
     assert snapshot[0]["product_id"] == product.id
     assert snapshot[0]["quantity"] == 1
+
+
+def test_finalize_invoice_snapshots_payment(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, price=10.0)
+    breakdown = [{"method": "cash", "amount": 4.0}, {"method": "card", "amount": 6.0}]
+
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id,
+        payment_method="card", payment_breakdown=breakdown,
+    )
+
+    assert invoice.payment_method == "card"
+    assert json.loads(invoice.payment_breakdown) == breakdown
 
 
 def test_finalize_invoice_without_client_raises(db_session):
@@ -308,6 +300,40 @@ def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
     assert snapshot[0]["quantity"] == 3
 
 
+def test_update_sale_resyncs_unsent_invoice_payment(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, price=10.0)
+    invoice = SalesService.finalize_invoice(
+        db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id, payment_method="cash",
+    )
+
+    breakdown = [{"method": "card", "amount": 10.0}]
+    SalesService.update_sale(
+        db_session, invoice.sale_id, _cart_with(_item_for(product, quantity=1)),
+        payment_method="card", payment_breakdown=breakdown,
+    )
+
+    db_session.refresh(invoice)
+    assert invoice.payment_method == "card"
+    assert json.loads(invoice.payment_breakdown) == breakdown
+
+
+def test_update_sale_turning_receipt_into_invoice_snapshots_payment(db_session):
+    from app.core.client_service import ClientService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, price=10.0)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)), payment_method="cash")
+
+    SalesService.update_sale(
+        db_session, sale.id, _cart_with(_item_for(product, quantity=1)),
+        payment_method="card", client_id=client.id,
+    )
+
+    db_session.refresh(sale)
+    assert sale.invoice.payment_method == "card"
+
+
 def test_update_sale_with_client_turns_refund_into_credit_note(db_session):
     """A finished RF- ticket reopened and given a client must become a CN-
     credit note on re-payment, not stay a plain refund."""
@@ -324,7 +350,7 @@ def test_update_sale_with_client_turns_refund_into_credit_note(db_session):
     assert updated.sale_number == sale.sale_number
     assert updated.invoice is not None
     assert updated.invoice.is_credit_note
-    assert updated.invoice.invoice_number == sale.sale_number.replace("RF-", "CN-", 1)
+    assert updated.invoice.invoice_number.startswith("CN-") and updated.invoice.invoice_number.endswith("-001")
     assert updated.invoice.client_name == "Client"
     assert updated.invoice.final_amount == -10.0
 
@@ -338,7 +364,7 @@ def test_update_sale_with_client_turns_receipt_into_invoice(db_session):
 
     updated = SalesService.update_sale(db_session, sale.id, cart, client_id=client.id)
 
-    assert updated.invoice.invoice_number == sale.sale_number.replace("S-", "I-", 1)
+    assert updated.invoice.invoice_number.startswith("I-") and updated.invoice.invoice_number.endswith("-001")
     assert not updated.invoice.is_credit_note
 
 
@@ -396,11 +422,9 @@ def test_update_sale_refuses_once_invoice_sent(db_session):
 
 # ── Reports / queries ────────────────────────────────────────────────────
 
-def test_get_sales_for_date_filters_by_date_and_status(db_session):
+def test_get_sales_for_date_returns_that_days_sales(db_session):
     product = _make_product(db_session)
     sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
-    voided = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
-    SalesService.void_sale(db_session, voided.id)
 
     result = SalesService.get_sales_for_date(db_session, date.today())
 
@@ -448,16 +472,6 @@ def test_get_sales_range_includes_boundaries_and_excludes_outside(db_session):
     assert result_future == []
 
 
-def test_get_sales_range_excludes_voided(db_session):
-    product = _make_product(db_session)
-    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
-    SalesService.void_sale(db_session, sale.id)
-
-    today = date.today()
-    result = SalesService.get_sales_range(db_session, today, today)
-    assert result == []
-
-
 # ── Refund / credit-note numbering ───────────────────────────────────────
 
 def test_refund_cart_negates_added_quantity(db_session):
@@ -474,8 +488,8 @@ def test_refund_sale_numbered_rf_with_its_own_sequence(db_session):
     refund_cart.is_refund = True
     r1 = SalesService.finalize_sale(db_session, refund_cart)
 
-    assert s1.sale_number.endswith("-001") and s1.sale_number.startswith("S-")
-    assert r1.sale_number.startswith("RF-") and r1.sale_number.endswith("-001")
+    assert s1.sale_number.endswith("-0001") and s1.sale_number.startswith("S-")
+    assert r1.sale_number.startswith("RF-") and r1.sale_number.endswith("-0001")
 
 
 def test_refund_invoice_numbered_cn(db_session):
@@ -590,3 +604,90 @@ def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
     assert [line.discount_percent for line in lines] == [10.0, 10.0]
     assert [line.line_total_excl_tax for line in lines] == [9.0, 9.0]
     assert invoice.tax_amount == round(0.54 + 1.89, 2)
+
+
+def test_invoice_number_not_reused_after_z_report_same_day(db_session):
+    """A Z report purges sales but keeps invoices; the invoice sequence
+    carries on rather than reissue an existing invoice number."""
+    from app.core.client_service import ClientService
+    from app.core.report_service import XZReportService
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, stock_quantity=10)
+    first = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+    SalesService.mark_invoice_sent(db_session, first.sale_id)
+    XZReportService.close_z_report(db_session)
+
+    second = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+
+    assert first.invoice_number.endswith("-001")
+    assert second.invoice_number.endswith("-002")
+
+
+def test_z_report_restarts_sale_numbers(db_session):
+    from app.core.report_service import XZReportService
+    product = _make_product(db_session, stock_quantity=10)
+    SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    XZReportService.close_z_report(db_session)
+
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+
+    assert sale.sale_number == f"S-{date.today().strftime('%d%m%y')}-0001"
+
+
+def test_invoice_number_wraps_after_999(db_session):
+    from app.core.client_service import ClientService
+    from app.models.models import NumberSequence
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, stock_quantity=10)
+    db_session.add(NumberSequence(series="I", last_value=998))
+    db_session.commit()
+
+    last = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+    wrapped = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+
+    assert last.invoice_number.endswith("-999")
+    assert wrapped.invoice_number.endswith("-001")
+
+
+def test_wrapped_number_skips_one_still_in_use(db_session):
+    """Wrapping within one day mustn't reissue a number already taken today."""
+    from app.models.models import NumberSequence
+    product = _make_product(db_session, stock_quantity=10)
+    taken = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))  # S-…-0001
+    db_session.get(NumberSequence, "S").last_value = 9999
+    db_session.commit()
+
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+
+    assert taken.sale_number.endswith("-0001")
+    assert sale.sale_number.endswith("-0002")
+
+
+def test_sequence_seeds_from_latest_number_on_existing_database(db_session):
+    """A database from before stored counters continues after its last
+    issued invoice instead of restarting at 001."""
+    from app.core.client_service import ClientService
+    from app.models.models import Invoice
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, stock_quantity=10)
+    db_session.add(Invoice(client_id=client.id, invoice_number="I-010126-041", client_name="C",
+                           client_vat_number="V1", client_street="", client_zip="", client_city=""))
+    db_session.commit()
+
+    invoice = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
+
+    assert invoice.invoice_number.endswith("-042")
+
+
+def test_sale_number_wraps_after_9999(db_session):
+    from app.models.models import NumberSequence
+    product = _make_product(db_session, stock_quantity=10)
+    db_session.add(NumberSequence(series="S", last_value=9998))
+    db_session.commit()
+
+    last = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    wrapped = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+
+    assert last.sale_number.endswith("-9999")
+    assert wrapped.sale_number.endswith("-0001")

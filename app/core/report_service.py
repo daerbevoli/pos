@@ -12,7 +12,7 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.sales_service import Cart, calc_tax
+from app.core.sales_service import Cart, calc_tax, SalesService, OpenTicketData, load_open_tickets
 from app.models.models import Invoice, Product, Sale, ZReport
 
 VAT_RATES = (0, 6, 21)
@@ -27,6 +27,19 @@ def _payment_breakdown(sale) -> list[dict]:
         except (ValueError, TypeError):
             pass
     return [{"method": sale.payment_method, "amount": sale.final_amount}]
+
+
+def _sum_payment_breakdowns(sources) -> list[dict]:
+    """Per-method totals over sales (or invoices — same payment fields)."""
+    payment_totals: dict[str, float] = {}
+    for source in sources:
+        for leg in _payment_breakdown(source):
+            method = leg.get("method", "unknown")
+            payment_totals[method] = payment_totals.get(method, 0.0) + leg.get("amount", 0.0)
+    return [
+        {"method": method, "amount": round(amount, 2)}
+        for method, amount in payment_totals.items()
+    ]
 
 
 def _amount_for_method(sale, method: str) -> float:
@@ -67,6 +80,20 @@ def invoice_vat_breakdown(invoices) -> dict:
                 continue
             lines.append((entry.tax_rate, calc_tax(net_total, entry.tax_rate), net_total))
     return _vat_breakdown(lines)
+
+
+def invoice_payment_breakdown(invoices) -> list[dict]:
+    """Per-method payment totals from each invoice's own frozen payment
+    snapshot, so it still works after a Z report has purged the invoices'
+    sales. An invoice issued before that snapshot existed falls back to its
+    sale; if that's been purged too, how it was paid is lost and it's left out."""
+    sources = []
+    for invoice in invoices:
+        if invoice.payment_method is not None:
+            sources.append(invoice)
+        elif invoice.sale is not None:
+            sources.append(invoice.sale)
+    return _sum_payment_breakdowns(sources)
 
 
 def invoice_category_breakdown(session: Session, invoices) -> dict:
@@ -151,15 +178,7 @@ class XZReportService:
             (item.tax_rate, item.tax_amount, item.line_total) for sale in sales for item in sale.items
         )
 
-        payment_totals: dict[str, float] = {}
-        for sale in sales:
-            for leg in _payment_breakdown(sale):
-                method = leg.get("method", "unknown")
-                payment_totals[method] = payment_totals.get(method, 0.0) + leg.get("amount", 0.0)
-        payment_breakdown = [
-            {"method": method, "amount": round(amount, 2)}
-            for method, amount in payment_totals.items()
-        ]
+        payment_breakdown = _sum_payment_breakdowns(sales)
 
         discounts, mistakes = _discounts_and_mistakes(sales)
 
@@ -208,6 +227,13 @@ class XZReportService:
         return [number for (number,) in rows]
 
     @staticmethod
+    def open_tickets(session: Session) -> bool:
+        if load_open_tickets(session):
+            return True
+        return False
+
+
+    @staticmethod
     def close_z_report(session: Session) -> ZReport:
         """Snapshot current sales into a new ZReport row, then purge them.
         Runs as one transaction: the snapshot and the purge succeed or fail
@@ -218,7 +244,8 @@ class XZReportService:
         is still unsent: purging its sale unlinks the invoice from it, and
         the POS can then no longer reach it to send it."""
         unsent = XZReportService.unsent_invoice_numbers(session)
-        if unsent:
+        open_tickets = XZReportService.open_tickets(session)
+        if unsent or open_tickets:
             raise ValueError(f"Unsent invoices: {', '.join(unsent)}")
 
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
@@ -253,6 +280,7 @@ class XZReportService:
 
         for sale in sales:
             session.delete(sale)
+        SalesService.reset_sale_sequences(session)
 
         session.commit()
         session.refresh(z_report)

@@ -8,14 +8,12 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket
+from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket, NumberSequence
 from app.core.product_service import ProductService
-from app.core.settings_service import get_store_data
 
 @dataclass
 class ReceiptEntry:
     pass
-
 
 @dataclass
 class CartItem(ReceiptEntry):
@@ -35,7 +33,7 @@ class CartItem(ReceiptEntry):
     is_open_price: bool = False  # True = unit_price is typed in per sale rather than fixed on the product
     promo_name: str | None = None    # label of the Promo attached to the product when this line was added, if any
     promo_type: str | None = None    # "percent" | "fixed" | None — copied from Promo.discount_type
-    promo_value: float = 0.0         # copied from Promo.discount_value
+    discount: float = 0.0            # copied from PromoItem.discount_value: a percent or a fixed amount per unit, per promo_type
 
     @property
     def pending(self) -> bool:
@@ -45,8 +43,8 @@ class CartItem(ReceiptEntry):
         return self.quantity is None or (self.is_open_price and self.unit_price == 0.0)
 
     @property
-    def promo_discount(self) -> float:
-        """Discount contributed by the attached promo, recomputed live off the
+    def discount_amount(self) -> float:
+        """Discount amount contributed by the attached promo, recomputed live off the
         current quantity/unit_price so it stays correct even for a pending
         weight/open-price item whose amount is filled in after this line
         already exists. Materialized into a real DiscountEntry by
@@ -59,8 +57,8 @@ class CartItem(ReceiptEntry):
             return 0.0
         raw = self.unit_price * self.quantity
         if self.promo_type == "percent":
-            return round(raw * self.promo_value / 100, 2)
-        fixed = self.promo_value * self.quantity
+            return round(raw * self.discount / 100, 2)
+        fixed = self.discount * self.quantity
         return round(min(fixed, raw), 2) if raw >= 0 else round(max(fixed, raw), 2)
 
     @property
@@ -204,14 +202,14 @@ class Cart:
                 is_open_price=product.is_open_price,
                 promo_name=promo_item.promo.name if promo_item else None,
                 promo_type=promo_item.discount_type if promo_item else None,
-                promo_value=promo_item.discount_value if promo_item else 0.0,
+                discount=promo_item.discount_value if promo_item else 0.0,
             )
         )
         self.sync_promo_discounts()
 
     def sync_promo_discounts(self):
         """Rebuild every promo-driven DiscountEntry from scratch off each
-        CartItem's *current* promo_discount. Call this after anything that
+        CartItem's *current* discount_amount. Call this after anything that
         could change a promo'd line's amount: add_product() already does,
         but also after +/- quantity, filling in a pending weight/open-price
         item's amount, reversing a line, or removing one — see callers in
@@ -227,8 +225,8 @@ class Cart:
         result = []
         for entry in self.entries:
             result.append(entry)
-            if isinstance(entry, CartItem) and not entry.has_reversal and entry.promo_discount != 0:
-                result.append(DiscountEntry(amount=entry.promo_discount, label=entry.promo_name, is_promo=True))
+            if isinstance(entry, CartItem) and not entry.has_reversal and entry.discount_amount != 0:
+                result.append(DiscountEntry(amount=entry.discount_amount, label=entry.promo_name, is_promo=True))
         self.entries = result
 
     def retax_for_client(self, is_domestic: bool):
@@ -298,7 +296,7 @@ class Cart:
                     "is_open_price": entry.is_open_price,
                     "promo_name": entry.promo_name,
                     "promo_type": entry.promo_type,
-                    "promo_value": entry.promo_value,
+                    "discount": entry.discount,
                 })
             elif isinstance(entry, DiscountEntry):
                 data.append({
@@ -333,7 +331,8 @@ class Cart:
                     is_open_price=raw.get("is_open_price", False),
                     promo_name=raw.get("promo_name"),
                     promo_type=raw.get("promo_type"),
-                    promo_value=raw.get("promo_value", 0.0),
+                    # Snapshots saved before the rename still carry "promo_value".
+                    discount=raw.get("discount", raw.get("promo_value", 0.0)),
                 )
                 entries.append(item)
                 items.append(item)
@@ -416,7 +415,7 @@ def save_open_ticket(
 
 def clear_open_ticket(session: Session, vtab_slot: int) -> None:
     """Drops the crash-recovery snapshot for a V-tab once its ticket is no
-    longer in progress (paid, voided, or explicitly cleared)."""
+    longer in progress (paid or explicitly cleared)."""
     session.query(OpenTicket).filter_by(vtab_slot=vtab_slot).delete()
     session.commit()
 
@@ -468,9 +467,7 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
     for entry, net_total in cart.net_line_totals():
         if entry.quantity is None:
             continue
-        # A line voided on a reopened sale and its reversal net to zero
-        # (same price/VAT, negated quantity), so neither belongs on the
-        # document — and keeping them breaks the credit-note abs() below.
+        # If item was added and voided, skip it
         if entry.has_reversal or entry.is_reversal:
             continue
         tax = calc_tax(net_total, entry.tax_rate)
@@ -521,27 +518,74 @@ def generate_invoice_data(invoice: Invoice) -> dict:
 
     # ── Reports / Queries ─────────────────────────────────────────────────────
 
+# Highest number in a series before it wraps back to 1; also sets the
+# zero-padded width ("S-ddmmyy-0042", "I-ddmmyy-042").
+SALE_NUMBER_MAX = 9999     # S- / RF-
+INVOICE_NUMBER_MAX = 999   # I- / CN-
+
+
 class SalesService:
 
     @staticmethod
-    def _generate_sale_number(session: Session, prefix: str = "S") -> str:
-        """Next "<prefix>-ddmmyy-NNN" number, sequenced per prefix so
-        refunds (RF-) get their own run of numbers next to sales (S-)."""
-        today = date.today().strftime("%d%m%y")
-        count = session.query(func.count(Sale.id)).filter(
-            func.date(Sale.created_at) == date.today(),
-            Sale.sale_number.like(f"{prefix}-%"),
-        ).scalar() or 0
-        return f"{prefix}-{today}-{count + 1:03d}"
+    def _next_number(session: Session, series: str, column, maximum: int) -> str:
+        """Next "<series>-ddmmyy-N…" number. N… counts 1..maximum per series,
+        zero-padded to maximum's width, and wraps back to 1, skipping any number still taken in `column`
+        (the date usually keeps a wrapped number unique; this covers a
+        series that wraps within one day). A series with no stored counter
+        yet (database from before counters existed) continues after its
+        most recently issued number."""
+        row = session.get(NumberSequence, series)
+        if row is None:
+            latest = session.query(column).filter(column.like(f"{series}-%")) \
+                .order_by(column.class_.id.desc()).first()
+            suffix = latest[0].rsplit("-", 1)[1] if latest else ""
+            row = NumberSequence(series=series, last_value=int(suffix) if suffix.isdigit() else 0)
+            session.add(row)
 
+        today = date.today().strftime("%d%m%y")
+        value = row.last_value
+        width = len(str(maximum))
+        for _ in range(maximum):
+            value = value % maximum + 1
+            number = f"{series}-{today}-{value:0{width}d}"
+            if session.query(column).filter(column == number).first() is None:
+                row.last_value = value
+                return number
+        raise ValueError(f"All {maximum} {series}- numbers for today are in use.")
+
+    @staticmethod
+    def _generate_sale_number(session: Session, prefix: str = "S") -> str:
+        """Sales (S-) and refunds (RF-) each run their own 0001..9999 sequence,
+        restarted by every Z report (see reset_sale_sequences())."""
+        return SalesService._next_number(session, prefix, Sale.sale_number, SALE_NUMBER_MAX)
+
+    @staticmethod
+    def _generate_invoice_number(session: Session, is_credit_note: bool) -> str:
+        """Invoices (I-) and credit notes (CN-) each run their own 001..999
+        sequence that carries on across Z reports — unlike the sale's
+        number, which restarts — so it's independent of the sale's number."""
+        return SalesService._next_number(
+            session, "CN" if is_credit_note else "I", Invoice.invoice_number, INVOICE_NUMBER_MAX,
+        )
+
+    @staticmethod
+    def reset_sale_sequences(session: Session) -> None:
+        """Called by the Z report: the next sale/refund starts again at 0001.
+        Not committed here — it's part of the Z report's transaction."""
+        for series in ("S", "RF"):
+            row = session.get(NumberSequence, series)
+            if row is None:
+                session.add(NumberSequence(series=series, last_value=0))
+            else:
+                row.last_value = 0
 
     @staticmethod
     def finalize_sale(
         session: Session,
         cart: Cart,
         payment_method: str = "cash",
-        amount_tendered: float = None,
-        notes: str = None,
+        amount_tendered: float | None = None,
+        notes: str | None = None,
         payment_breakdown: list[dict] = None,
     ) -> Sale:
         """
@@ -610,14 +654,11 @@ class SalesService:
         return round(total_tax, 2)
 
     @staticmethod
-    def _new_invoice(sale: Sale, client: Client, cart: Cart) -> Invoice:
-        """Builds the Invoice document for an already-flushed sale. Its number
-        follows the sale's: a refund issued to a client is a credit note
-        (RF-… sale, CN-… document), anything else a regular invoice (S-… → I-…)."""
-        if sale.is_refund:
-            invoice_number = sale.sale_number.replace("RF-", "CN-", 1)
-        else:
-            invoice_number = sale.sale_number.replace("S-", "I-", 1)
+    def _new_invoice(session: Session, sale: Sale, client: Client, cart: Cart) -> Invoice:
+        """Builds the Invoice document for an already-flushed sale: a refund
+        issued to a client is a credit note (CN-…), anything else a regular
+        invoice (I-…), numbered by its own sequence (_generate_invoice_number)."""
+        invoice_number = SalesService._generate_invoice_number(session, sale.is_refund)
         return Invoice(
             sale_id=sale.id,
             client_id=client.id,
@@ -634,6 +675,8 @@ class SalesService:
             tax_amount=sale.tax_amount,
             final_amount=sale.final_amount,
             line_items_snapshot=cart.to_snapshot(),
+            payment_method=sale.payment_method,
+            payment_breakdown=sale.payment_breakdown,
         )
 
     @staticmethod
@@ -703,7 +746,7 @@ class SalesService:
             raise ValueError("An invoice requires a valid client.")
         if sale.invoice is None and client is not None:
             # Reopened receipt/refund turned into an invoice/credit note.
-            session.add(SalesService._new_invoice(sale, client, cart))
+            session.add(SalesService._new_invoice(session, sale, client, cart))
         elif sale.invoice is not None:
             if client is not None and client.id != sale.invoice.client_id:
                 sale.invoice.client_id = client.id
@@ -717,6 +760,8 @@ class SalesService:
             sale.invoice.tax_amount = sale.tax_amount
             sale.invoice.final_amount = sale.final_amount
             sale.invoice.line_items_snapshot = cart.to_snapshot()
+            sale.invoice.payment_method = sale.payment_method
+            sale.invoice.payment_breakdown = sale.payment_breakdown
 
         session.commit()
         session.refresh(sale)
@@ -745,29 +790,6 @@ class SalesService:
         session.commit()
         session.refresh(invoice)
         return invoice
-
-    @staticmethod
-    def void_sale(session: Session, sale_id: int, notes: str = None) -> bool:
-        """Void a sale and restore stock."""
-        sale = session.query(Sale).filter_by(id=sale_id, status="completed").first()
-        if not sale:
-            return False
-
-        for item in sale.items:
-            ProductService.adjust_stock(
-                session,
-                product_id=item.product_id,
-                quantity_change=item.quantity,
-                movement_type="return",
-                reference=sale.sale_number,
-                notes="Sale voided"
-            )
-
-        sale.status = "voided"
-        if notes:
-            sale.notes = (sale.notes or "") + f"\nVoided: {notes}"
-        session.commit()
-        return True
 
     @staticmethod
     def finalize_invoice(
@@ -808,7 +830,7 @@ class SalesService:
 
         sale.tax_amount = SalesService._add_sale_items(session, sale, cart)
 
-        invoice = SalesService._new_invoice(sale, client, cart)
+        invoice = SalesService._new_invoice(session, sale, client, cart)
         session.add(invoice)
         session.commit()
         session.refresh(sale)

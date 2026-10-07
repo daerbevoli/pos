@@ -58,68 +58,68 @@ def test_cart_item_line_total_rounds_to_2dp():
     assert item.line_total == 0.3
 
 
-# ── CartItem.promo_discount ──────────────────────────────────────────────
+# ── CartItem.discount_amount ─────────────────────────────────────────────
 
-def test_promo_discount_percent():
-    """promo_discount is no longer folded into line_total — it's
+def test_discount_amount_percent():
+    """discount_amount is no longer folded into line_total — it's
     materialized as its own DiscountEntry by sync_promo_discounts(), so the
     item's own line_total stays the full, undiscounted price."""
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=2,
-                     promo_type="percent", promo_value=15.0)
-    assert item.promo_discount == 3.0
+                     promo_type="percent", discount=15.0)
+    assert item.discount_amount == 3.0
     assert item.line_total == 20.0
 
 
-def test_promo_discount_fixed():
+def test_discount_amount_fixed():
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=2,
-                     promo_type="fixed", promo_value=1.5)
-    assert item.promo_discount == 3.0
+                     promo_type="fixed", discount=1.5)
+    assert item.discount_amount == 3.0
     assert item.line_total == 20.0
 
 
-def test_promo_discount_fixed_never_exceeds_line_total():
+def test_discount_amount_fixed_never_exceeds_line_total():
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=1.0, quantity=1,
-                     promo_type="fixed", promo_value=99.0)
-    assert item.promo_discount == 1.0
+                     promo_type="fixed", discount=99.0)
+    assert item.discount_amount == 1.0
     assert item.line_total == 1.0
 
 
-def test_promo_discount_fixed_reversal_line_is_sign_aware():
+def test_discount_amount_fixed_reversal_line_is_sign_aware():
     """A reversal line (negative quantity) with the same promo fields copied
     onto it must produce a negative discount capped at the same magnitude,
     so its DiscountEntry exactly undoes the original line's."""
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=1.0, quantity=-1,
-                     promo_type="fixed", promo_value=99.0)
-    assert item.promo_discount == -1.0
+                     promo_type="fixed", discount=99.0)
+    assert item.discount_amount == -1.0
 
 
-def test_promo_discount_percent_reversal_line_is_negative():
+def test_discount_amount_percent_reversal_line_is_negative():
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=-2,
-                     promo_type="percent", promo_value=15.0)
-    assert item.promo_discount == -3.0
+                     promo_type="percent", discount=15.0)
+    assert item.discount_amount == -3.0
 
 
-def test_promo_discount_none_when_no_promo():
+def test_discount_amount_none_when_no_promo():
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=2)
-    assert item.promo_discount == 0.0
+    assert item.discount_amount == 0.0
 
 
-def test_promo_discount_zero_for_pending_item():
+def test_discount_amount_zero_for_pending_item():
     """A pending weight item has no quantity yet, so the promo can't be
     priced until the amount is filled in — same as line_total."""
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=None,
-                     promo_type="percent", promo_value=15.0)
-    assert item.promo_discount == 0.0
+                     promo_type="percent", discount=15.0)
+    assert item.discount_amount == 0.0
 
 
-def test_promo_discount_recomputes_after_pending_quantity_is_filled_in():
+def test_discount_amount_recomputes_after_pending_quantity_is_filled_in():
     """Regression guard: promo terms are set once at add_product() time, but
     the discount itself must stay live off quantity so a pending weight item
     still gets priced correctly once its amount is entered."""
     item = CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=None,
-                     promo_type="percent", promo_value=15.0)
+                     promo_type="percent", discount=15.0)
     item.quantity = 2
-    assert item.promo_discount == 3.0
+    assert item.discount_amount == 3.0
     assert item.line_total == 20.0
 
 
@@ -300,8 +300,8 @@ def test_add_product_copies_active_promo_onto_the_line():
     entry, discount = cart.entries
     assert entry.promo_name == "New Year Promo"
     assert entry.promo_type == "percent"
-    assert entry.promo_value == 15.0
-    assert entry.promo_discount == 3.0
+    assert entry.discount == 15.0
+    assert entry.discount_amount == 3.0
     assert entry.line_total == 20.0  # full price — the promo is the separate line below
 
     assert isinstance(discount, DiscountEntry)
@@ -322,7 +322,7 @@ def test_add_product_ignores_inactive_promo():
     assert len(cart.entries) == 1  # no DiscountEntry synthesized
     entry = cart.entries[0]
     assert entry.promo_name is None
-    assert entry.promo_discount == 0.0
+    assert entry.discount_amount == 0.0
 
 
 def test_add_product_no_promo_leaves_fields_unset():
@@ -333,7 +333,7 @@ def test_add_product_no_promo_leaves_fields_unset():
     entry = cart.entries[0]
     assert entry.promo_name is None
     assert entry.promo_type is None
-    assert entry.promo_value == 0.0
+    assert entry.discount == 0.0
 
 
 # ── Cart.sync_promo_discounts ────────────────────────────────────────────
@@ -581,7 +581,7 @@ def test_snapshot_round_trip_preserves_all_entry_types():
             product_id=1, product_name="Bread", product_barcode="111",
             unit_price=2.5, quantity=2, unit="pcs", tax_rate=0, base_tax_rate=6,
             base_unit_price=2.65, is_reversal=False, has_reversal=True,
-            promo_name="New Year Promo", promo_type="percent", promo_value=15.0,
+            promo_name="New Year Promo", promo_type="percent", discount=15.0,
         ),
         DiscountEntry(amount=1.0, label="1.00"),
         DiscountEntry(amount=0.375, label="New Year Promo", is_promo=True),
@@ -605,7 +605,7 @@ def test_snapshot_round_trip_preserves_all_entry_types():
     assert item.has_reversal is True
     assert item.promo_name == "New Year Promo"
     assert item.promo_type == "percent"
-    assert item.promo_value == 15.0
+    assert item.discount == 15.0
 
     discount = restored.entries[1]
     assert isinstance(discount, DiscountEntry)
@@ -672,6 +672,19 @@ def test_from_snapshot_missing_base_unit_price_falls_back_to_unit_price():
     restored = Cart.from_snapshot(raw)
     assert restored.entries[0].unit_price == 12.10
     assert restored.entries[0].base_unit_price == 12.10
+
+
+def test_from_snapshot_reads_legacy_promo_value_key():
+    """Snapshots saved before CartItem.promo_value was renamed to discount
+    should still restore the promo's value."""
+    raw = json.dumps([{
+        "type": "item", "product_id": 1, "product_name": "X",
+        "product_barcode": "1", "unit_price": 10.0, "quantity": 1,
+        "promo_name": "Old Promo", "promo_type": "percent", "promo_value": 15.0,
+    }])
+    restored = Cart.from_snapshot(raw)
+    assert restored.entries[0].discount == 15.0
+    assert restored.entries[0].discount_amount == 1.5
 
 
 # ── _calc_tax ─────────────────────────────────────────────────────────────

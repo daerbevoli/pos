@@ -516,7 +516,7 @@ class POSScreen(QWidget):
 
     def _clear_open_ticket(self):
         """Drops the active tab's crash-recovery snapshot once its ticket is
-        no longer in progress (paid, voided, or explicitly cleared)."""
+        no longer in progress (paid or explicitly cleared)."""
         with get_session() as session:
             clear_open_ticket(session, self._active_tab)
 
@@ -1412,9 +1412,11 @@ class POSScreen(QWidget):
         self.cart.clear()
         self._set_frozen_style(False)
         self.input_stack.setCurrentIndex(0)
-        self._refresh_cart()
         self.ticket_total_lbl.show()
         self.client_label.hide()
+        self.client_id = None
+        self.is_invoice = False
+        self._refresh_cart()
         self.cart_table.setFocus()
 
     def _reopen_ticket(self):
@@ -1685,7 +1687,7 @@ class POSScreen(QWidget):
         #         self.isAdmin = True
         #         self.salesperson_changed.emit("Admin")
 
-    def _show_overlay(self, message: str, title: str = "", kind: str = "info"):
+    def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)
 
     def set_client(self, client_id: int, client_name: str):

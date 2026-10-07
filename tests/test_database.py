@@ -104,67 +104,9 @@ def test_seed_defaults_preserves_user_edited_values(monkeypatch):
         assert session.query(Settings).filter_by(key="store_name").first().value == "My Custom Store"
 
 
-# ── _run_migrations: additive columns ───────────────────────────────────
+# ── _run_migrations ──────────────────────────────────────────────────────
 
-def test_migrations_add_missing_columns(monkeypatch):
-    engine = _memory_engine()
-    monkeypatch.setattr(database, "ENGINE", engine)
-
-    with engine.connect() as conn:
-        conn.exec_driver_sql("""
-            CREATE TABLE sales (
-                id INTEGER PRIMARY KEY,
-                sale_number TEXT UNIQUE NOT NULL,
-                total_amount REAL NOT NULL,
-                final_amount REAL NOT NULL
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE sale_items (
-                id INTEGER PRIMARY KEY,
-                sale_id INTEGER NOT NULL,
-                product_id INTEGER NOT NULL,
-                product_name TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                unit_price REAL NOT NULL,
-                line_total REAL NOT NULL
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE clients (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                address TEXT,
-                phone TEXT,
-                email TEXT,
-                vatNumber TEXT NOT NULL,
-                website TEXT,
-                is_active BOOLEAN DEFAULT 1
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE z_reports (
-                id INTEGER PRIMARY KEY,
-                report_number TEXT UNIQUE NOT NULL
-            )
-        """)
-        conn.commit()
-
-    database._run_migrations()
-
-    with engine.connect() as conn:
-        z_report_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(z_reports)")}
-        sales_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)")}
-        sale_item_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sale_items)")}
-        client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
-
-    assert {"cart_snapshot", "payment_breakdown"} <= sales_cols
-    assert {"tax_rate", "tax_amount"} <= sale_item_cols
-    assert "ux_clients_name_active" in client_indexes
-    assert {"discounts", "mistakes"} <= z_report_cols
-
-
-def test_migrations_are_noop_when_columns_already_present(monkeypatch):
+def test_migrations_are_noop_on_current_schema(monkeypatch):
     """Running migrations against an already-current schema must not error."""
     engine = _memory_engine()
     Base.metadata.create_all(engine)
@@ -173,224 +115,34 @@ def test_migrations_are_noop_when_columns_already_present(monkeypatch):
     database._run_migrations()  # should be a no-op, not raise
 
 
-def test_migrations_add_invoice_snapshot_columns_preserving_data(monkeypatch):
-    """An invoices table predating the client/amount snapshot columns gets
-    them added, with existing rows preserved."""
+def test_column_migration_adds_missing_column_preserving_data(monkeypatch):
     engine = _memory_engine()
     monkeypatch.setattr(database, "ENGINE", engine)
+    monkeypatch.setattr(database, "_COLUMN_MIGRATIONS", [
+        database._ColumnMigration("widgets", "colour", "TEXT DEFAULT 'red'", "test"),
+    ])
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.exec_driver_sql("INSERT INTO widgets (id, name) VALUES (1, 'a')")
+        conn.commit()
+
+    database._run_migrations()
+    database._run_migrations()  # idempotent
 
     with engine.connect() as conn:
-        # Full old-style clients columns so the (unrelated) client-index
-        # migration this triggers can complete — this test is only about
-        # the invoices snapshot columns.
-        conn.exec_driver_sql("""
-            CREATE TABLE clients (
-                id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, address TEXT,
-                phone TEXT, email TEXT, vatNumber TEXT UNIQUE NOT NULL, website TEXT,
-                is_active BOOLEAN DEFAULT 1
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE sales (
-                id INTEGER PRIMARY KEY, sale_number TEXT UNIQUE NOT NULL,
-                total_amount REAL, final_amount REAL, cart_snapshot TEXT, payment_breakdown TEXT
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE sale_items (
-                id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER, product_name TEXT,
-                quantity REAL, unit_price REAL, line_total REAL, tax_rate INTEGER, tax_amount REAL
-            )
-        """)
-        # Old-style invoices: just the original 4 columns, no snapshot fields.
-        conn.exec_driver_sql("""
-            CREATE TABLE invoices (
-                id INTEGER PRIMARY KEY, sale_id INTEGER UNIQUE, client_id INTEGER,
-                invoice_number TEXT UNIQUE
-            )
-        """)
-        conn.exec_driver_sql(
-            "INSERT INTO invoices (sale_id, client_id, invoice_number) VALUES (1, 1, 'I-OLD')"
-        )
-        conn.commit()
+        rows = conn.exec_driver_sql("SELECT id, name, colour FROM widgets").fetchall()
+    assert rows == [(1, "a", "red")]
+
+
+def test_column_migration_skips_missing_table(monkeypatch):
+    """A table that doesn't exist yet is left to create_all(), not created here."""
+    engine = _memory_engine()
+    monkeypatch.setattr(database, "ENGINE", engine)
+    monkeypatch.setattr(database, "_COLUMN_MIGRATIONS", [
+        database._ColumnMigration("widgets", "colour", "TEXT", "test"),
+    ])
 
     database._run_migrations()
 
     with engine.connect() as conn:
-        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(invoices)")}
-        assert {
-            "issued_at", "client_name", "client_vat_number",
-            "client_street", "client_zip", "client_city",
-            "total_amount", "tax_amount", "final_amount", "line_items_snapshot",
-        } <= cols
-
-        row = conn.exec_driver_sql(
-            "SELECT sale_id, client_id, invoice_number FROM invoices"
-        ).fetchone()
-        assert row == (1, 1, "I-OLD")
-
-
-# ── _migrate_clients_to_partial_unique ──────────────────────────────────
-
-def test_migrate_clients_preserves_data_and_relaxes_uniqueness(monkeypatch):
-    engine = _memory_engine()
-    monkeypatch.setattr(database, "ENGINE", engine)
-
-    with engine.connect() as conn:
-        # Old-style schema: column-level UNIQUE constraints baked into the table.
-        conn.exec_driver_sql("""
-            CREATE TABLE clients (
-                id INTEGER PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL,
-                address TEXT UNIQUE,
-                phone TEXT UNIQUE,
-                email TEXT UNIQUE,
-                vatNumber TEXT UNIQUE NOT NULL,
-                website TEXT UNIQUE,
-                is_active BOOLEAN DEFAULT 1
-            )
-        """)
-        conn.exec_driver_sql(
-            "INSERT INTO clients (name, vatNumber, is_active) VALUES ('Acme', 'V1', 1)"
-        )
-        conn.exec_driver_sql("""
-            CREATE TABLE sales (
-                id INTEGER PRIMARY KEY, sale_number TEXT UNIQUE NOT NULL,
-                total_amount REAL, final_amount REAL,
-                cart_snapshot TEXT, payment_breakdown TEXT
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE sale_items (
-                id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER,
-                product_name TEXT, quantity REAL, unit_price REAL, line_total REAL,
-                tax_rate INTEGER, tax_amount REAL
-            )
-        """)
-        # A table with a FOREIGN KEY REFERENCES clients(...), same as the
-        # real invoices table — this is what SQLite's RENAME TABLE would
-        # silently corrupt without PRAGMA legacy_alter_table=ON (see
-        # test_migrate_clients_does_not_corrupt_dependent_foreign_keys).
-        conn.exec_driver_sql("""
-            CREATE TABLE invoices (
-                id INTEGER PRIMARY KEY, sale_id INTEGER UNIQUE, client_id INTEGER,
-                invoice_number TEXT UNIQUE,
-                FOREIGN KEY(client_id) REFERENCES clients(id),
-                FOREIGN KEY(sale_id) REFERENCES sales(id)
-            )
-        """)
-        conn.commit()
-
-    database._run_migrations()
-
-    with engine.connect() as conn:
-        rows = list(conn.exec_driver_sql("SELECT name, vatNumber, is_active FROM clients"))
-        assert rows == [("Acme", "V1", 1)]
-
-        # Deactivate the original, then a second client can reuse its name —
-        # impossible under the old blanket column-level UNIQUE.
-        conn.exec_driver_sql("UPDATE clients SET is_active = 0 WHERE name = 'Acme'")
-        conn.commit()
-        conn.exec_driver_sql(
-            "INSERT INTO clients (name, street, zip_code, city, vatNumber, is_active) "
-            "VALUES ('Acme', '2 Main St', '2000', 'Antwerpen', 'V2', 1)"
-        )
-        conn.commit()
-
-        count = conn.exec_driver_sql("SELECT COUNT(*) FROM clients").scalar()
-        assert count == 2
-
-        client_indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(clients)")}
-        assert "ux_clients_name_active" in client_indexes
-
-
-def test_migrate_clients_does_not_corrupt_dependent_foreign_keys(monkeypatch):
-    """
-    Regression: SQLite's ALTER TABLE ... RENAME TO auto-rewrites *other*
-    tables' REFERENCES clauses to follow the renamed table, regardless of
-    the foreign_keys pragma (that only controls enforcement, not this
-    schema rewrite). Without PRAGMA legacy_alter_table=ON, renaming
-    clients -> clients_old silently corrupted invoices.client_id's foreign
-    key to point at clients_old, which was then dropped — so every future
-    INSERT INTO invoices raised "no such table: main.clients_old" once FK
-    enforcement was on. Assert the invoices schema still references
-    `clients`, and that inserting a row actually works.
-    """
-    engine = _memory_engine()
-    monkeypatch.setattr(database, "ENGINE", engine)
-
-    with engine.connect() as conn:
-        conn.exec_driver_sql("""
-            CREATE TABLE clients (
-                id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, address TEXT,
-                phone TEXT, email TEXT, vatNumber TEXT UNIQUE NOT NULL, website TEXT,
-                is_active BOOLEAN DEFAULT 1
-            )
-        """)
-        conn.exec_driver_sql("INSERT INTO clients (name, vatNumber) VALUES ('Acme', 'V1')")
-        conn.exec_driver_sql("""
-            CREATE TABLE sales (
-                id INTEGER PRIMARY KEY, sale_number TEXT UNIQUE NOT NULL,
-                total_amount REAL, final_amount REAL, cart_snapshot TEXT, payment_breakdown TEXT
-            )
-        """)
-        conn.exec_driver_sql("INSERT INTO sales (sale_number, total_amount, final_amount) VALUES ('S-1', 1, 1)")
-        conn.exec_driver_sql("""
-            CREATE TABLE sale_items (
-                id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER,
-                product_name TEXT, quantity REAL, unit_price REAL, line_total REAL,
-                tax_rate INTEGER, tax_amount REAL
-            )
-        """)
-        conn.exec_driver_sql("""
-            CREATE TABLE invoices (
-                id INTEGER PRIMARY KEY, sale_id INTEGER UNIQUE, client_id INTEGER,
-                invoice_number TEXT UNIQUE,
-                FOREIGN KEY(client_id) REFERENCES clients(id),
-                FOREIGN KEY(sale_id) REFERENCES sales(id)
-            )
-        """)
-        conn.commit()
-        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
-
-    database._run_migrations()
-
-    with engine.connect() as conn:
-        invoices_sql = conn.exec_driver_sql(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='invoices'"
-        ).fetchone()[0]
-        assert "clients_old" not in invoices_sql
-
-        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
-        conn.exec_driver_sql(
-            "INSERT INTO invoices (sale_id, client_id, invoice_number) VALUES (1, 1, 'I-1')"
-        )
-        conn.commit()  # must not raise "no such table: main.clients_old"
-
-
-# ── _migrate_invoice_client_country ─────────────────────────────────────
-
-def test_migrate_invoice_client_country_backfills_from_client():
-    engine = _memory_engine()
-    Base.metadata.create_all(engine)
-    with engine.connect() as conn:
-        conn.exec_driver_sql(
-            "INSERT INTO clients (id, name, street, zip_code, city, country, vatNumber, is_active) "
-            "VALUES (1, 'Dutch BV', 'Straat 1', '1011', 'Amsterdam', 'NL', 'NL001', 1)"
-        )
-        # Invoice 2 points at a client that no longer exists -> falls back to BE.
-        conn.exec_driver_sql(
-            "INSERT INTO invoices (id, sale_id, client_id, invoice_number, client_name, "
-            "client_vat_number, client_street, client_zip, client_city) VALUES "
-            "(1, 1, 1, 'I-1', 'Dutch BV', 'NL001', 'Straat 1', '1011', 'Amsterdam'), "
-            "(2, 2, 99, 'I-2', 'Gone', 'BE002', 'x', 'y', 'z')"
-        )
-        # Simulate a database from before the column existed.
-        conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN client_country")
-        conn.commit()
-
-        database._migrate_invoice_client_country(conn)
-        database._migrate_invoice_client_country(conn)  # idempotent
-
-        rows = conn.exec_driver_sql("SELECT id, client_country FROM invoices ORDER BY id").fetchall()
-    assert rows == [(1, "NL"), (2, "BE")]
+        assert database._table_columns(conn, "widgets") == set()

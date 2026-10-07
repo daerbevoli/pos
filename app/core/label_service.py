@@ -112,7 +112,7 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
 
 def promo_label_data(product: Product, currency: str) -> dict | None:
     """{"price"} for the product's running promo, or None. The
-    promo price uses the same rule as the till (CartItem.promo_discount):
+    promo price uses the same rule as the till (CartItem.discount_amount):
     percent off, or a fixed amount off per unit, never below 0."""
     promo_item = product.active_promo_item
     if promo_item is None:

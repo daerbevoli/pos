@@ -117,8 +117,8 @@ def test_discounts_and_mistakes_skip_missing_or_bad_snapshot():
 # ── Screen behavior ──────────────────────────────────────────────────────
 
 def test_initial_state_shows_zero_summary(screen):
-    assert screen.card_revenue._value_label.text() == "0.00"
-    assert screen.card_transactions._value_label.text() == "0"
+    assert screen.cr_label.text() == "0.00"
+    assert screen.ctrans_label.text() == "0"
     assert screen.sales_table.rowCount() == 0
 
 
@@ -130,10 +130,10 @@ def test_load_report_populates_summary_and_table(screen):
 
     screen._load_report()
 
-    assert screen.card_revenue._value_label.text() == "30.00"
-    assert screen.card_transactions._value_label.text() == "2"
-    assert screen.card_cash._value_label.text() == "20.00"
-    assert screen.card_card._value_label.text() == "10.00"
+    assert screen.cr_label.text() == "30.00"
+    assert screen.ctrans_label.text() == "2"
+    assert screen.cc_label.text() == "20.00"
+    assert screen.crcr_label.text() == "10.00"
     assert screen.sales_table.rowCount() == 2
 
 
@@ -486,13 +486,13 @@ def test_mark_sent_on_a_plain_sale_does_not_ask(screen, monkeypatch):
         product = _make_product(session)
     sale = _finalize_sale(product)
     _select_sale_row(screen, sale.id)
-    infos, questions = [], []
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: infos.append(a))
+    overlays, questions = [], []
+    monkeypatch.setattr(screen, "_show_overlay", lambda message, **k: overlays.append(message))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: questions.append(a))
 
     screen._mark_invoice_sent()
 
-    assert len(infos) == 1 and questions == []
+    assert overlays == ["Sale is not an invoice."] and questions == []
 
 
 # ── Invoices view reads the invoices table ───────────────────────────────
@@ -513,13 +513,12 @@ def test_invoices_view_still_lists_invoices_after_z_report(screen):
     assert screen.sales_table.item(0, 0).text() == invoice.invoice_number
     assert screen.sales_table.item(0, 2).text() == "Acme"
     assert screen.sales_table.item(0, 4).text() == "1"
-    assert screen.sales_table.item(0, 5).text() == "/"
-    assert screen.card_transactions._value_label.text() == "1"
+    assert screen.sales_table.item(0, 5).text() == "CASH"  # from the invoice's own payment snapshot
+    assert screen.ctrans_label.text() == "1"
     assert screen._sales_row_ids == {}
 
 
 def test_purged_invoice_cannot_be_opened_on_pos(screen, qtbot, monkeypatch):
-    from PyQt6.QtWidgets import QMessageBox
     from app.core.report_service import XZReportService
     invoice = _make_invoice()
     with get_session() as session:
@@ -528,14 +527,14 @@ def test_purged_invoice_cannot_be_opened_on_pos(screen, qtbot, monkeypatch):
         XZReportService.close_z_report(session)
     screen._invoices_only()
     screen.sales_table.setCurrentCell(0, 0)
-    infos, selected, navigated = [], [], []
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: infos.append(a))
+    overlays, selected, navigated = [], [], []
+    monkeypatch.setattr(screen, "_show_overlay", lambda message, **k: overlays.append(message))
     screen.sale_selected.connect(selected.append)
     screen.navigate.connect(navigated.append)
 
     screen._confirm()
 
-    assert len(infos) == 1 and selected == [] and navigated == []
+    assert overlays == ["Z report cleared. View invoice in ERP."] and selected == [] and navigated == []
 
 
 def test_mark_sent_works_on_invoice_without_sale(screen, monkeypatch):
@@ -637,3 +636,38 @@ def test_invoice_category_breakdown_matches_sale_based_breakdown(patched_db):
         inv = session.get(Invoice, invoice.id)
         assert invoice_category_breakdown(session, [inv]) == \
             XZReportService.compute_totals(session, [inv.sale])["category_breakdown"]
+
+
+def test_invoice_payments_survive_z_report(screen):
+    """Cash/card cards in the Invoices view come from each invoice's own
+    payment snapshot, so they still add up to revenue after a Z report."""
+    from app.core.report_service import XZReportService
+    invoice = _make_invoice()  # 10.00, paid cash
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+    with get_session() as session:
+        XZReportService.close_z_report(session)
+
+    screen._invoices_only()
+
+    assert screen.cc_label.text() == "10.00"
+    assert screen.crcr_label.text() == "0.00"
+
+
+def test_invoice_payment_breakdown_falls_back_to_sale_for_legacy_invoices(patched_db):
+    """Invoices issued before payments were snapshotted onto them read the
+    payment off their sale while it exists, and are left out once it's purged."""
+    from app.core.report_service import invoice_payment_breakdown
+    from app.models.models import Invoice
+    invoice = _make_invoice()
+    with get_session() as session:
+        inv = session.get(Invoice, invoice.id)
+        inv.payment_method = None
+        inv.payment_breakdown = None
+        session.commit()
+        assert invoice_payment_breakdown([inv]) == [{"method": "cash", "amount": 10.0}]
+
+        inv.sale_id = None
+        session.commit()
+        session.refresh(inv)
+        assert invoice_payment_breakdown([inv]) == []

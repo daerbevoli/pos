@@ -160,7 +160,7 @@ def test_generate_barcode_raises_when_all_codes_used(db_session, monkeypatch):
 
 def test_generate_barcode_unsupported_type(db_session):
     with pytest.raises(ValueError):
-        ProductService.generate_barcode(db_session, type="code128")
+        ProductService.generate_barcode(db_session, barcode_type="code128")
 
 
 # ── Stock management ─────────────────────────────────────────────────────

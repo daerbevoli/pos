@@ -10,24 +10,22 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup
+    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup, QMessageBox
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
-
-from PyQt6.QtWidgets import QMessageBox
 
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.receipt_service import ReceiptService, PrinterError
 from app.core.report_service import (
-    XZReportService, invoice_category_breakdown, invoice_vat_breakdown,
+    XZReportService, invoice_category_breakdown, invoice_payment_breakdown, invoice_vat_breakdown,
 )
 from app.models.models import Invoice, Sale
-from app.utils.utils import FunctionButton
-from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT
+from app.utils.utils import FunctionButton, TapToDismissOverlay
+from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_MD, SPACING_LG
 
 
-def _make_card(title: str, value: str, bold: bool = False) -> QGroupBox:
+def _make_card(title: str, value: str, bold: bool = False) -> tuple[QGroupBox, QLabel]:
     card = QGroupBox(title)
     card.setObjectName("summaryCard")
     v = QVBoxLayout(card)
@@ -39,8 +37,7 @@ def _make_card(title: str, value: str, bold: bool = False) -> QGroupBox:
         font.setBold(True)
         label.setFont(font)
     v.addWidget(label)
-    card._value_label = label
-    return card
+    return card, label
 
 class ReportsScreen(QWidget):
 
@@ -52,31 +49,31 @@ class ReportsScreen(QWidget):
 
     def __init__(self):
         super().__init__()
-        # Invoices filter: once on, every reload (range buttons, Load Report,
-        # Z report, Mark sent) stays on invoices until toggled off.
+        # Invoices filter: once on, every reload (range buttons, Load Report, Z report, Mark sent) stays on until toggled off.
+        self.overlay = TapToDismissOverlay(self)
         self.invoices_only = False
         self._build_ui()
         self._load_today()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(SPACING_MD)
 
         # ── Date range controls ───────────────────────────────────────────────
-        controls = QHBoxLayout()
+        dates = QHBoxLayout()
 
-        controls.addWidget(QLabel("From:"))
+        dates.addWidget(QLabel("From:"))
         self.date_from = QDateEdit(QDate.currentDate())
         self.date_from.setCalendarPopup(True)
         self.date_from.setFixedHeight(REPORTS_BUTTON_HEIGHT)
-        controls.addWidget(self.date_from)
+        dates.addWidget(self.date_from)
 
-        controls.addWidget(QLabel("To:"))
+        dates.addWidget(QLabel("To:"))
         self.date_to = QDateEdit(QDate.currentDate())
         self.date_to.setCalendarPopup(True)
         self.date_to.setFixedHeight(REPORTS_BUTTON_HEIGHT)
-        controls.addWidget(self.date_to)
+        dates.addWidget(self.date_to)
 
         self._range_group = QButtonGroup(self)
         self._range_group.setExclusive(True)
@@ -88,7 +85,6 @@ class ReportsScreen(QWidget):
         self.today_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.today_btn.clicked.connect(lambda: self._set_range(0))
         self._range_group.addButton(self.today_btn)
-        controls.addWidget(self.today_btn)
 
         last_7_days_btn = QPushButton("Last 7 days")
         last_7_days_btn.setObjectName("salesBtn")
@@ -97,7 +93,6 @@ class ReportsScreen(QWidget):
         last_7_days_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         last_7_days_btn.clicked.connect(lambda: self._set_range(7))
         self._range_group.addButton(last_7_days_btn)
-        controls.addWidget(last_7_days_btn)
 
         last_30_days_btn = QPushButton("Last 30 days")
         last_30_days_btn.setObjectName("salesBtn")
@@ -106,29 +101,25 @@ class ReportsScreen(QWidget):
         last_30_days_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         last_30_days_btn.clicked.connect(lambda: self._set_range(30))
         self._range_group.addButton(last_30_days_btn)
-        controls.addWidget(last_30_days_btn)
 
         load_btn = QPushButton("Load Report")
         load_btn.setObjectName("primaryBtn")
         load_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         load_btn.clicked.connect(lambda: self._load_report())
-        controls.addWidget(load_btn)
 
+        # ── View / report actions ─────────────────────────────────────────────
         self.sales_btn = FunctionButton("Sales", "salesBtn")
         self.sales_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.sales_btn.setCheckable(True)
         self.sales_btn.setChecked(True)
-        controls.addWidget(self.sales_btn)
 
         vat_btn = FunctionButton("VAT breakdown", "salesBtn")
         vat_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         vat_btn.setCheckable(True)
-        controls.addWidget(vat_btn)
 
         cats_btn = FunctionButton("Categories", "salesBtn")
         cats_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         cats_btn.setCheckable(True)
-        controls.addWidget(cats_btn)
 
         self._view_group = QButtonGroup(self)
         self._view_group.setExclusive(True)
@@ -138,40 +129,63 @@ class ReportsScreen(QWidget):
         self.invoices_btn = FunctionButton("Invoices", "InvBtn")
         self.invoices_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.invoices_btn.setCheckable(True)
-        controls.addWidget(self.invoices_btn)
 
         mark_sent_btn = FunctionButton("Mark sent", "InvBtn")
         mark_sent_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         mark_sent_btn.clicked.connect(self._mark_invoice_sent)
-        controls.addWidget(mark_sent_btn)
 
         x_report_btn = FunctionButton("X Report", "XRBtn")
         x_report_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         x_report_btn.clicked.connect(self._print_x_report)
-        controls.addWidget(x_report_btn)
 
         z_report_btn = FunctionButton("Z Report", "ZRBtn")
         z_report_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         z_report_btn.clicked.connect(self._print_z_report)
-        controls.addWidget(z_report_btn)
 
         self.btn_ok = FunctionButton("OK", "okBtn")
         self.btn_ok.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         self.btn_ok.clicked.connect(self._confirm)
-        controls.addWidget(self.btn_ok)
 
-        controls.addStretch()
+        # Size every button to the widest one so the columns line up.
+        buttons = [
+            self.today_btn, last_7_days_btn, last_30_days_btn, load_btn,
+            self.sales_btn, vat_btn, cats_btn, self.invoices_btn,
+            mark_sent_btn, x_report_btn, z_report_btn, self.btn_ok,
+        ]
+        for btn in buttons:
+            btn.ensurePolished()  # apply QSS padding/font before measuring
+        button_width = max(btn.sizeHint().width() for btn in buttons)
+        for btn in buttons:
+            btn.setFixedWidth(button_width)
+
+        controls = QGridLayout()
+        controls.setHorizontalSpacing(20)
+        controls.addLayout(dates, 0, 0)
+        for col, (top, bottom) in enumerate([
+            (self.today_btn, self.sales_btn),
+            (last_7_days_btn, vat_btn),
+            (last_30_days_btn, cats_btn),
+            (load_btn, self.invoices_btn),
+        ], start=1):
+            controls.addWidget(top, 0, col)
+            controls.addWidget(bottom, 1, col)
+        controls.setColumnMinimumWidth(5, SPACING_LG)
+        controls.addWidget(x_report_btn, 0, 6)
+        controls.addWidget(z_report_btn, 0, 7)
+        controls.addWidget(mark_sent_btn, 1, 6)
+        controls.addWidget(self.btn_ok, 1, 7)
+        controls.setColumnStretch(8, 1)
         layout.addLayout(controls)
 
         # ── Summary cards ─────────────────────────────────────────────────────
         cards_group = QGroupBox("Summary")
         cards_layout = QGridLayout(cards_group)
 
-        self.card_revenue = _make_card("Total Revenue", "0.00", True)
-        self.card_transactions = _make_card("Transactions", "0")
-        self.card_avg = _make_card("Avg. Transaction", "0.00")
-        self.card_cash = _make_card("Cash Sales", "0.00")
-        self.card_card = _make_card("Card Sales", "0.00")
+        self.card_revenue, self.cr_label = _make_card("Total Revenue", "0.00", True)
+        self.card_transactions, self.ctrans_label = _make_card("Transactions", "0")
+        self.card_avg, self.cavg_label = _make_card("Avg. Transaction", "0.00")
+        self.card_cash, self.cc_label = _make_card("Cash Sales", "0.00")
+        self.card_card, self.crcr_label = _make_card("Card Sales", "0.00")
 
         cards_layout.addWidget(self.card_revenue, 0, 0)
         cards_layout.addWidget(self.card_transactions, 0, 1)
@@ -272,11 +286,11 @@ class ReportsScreen(QWidget):
                 invoice_rows = SalesService.get_invoices_range(session, start, end)
                 for invoice in invoice_rows:
                     self._add_row(invoice.sale, invoice)
-                # The payment split only exists on the sale, so it covers just
-                # the invoices whose sale hasn't been purged yet; VAT and
-                # categories are rebuilt from every invoice's own line items.
+                # Payments, VAT and categories are all rebuilt from each
+                # invoice's own snapshot, so purged sales still count.
                 sales = [invoice.sale for invoice in invoice_rows if invoice.sale is not None]
                 totals = XZReportService.compute_totals(session, sales)
+                totals["payment_breakdown"] = invoice_payment_breakdown(invoice_rows)
                 totals["vat_breakdown"] = invoice_vat_breakdown(invoice_rows)
                 totals["category_breakdown"] = invoice_category_breakdown(session, invoice_rows)
                 revenue = round(sum(invoice.final_amount or 0.0 for invoice in invoice_rows), 2)
@@ -292,11 +306,11 @@ class ReportsScreen(QWidget):
             avg = revenue / transaction_count if transaction_count else 0
             payment_totals = {leg["method"]: leg["amount"] for leg in totals["payment_breakdown"]}
 
-            self.card_revenue._value_label.setText(f"{revenue:.2f}")
-            self.card_transactions._value_label.setText(str(transaction_count))
-            self.card_avg._value_label.setText(f"{avg:.2f}")
-            self.card_cash._value_label.setText(f"{payment_totals.get('cash', 0.0):.2f}")
-            self.card_card._value_label.setText(f"{payment_totals.get('card', 0.0):.2f}")
+            self.cr_label.setText(f"{revenue:.2f}")
+            self.ctrans_label.setText(str(transaction_count))
+            self.cavg_label.setText(f"{avg:.2f}")
+            self.cc_label.setText(f"{payment_totals.get('cash', 0.0):.2f}")
+            self.crcr_label.setText(f"{payment_totals.get('card', 0.0):.2f}")
 
             self.vat_table.setRowCount(0)
             for rate, amounts in totals["vat_breakdown"].items():
@@ -347,7 +361,9 @@ class ReportsScreen(QWidget):
         else:
             snapshot = json.loads(invoice.line_items_snapshot) if invoice.line_items_snapshot else []
             item_count = sum(1 for entry in snapshot if entry.get("type") == "item")
-            payment, updated_at = "/", None
+            # NULL on invoices issued before payments were snapshotted onto them.
+            payment = (invoice.payment_method or "/").upper()
+            updated_at = None
 
         values = [number, fmt(created), client_name, vat_num, str(item_count), payment,
                   f"{final_amount:.2f}", fmt(updated_at)]
@@ -409,16 +425,16 @@ class ReportsScreen(QWidget):
         longer be reopened/edited, and stops blocking the Z report."""
         row = self.sales_table.currentRow()
         if row == -1:
-            QMessageBox.information(self, "Mark Invoice Sent", "Select an invoice first.")
+            self._show_overlay("Select invoice first.")
             return
         invoice_id = self._invoice_row_ids.get(row)
         if invoice_id is None:
-            QMessageBox.information(self, "Mark Invoice Sent", "The selected sale is not an invoice.")
+            self._show_overlay("Sale is not an invoice.")
             return
         with get_session() as session:
             invoice = session.get(Invoice, invoice_id)
             if invoice.sent_at is not None:
-                QMessageBox.information(self, "Mark Invoice Sent", f"{invoice.invoice_number} is already sent.")
+                self._show_overlay(f"Invoice {invoice.invoice_number} already sent.")
                 return
             invoice_number = invoice.invoice_number
 
@@ -437,10 +453,11 @@ class ReportsScreen(QWidget):
     def _warn_unsent_invoices(self, invoice_numbers: list[str]):
         QMessageBox.warning(
             self, "Z Report Blocked",
-            "These invoices haven't been sent to the ERP yet:\n\n"
+            "There are still open tickets on the pos. Clear them first "
+            + "\nand/or"
+            + "\nThese invoices haven't been sent to the ERP yet:\n\n"
             + "\n".join(invoice_numbers)
-            + "\n\nSend them first — once the Z report clears the sales, "
-              "they can no longer be sent from the POS."
+            + "\n\nSend them first."
         )
 
     def _confirm(self):
@@ -472,13 +489,13 @@ class ReportsScreen(QWidget):
         row = self.sales_table.currentRow()
         sale_id = self._sales_row_ids.get(row)
         if sale_id is None and row in self._invoice_row_ids:
-            QMessageBox.information(
-                self, "Invoice",
-                "This invoice's sale was cleared by a Z report, so it can't be opened on the POS. Open it in the ERP.",
-            )
+            self._show_overlay("Z report cleared. View invoice in ERP.")
             return False
         if sale_id is not None:
             self.sale_selected.emit(sale_id)
         self.sales_table.setCurrentCell(-1, -1)
         return True
+
+    def _show_overlay(self, message: str, kind: str = "info"):
+        self.overlay.show_message(message, kind=kind)
 

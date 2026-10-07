@@ -15,8 +15,10 @@ from app.constants.countries import BELGIUM
 class Base(DeclarativeBase):
     pass
 
-
 class Category(Base):
+    """
+    Categories that hold products. Used in Z-report to find per category sale
+    """
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -24,6 +26,7 @@ class Category(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
+    # A category had products
     products = relationship("Product", back_populates="category")
 
     def __repr__(self):
@@ -42,12 +45,13 @@ class Promo(Base):
     end_date = Column(Date, nullable=True)     # None = no upper bound
     is_active = Column(Boolean, default=True)
 
+    # Items have a promotion
     items = relationship("PromoItem", back_populates="promo", cascade="all, delete-orphan")
 
     @property
     def is_current(self) -> bool:
         """is_active and today falls within [start_date, end_date]
-        (either bound is optional)."""
+        (either bound is optional). Used to distinguish active ot finished sale"""
         if not self.is_active:
             return False
         today = date.today()
@@ -93,11 +97,11 @@ class Product(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     price = Column(Float, nullable=False)                # Ignored at sale time when is_open_price is set
-    is_open_price = Column(Boolean, nullable=False, default=False)  # True = price is typed in per sale (loose food, cigarettes, ...)
+    is_open_price = Column(Boolean, nullable=False, default=False)  # True = price is typed in per sale
     stock_quantity = Column(Integer, default=0)           # Float to support weight-based items
     min_stock_level = Column(Integer, default=5)          # Alert threshold
     unit = Column(String(20), default="pcs")            # pcs, kg, liter, etc.
-    tax = Column(Integer, nullable=False, default=21)    # 0, 6, 21 %
+    tax = Column(Integer, nullable=False, default=21)    # 0, 6, 12, 21 %
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -128,7 +132,7 @@ class Sale(Base):
     __tablename__ = "sales"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    sale_number = Column(String(20), unique=True, nullable=False)  # e.g. "S-20241201-0042"
+    sale_number = Column(String(20), unique=True, nullable=False)  # e.g. "S-010127-0042"
     total_amount = Column(Float, nullable=False)
     tax_amount = Column(Float, default=0.0)
     final_amount = Column(Float, nullable=False)
@@ -136,7 +140,7 @@ class Sale(Base):
     amount_tendered = Column(Float, nullable=True)     # Cash given by customer
     change_given = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
-    status = Column(Enum("completed", "refunded", "voided", name="sale_status"), default="completed")
+    status = Column(Enum("completed", "refunded", name="sale_status"), default="completed")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now) # shows if and when sale reopened and updated
     cart_snapshot = Column(Text, nullable=True)  # JSON: ordered cart entries as they were at payment time
@@ -245,6 +249,18 @@ class Client(Base):
     def __repr__(self):
         return f"<Client {self.name} {self.vatNumber}>"
 
+class NumberSequence(Base):
+    """Last number handed out in each document series — see
+    SalesService._next_number(). Stored rather than derived from existing
+    rows because numbers wrap back to 1 (after 9999 for sales, 999 for invoices), after which "highest
+    used + 1" no longer works. S-/RF- (sales/refunds) restart at each Z
+    report; I-/CN- (invoices/credit notes) run on across Z reports."""
+    __tablename__ = "number_sequences"
+
+    series = Column(String(4), primary_key=True)  # "S", "RF", "I", "CN"
+    last_value = Column(Integer, nullable=False, default=0)
+
+
 class ZReport(Base):
     __tablename__ = "z_reports"
 
@@ -268,10 +284,10 @@ class ZReport(Base):
 
 
 class OpenTicket(Base):
-    """Crash-recovery snapshot of one V-tab's in-progress (unpaid) cart —
+    """Crash-recovery snapshot of one V-tab's in-progress cart —
     upserted on every cart mutation while the ticket isn't finished yet
-    (see POSScreen._autosave_open_ticket()), and dropped once it's paid,
-    voided, or explicitly cleared, since a real Sale row then covers it.
+    (see POSScreen._autosave_open_ticket()), and dropped once it's paid
+    or explicitly cleared, since a real Sale row then covers it.
     One row per active V-tab slot, never a history table."""
     __tablename__ = "open_tickets"
 
@@ -292,14 +308,6 @@ class Invoice(Base):
     sale_id = Column(Integer, ForeignKey("sales.id"), unique=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     invoice_number = Column(String, unique=True)
-
-    # Snapshot of billing-relevant data, duplicated from Client/Sale rather
-    # than read live through the relationships below. Kept in sync by
-    # SalesService.update_sale() while the invoice is still editable
-    # (sent_at is None) — reopening the ticket and re-paying it re-derives
-    # these; see POSScreen._reopen_ticket(). Once sent_at is set the
-    # document is transmitted (Peppol) and must never change again — that's
-    # the point of freezing it here instead of deriving it live.
     issued_at = Column(DateTime, default=datetime.now)
     sent_at = Column(DateTime, nullable=True)  # None = still editable; set once transmitted, after which it's locked
     client_name = Column(String, nullable=False)
@@ -313,7 +321,9 @@ class Invoice(Base):
     total_amount = Column(Float, nullable=True)
     tax_amount = Column(Float, nullable=True)
     final_amount = Column(Float, nullable=True)
-    line_items_snapshot = Column(Text, nullable=True)  # JSON; same shape as Sale.cart_snapshot
+    line_items_snapshot = Column(Text, nullable=True)  # JSON; same shape as Sale.cart_snapsho
+    payment_method = Column(String(20), nullable=True)
+    payment_breakdown = Column(Text, nullable=True)  # JSON: [{"method": "cash", "amount": 20.0}, ...]
 
     sale   = relationship("Sale", backref=backref("invoice", uselist=False))
     client = relationship("Client", backref=backref("invoices", uselist=True))

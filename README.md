@@ -100,7 +100,7 @@ pos/
 │   ├── core/
 │   │   ├── database.py            # DB init, session factory, lightweight migrations
 │   │   ├── product_service.py     # Product & inventory logic
-│   │   ├── sales_service.py       # Cart, checkout, invoice/void logic
+│   │   ├── sales_service.py       # Cart, checkout, invoice logic
 │   │   ├── client_service.py      # Client CRUD
 │   │   ├── settings_service.py    # App settings
 │   │   ├── receipt_service.py     # ESC/POS receipt printing, cash drawer kick
