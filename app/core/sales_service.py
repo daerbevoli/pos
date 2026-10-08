@@ -266,7 +266,11 @@ class Cart:
                 return
 
     def clear(self):
+        """Empties the ticket for the next sale. The client's VAT treatment
+        goes with it (the caller drops the attached client too); refund mode
+        stays on, since only the RF/CN button leaves it."""
         self.entries.clear()
+        self.is_domestic = True
 
     def to_snapshot(self) -> str:
         """Serialize entries in order, exactly as displayed, for later replay.
@@ -644,7 +648,7 @@ class SalesService:
                 discount=round(entry.line_total - net_total, 2),
                 line_total=net_total,
             ))
-            ProductService.adjust_stock(
+            ProductService.move_stock(
                 session,
                 product_id=entry.product_id,
                 quantity_change=-entry.quantity,
@@ -709,7 +713,7 @@ class SalesService:
 
         # Restore stock from the old line items before replacing them.
         for old_item in sale.items:
-            ProductService.adjust_stock(
+            ProductService.move_stock(
                 session,
                 product_id=old_item.product_id,
                 quantity_change=old_item.quantity,

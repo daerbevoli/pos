@@ -184,6 +184,46 @@ def test_finalize_invoice_creates_sale_and_invoice(db_session):
     assert product.stock_quantity == 8
 
 
+def test_finalize_invoice_failure_rolls_back_sale_and_stock(db_session, monkeypatch):
+    """A failure after the stock moved (e.g. invoice numbering) must not
+    leave a committed sale with no invoice, or the stock already deducted."""
+    from app.core.client_service import ClientService
+    from app.models.models import StockMovement
+    client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
+    product = _make_product(db_session, stock_quantity=10)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("invoice numbering failed")
+    monkeypatch.setattr(SalesService, "_new_invoice", boom)
+
+    with pytest.raises(RuntimeError):
+        SalesService.finalize_invoice(
+            db_session, _cart_with(_item_for(product, quantity=2)), client_id=client.id
+        )
+    db_session.rollback()  # what closing the caller's session does
+
+    assert db_session.query(Sale).count() == 0
+    assert db_session.query(StockMovement).count() == 0
+    db_session.refresh(product)
+    assert product.stock_quantity == 10
+
+
+def test_update_sale_failure_rolls_back_stock_reconciliation(db_session):
+    product = _make_product(db_session, stock_quantity=10)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=2)))
+
+    # Fails at the client check — after old stock was restored and new deducted.
+    with pytest.raises(ValueError):
+        SalesService.update_sale(
+            db_session, sale.id, _cart_with(_item_for(product, quantity=5)), client_id=999999
+        )
+    db_session.rollback()
+
+    db_session.refresh(product)
+    assert product.stock_quantity == 8
+    assert db_session.get(Sale, sale.id).items[0].quantity == 2
+
+
 def test_finalize_invoice_empty_cart_raises(db_session):
     with pytest.raises(ValueError):
         SalesService.finalize_invoice(db_session, Cart())

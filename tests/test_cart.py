@@ -561,6 +561,19 @@ def test_add_product_after_non_domestic_client_already_set_nets_price():
     assert entry.base_unit_price == 12.10
 
 
+def test_clear_resets_non_domestic_vat_for_next_sale():
+    """A walk-in sale after a foreign-client invoice must be charged VAT again."""
+    cart = Cart()
+    cart.retax_for_client(is_domestic=False)
+    cart.clear()
+
+    cart.add_product(_FakeProduct(id=1, price=12.10, tax=21), quantity=1)
+
+    assert cart.is_domestic
+    assert cart.entries[0].tax_rate == 21
+    assert cart.entries[0].unit_price == 12.10
+
+
 def test_set_open_price_applies_current_client_vat_treatment():
     cart = Cart(is_domestic=False)
     product = _FakeProduct(id=1, name="Loose Snacks", price=0.0, tax=21, is_open_price=True)

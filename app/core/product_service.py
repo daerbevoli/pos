@@ -118,10 +118,31 @@ class ProductService:
         notes: str = None
     ) -> Optional[StockMovement]:
         """
-        Adjust stock for a product.
+        Adjust stock for a product, committed on its own — for a standalone
+        adjustment (inventory screen). Inside a larger save, use move_stock().
         quantity_change: positive = stock in, negative = stock out
         movement_type: 'purchase', 'sale', 'adjustment', 'return', 'waste'
         """
+        movement = ProductService.move_stock(
+            session, product_id, quantity_change, movement_type, reference, notes
+        )
+        if movement is not None:
+            session.commit()
+        return movement
+
+    @staticmethod
+    def move_stock(
+        session: Session,
+        product_id: int,
+        quantity_change: float,
+        movement_type: str,
+        reference: str = None,
+        notes: str = None
+    ) -> Optional[StockMovement]:
+        """adjust_stock() without the commit: the stock change and its
+        movement row are only flushed, so they commit or roll back together
+        with the caller's transaction (a sale and its invoice — see
+        SalesService.finalize_sale/finalize_invoice/update_sale)."""
         product = session.query(Product).filter_by(id=product_id).first()
         if not product:
             return None
@@ -139,7 +160,7 @@ class ProductService:
             notes=notes
         )
         session.add(movement)
-        session.commit()
+        session.flush()
         return movement
 
     @staticmethod

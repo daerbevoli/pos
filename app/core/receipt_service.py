@@ -355,7 +355,7 @@ class ReceiptService:
             printer.set(align="center", bold=False, width=1, height=1, custom_size=True)
             printer.text("Printer connected OK\n")
             printer.text("-" * LINE_WIDTH + "\n")
-            printer.cut()
+            printer.cut(mode="PART")
         except Exception as e:
             raise PrinterError(f"Printer connected but failed to print: {e}") from e
         finally:
@@ -443,7 +443,7 @@ class ReceiptService:
             printer.text("\n")
             printer.text("\n")
 
-            printer.text(f"Printed on {totals["period_end"]}")
+            printer.text(f"Printed on {z_report.period_end.strftime('%d/%m/%Y %H:%M')}")
 
             printer.cut(mode="PART")
         except PrinterError:

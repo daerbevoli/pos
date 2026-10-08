@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.sales_service import Cart, calc_tax, SalesService, OpenTicketData, load_open_tickets
 from app.models.models import Invoice, Product, Sale, ZReport
 
-VAT_RATES = (0, 6, 21)
+VAT_RATES = (0, 6, 21, 12)
 
 
 def _payment_breakdown(sale) -> list[dict]:
