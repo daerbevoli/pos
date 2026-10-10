@@ -18,7 +18,7 @@ from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.receipt_service import ReceiptService, PrinterError
 from app.core.report_service import (
-    XZReportService, invoice_category_breakdown, invoice_payment_breakdown, invoice_vat_breakdown,
+    XZReportService, invoice_category_breakdown, invoice_payment_breakdown, invoice_vat_breakdown, till_sales,
 )
 from app.models.models import Invoice, Sale
 from app.utils.utils import FunctionButton, TapToDismissOverlay
@@ -181,17 +181,21 @@ class ReportsScreen(QWidget):
         cards_group = QGroupBox("Summary")
         cards_layout = QGridLayout(cards_group)
 
+        # Total = Sales (till sales, S-/RF-) + Invoices (I-/CN-) — shown apart
+        # because the accountant books each through a different channel.
         self.card_revenue, self.cr_label = _make_card("Total Revenue", "0.00", True)
+        self.card_sales_revenue, self.csr_label = _make_card("Sales Revenue", "0.00")
+        self.card_invoice_revenue, self.cir_label = _make_card("Invoice Revenue", "0.00")
         self.card_transactions, self.ctrans_label = _make_card("Transactions", "0")
         self.card_avg, self.cavg_label = _make_card("Avg. Transaction", "0.00")
         self.card_cash, self.cc_label = _make_card("Cash Sales", "0.00")
         self.card_card, self.crcr_label = _make_card("Card Sales", "0.00")
 
-        cards_layout.addWidget(self.card_revenue, 0, 0)
-        cards_layout.addWidget(self.card_transactions, 0, 1)
-        cards_layout.addWidget(self.card_avg, 0, 2)
-        cards_layout.addWidget(self.card_cash, 0, 3)
-        cards_layout.addWidget(self.card_card, 0, 4)
+        for col, card in enumerate((
+            self.card_revenue, self.card_sales_revenue, self.card_invoice_revenue,
+            self.card_transactions, self.card_avg, self.card_cash, self.card_card,
+        )):
+            cards_layout.addWidget(card, 0, col)
 
         cards_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(cards_group)
@@ -306,7 +310,16 @@ class ReportsScreen(QWidget):
             avg = revenue / transaction_count if transaction_count else 0
             payment_totals = {leg["method"]: leg["amount"] for leg in totals["payment_breakdown"]}
 
-            self.cr_label.setText(f"{revenue:.2f}")
+            sales_revenue = round(sum(
+                sale.final_amount for sale in till_sales(SalesService.get_sales_range(session, start, end))
+            ), 2)
+            invoice_revenue = round(sum(
+                invoice.final_amount or 0.0 for invoice in SalesService.get_invoices_range(session, start, end)
+            ), 2)
+
+            self.cr_label.setText(f"{sales_revenue + invoice_revenue:.2f}")
+            self.csr_label.setText(f"{sales_revenue:.2f}")
+            self.cir_label.setText(f"{invoice_revenue:.2f}")
             self.ctrans_label.setText(str(transaction_count))
             self.cavg_label.setText(f"{avg:.2f}")
             self.cc_label.setText(f"{payment_totals.get('cash', 0.0):.2f}")

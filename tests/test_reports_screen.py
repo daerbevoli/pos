@@ -425,6 +425,82 @@ def test_close_z_report_stores_discounts_and_mistakes(patched_db):
         assert json.loads(z.discounts) == {"manual": 0.5, "promo": 0.0}
         assert json.loads(z.mistakes) == [{"name": "Cola", "quantity": 2, "unit": "pcs", "amount": 4.0}]
 
+# ── X/Z cover till sales only; invoices are booked via the ERP ───────────
+
+def _make_client_id():
+    with get_session() as session:
+        return ClientService.create(session, name="Acme", vatNumber="BE0123456749",
+                                    street="1 Main St", zip_code="1000", city="Brussels").id
+
+
+def _invoice_with_discount(product, client_id):
+    """An invoice for 1 x product with a 2.00 manual discount on it."""
+    with get_session() as session:
+        cart = Cart(entries=[
+            CartItem(product_id=product.id, product_name=product.name, product_barcode="",
+                     unit_price=product.price, quantity=1, tax_rate=product.tax),
+            DiscountEntry(amount=2.0, label="MANUAL DISCOUNT 2.00"),
+        ])
+        return SalesService.finalize_invoice(session, cart, payment_method="cash", client_id=client_id)
+
+
+def test_x_report_leaves_invoices_and_their_discounts_out(patched_db):
+    from app.core.report_service import XZReportService
+    with get_session() as session:
+        product = _make_product(session, price=10.0)
+    _finalize_sale(product, quantity=1)
+    _invoice_with_discount(product, _make_client_id())
+
+    with get_session() as session:
+        x = XZReportService.generate_x_report(session)
+    assert x["final_amount"] == 10.0
+    assert x["transaction_count"] == 1
+    assert x["payment_breakdown"] == [{"method": "cash", "amount": 10.0}]
+    assert x["discounts"] == {"manual": 0.0, "promo": 0.0}
+    assert x["vat_breakdown"]["21"]["total"] == 10.0
+
+
+def test_z_report_totals_leave_invoices_out_but_purge_every_sale(patched_db):
+    from app.core.report_service import XZReportService
+    from app.models.models import Invoice, Sale
+    with get_session() as session:
+        product = _make_product(session, price=10.0)
+    _finalize_sale(product, quantity=2)
+    invoice = _invoice_with_discount(product, _make_client_id())
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+
+    with get_session() as session:
+        z = XZReportService.close_z_report(session)
+        assert z.final_amount == 20.0
+        assert z.transaction_count == 1
+        assert session.query(Sale).count() == 0
+        assert session.query(Invoice).count() == 1
+
+
+def test_revenue_cards_split_sales_and_invoices(screen):
+    from app.core.report_service import XZReportService
+    with get_session() as session:
+        product = _make_product(session, price=10.0)
+    _finalize_sale(product, quantity=3)
+    invoice = _invoice_with_discount(product, _make_client_id())  # 10 - 2 = 8
+
+    screen._load_report()
+    assert screen.cr_label.text() == "38.00"
+    assert screen.csr_label.text() == "30.00"
+    assert screen.cir_label.text() == "8.00"
+
+    # After a Z report the till sales are purged; the invoice stays.
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, invoice.sale_id)
+    with get_session() as session:
+        XZReportService.close_z_report(session)
+    screen._load_report()
+    assert screen.cr_label.text() == "8.00"
+    assert screen.csr_label.text() == "0.00"
+    assert screen.cir_label.text() == "8.00"
+
+
 def test_z_report_button_warns_and_skips_confirmation_when_unsent(screen, monkeypatch):
     from app.models.models import ZReport
     from PyQt6.QtWidgets import QMessageBox

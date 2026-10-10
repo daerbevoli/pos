@@ -1,10 +1,13 @@
 """
 X / Z Report Service
-X report: read-only snapshot of all sales currently in the table (i.e.
+X report: read-only snapshot of the till sales currently in the table (i.e.
 everything since the last Z report). Z report: persists that snapshot as a
-sequentially-numbered ZReport row, then purges the Sale/SaleItem rows it
-summarized — the ZReport row becomes the sole permanent record of that
-period (invoices are unaffected).
+sequentially-numbered ZReport row, then purges every Sale/SaleItem row of
+the period — the ZReport row becomes the sole permanent record of the till
+sales (invoices are unaffected).
+
+Both cover till sales only (S-/RF-, see till_sales()): a sale invoiced as
+I-/CN- is booked through the ERP, so counting it here too would book it twice.
 """
 import json
 from datetime import datetime
@@ -16,6 +19,13 @@ from app.core.sales_service import Cart, calc_tax, SalesService, OpenTicketData,
 from app.models.models import Invoice, Product, Sale, ZReport
 
 VAT_RATES = (0, 6, 21, 12)
+
+
+def till_sales(sales) -> list:
+    """The sales that aren't invoiced (S-/RF-). An invoiced sale (I-/CN-)
+    is booked by the accountant through its invoice in the ERP, so the X/Z
+    report and the "Sales Revenue" figure leave it out."""
+    return [sale for sale in sales if sale.invoice is None]
 
 
 def _payment_breakdown(sale) -> list[dict]:
@@ -205,9 +215,9 @@ class XZReportService:
 
     @staticmethod
     def generate_x_report(session: Session) -> dict:
-        """Read-only preview — no persistence, no deletion."""
+        """Read-only preview — no persistence, no deletion. Till sales only."""
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
-        totals = XZReportService.compute_totals(session, sales)
+        totals = XZReportService.compute_totals(session, till_sales(sales))
         totals["report_number"] = f"X-{XZReportService.current_period_number(session):04d}"
         totals["period_start"] = sales[0].created_at if sales else datetime.now()
         totals["period_end"] = datetime.now()
@@ -251,7 +261,9 @@ class XZReportService:
             raise ValueError(f"Unsent invoices: {', '.join(unsent)}")
 
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
-        totals = XZReportService.compute_totals(session, sales)
+        # Totals over the till sales only; the purge below still takes every
+        # sale — an invoiced one lives on in its Invoice row.
+        totals = XZReportService.compute_totals(session, till_sales(sales))
 
         report_number = f"Z-{XZReportService.current_period_number(session):04d}"
 
