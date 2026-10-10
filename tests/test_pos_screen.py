@@ -585,6 +585,27 @@ def test_open_price_typed_before_adding_does_not_lock_or_change_product(qtbot, f
         assert session.query(OpenTicket).count() == 1   # autosave went through
 
 
+def test_open_price_typed_before_adding_rejects_zero_price(screen):
+    pid, _, _ = _add_product(name="Food", price=0.0, tax=6, is_open_price=True)
+
+    screen.combined_input.setText("0")
+    screen.add_product_by_id(pid)
+
+    assert not any(isinstance(e, CartItem) for e in screen.cart.entries)
+
+
+def test_negative_open_price_typed_before_adding_becomes_minus_one_at_positive_price(screen):
+    pid, _, _ = _add_product(name="Food", price=0.0, tax=6, is_open_price=True)
+
+    screen.combined_input.setText("-5")
+    screen.add_product_by_id(pid)
+
+    entry = screen.cart.entries[-1]
+    assert entry.quantity == -1
+    assert entry.unit_price == 5.0 and entry.base_unit_price == 5.0
+    assert not entry.pending
+
+
 def test_invoice_payment_creates_invoice_record(screen):
     with get_session() as session:
         client = ClientService.create(

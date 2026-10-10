@@ -716,6 +716,9 @@ class POSScreen(QWidget):
     def _on_ticket_text(self, text: str):
         if self.sale_finished:
             self._unfreeze_ticket()
+        if text in "-" and not self.isAdmin:
+            self._show_overlay("Only admin", kind="error")
+            return
         if text in ".,":
             if "." in self.combined_input.text():
                 return
@@ -1121,7 +1124,7 @@ class POSScreen(QWidget):
                 if is_weight:
                     qty_text = "1" if pending else ("-1" if entry.quantity < 0 else "1")
                     weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
-                    name_text = f"{entry.product_name} - {weight_text}"
+                    name_text = f"{entry.product_name} | {weight_text}"
                     price_text = f"{entry.unit_price:.2f}/{entry.unit}"
                     # A weight article is one line item, not `quantity` kg of them.
                     count_contribution = 0 if pending else (-1 if entry.quantity < 0 else 1)
@@ -1670,6 +1673,8 @@ class POSScreen(QWidget):
         if not text:
             return None
         try:
+            if text.startswith('-'):
+                return min(float(text), 0.0)
             return max(0.0, float(text))
         except ValueError:
             return None
@@ -1715,28 +1720,27 @@ class POSScreen(QWidget):
         query = self.combined_input.text().strip()
         quantity_typed = bool(query)
         quantity = int(round(float(query))) if quantity_typed else 1
-
+        # FIXME
         with get_session() as session:
             product = ProductService.get_by_id(session, product_id)
             if product is None:
                 self.combined_input.clear()
                 return
+            open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
+            if open_price == 0:
+                self._show_overlay("Enter an valid amount", kind="info")
+                return
             if self.sale_finished:
                 self._unfreeze_ticket()
             if product.unit in WEIGHT_UNITS and not quantity_typed:
                 quantity = None
-            # For an open-price item the typed number is the price, not a
-            # quantity. It's applied to the cart line only: assigning it to
-            # product.price would dirty the Product row, get autoflushed as an
-            # UPDATE, and hold SQLite's write lock until this session closes.
-            open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
             if open_price is not None:
-                quantity = 1
-            self.cart.add_product(product, quantity=quantity)
-            if open_price is not None:
-                entry = next(e for e in reversed(self.cart.entries) if isinstance(e, CartItem))
-                self.cart.set_open_price(entry, open_price)
-                self.cart.sync_promo_discounts()
+                print(open_price)
+                # A negative typed price takes the item back off: -1 at the
+                # positive price, the same way refunds and reversals do it.
+                quantity = -1 if open_price < 0 else 1
+                open_price = abs(open_price)
+            self.cart.add_product(product, quantity=quantity, price=open_price)
         # Outside the session: this autosaves the ticket through its own session.
         self._refresh_cart(select_last=True)
         self.combined_input.clear()

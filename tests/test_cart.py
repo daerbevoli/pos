@@ -586,6 +586,18 @@ def test_set_open_price_applies_current_client_vat_treatment():
     assert entry.unit_price == 10.0
 
 
+def test_add_product_with_price_overrides_product_price_with_client_vat_treatment():
+    cart = Cart(is_domestic=False)
+    product = _FakeProduct(id=1, name="Loose Snacks", price=0.0, tax=21, is_open_price=True)
+
+    cart.add_product(product, quantity=1, price=12.10)
+    entry = cart.entries[0]
+
+    assert entry.base_unit_price == 12.10
+    assert entry.unit_price == 10.0
+    assert not entry.pending
+
+
 # ── Snapshot round-trip ───────────────────────────────────────────────────
 
 def test_snapshot_round_trip_preserves_all_entry_types():

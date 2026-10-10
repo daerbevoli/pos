@@ -173,32 +173,25 @@ class Cart:
             if isinstance(entry, CartItem) and entry.quantity is not None
         )
 
-    def add_product(self, product, quantity: float | None = 1):
+    def add_product(self, product, quantity: float | None = 1, price: float | None = None):
+        """price overrides product.price for this line only — used for the
+        cashier-typed amount on an open-price item."""
+        base_price = product.price if price is None else price
         if quantity is not None and self.is_refund:
             quantity = -abs(quantity)
 
-        if quantity is not None:
-            # Walk backwards until we hit a subtotal marker.
-            for entry in reversed(self.entries):
-                if (isinstance(entry, SubtotalMarker) or
-                        isinstance(entry, CartItem) and
-                        entry.product_id == product.id and
-                        entry.quantity is not None):
-                    break
-
-        # No matching item in the current section.
         promo_item = product.active_promo_item
         self.entries.append(
             CartItem(
                 product_id=product.id,
                 product_name=product.name,
                 product_barcode=product.barcode or "",
-                unit_price=self._effective_price(product.price, product.tax),
+                unit_price=self._effective_price(base_price, product.tax),
                 quantity=quantity,
                 unit=product.unit,
                 tax_rate=product.tax if self.is_domestic else 0,
                 base_tax_rate=product.tax,
-                base_unit_price=product.price,
+                base_unit_price=base_price,
                 is_open_price=product.is_open_price,
                 promo_name=promo_item.promo.name if promo_item else None,
                 promo_type=promo_item.discount_type if promo_item else None,
