@@ -103,7 +103,7 @@ class POSScreen(QWidget):
         self._current_sale_id   = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
         self.sale_ids           = []     # id: all of today's completed sale ids, chronological, shared across tabs — see _browse_index()
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
-        self._barcode_entry_quantity = None   # quantity typed before the Barcode button was pressed, if any
+        self._barcode_entry_quantity = None   # quantity text typed before the Barcode button was pressed, if any (may be a lone "-")
 
         # Shortcut / product-slot grid state (buttons built in _build_bottom_grid(), see there).
         self.slot_buttons: list[CategoryButton] = []       # the product-slot button widgets, index-aligned with _slot_product_ids
@@ -809,7 +809,9 @@ class POSScreen(QWidget):
         with get_session() as session:
             product = ProductService.get_by_barcode(session, barcode)
             if product:
-                quantity = self._typed_quantity(float(query), product) if query else 1
+                quantity = self._typed_quantity(query, product) if query else 1
+                if quantity is None:
+                    return
                 self.cart.add_product(product, quantity=quantity)
                 self._refresh_cart(select_last=True)
                 self.cart_input.clear()
@@ -826,10 +828,8 @@ class POSScreen(QWidget):
         prefix = self.cart_input.text().strip()
         if self._reject_bare_amount(prefix):
             return
-        try:
-            self._barcode_entry_quantity = float(prefix) if prefix else None
-        except ValueError:
-            self._barcode_entry_quantity = None
+        # Kept as typed: a lone "-" can only be resolved once the product is known.
+        self._barcode_entry_quantity = prefix or None
         # The quantity is stashed above; the input now holds only the barcode.
         self.cart_input.clear()
         self._set_barcode_entry_mode(True)
@@ -857,9 +857,12 @@ class POSScreen(QWidget):
         with get_session() as session:
             product = ProductService.get_by_barcode(session, code)
             if product:
-                amount = self._barcode_entry_quantity
-                if amount is not None:
-                    quantity = self._typed_quantity(amount, product)
+                typed = self._barcode_entry_quantity
+                self._barcode_entry_quantity = None
+                if typed is not None:
+                    quantity = self._typed_quantity(typed, product)
+                    if quantity is None:
+                        return
                 elif product.unit in WEIGHT_UNITS:
                     quantity = None
                 else:
@@ -1298,7 +1301,13 @@ class POSScreen(QWidget):
             return
 
         if self.cart.is_refund:
-            if self.cart.total >= 0:
+            if self.cart.total > 0:
+                # A refund pays money out; a positive total isn't a refund.
+                self._show_overlay("Nothing to refund", kind="error")
+                return
+            if self.cart.total == 0 and self._current_sale_id is None:
+                # A new refund of 0.00 has nothing to pay out. (A reopened
+                # refund may settle at 0.00: that cancels it.)
                 self._show_overlay("Nothing to refund", kind="error")
                 return
             # A refund is paid out in full by the chosen method in one go —
@@ -1455,8 +1464,12 @@ class POSScreen(QWidget):
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
+            # Unable to open sale or refund if not in the same mode
             if sale.is_refund and not self.cart.is_refund:
                 self._show_overlay("Refund can only be opened in refund mode", kind="error")
+                return
+            if not sale.is_refund and self.cart.is_refund:
+                self._show_overlay("Sale can only be opened outside refund mode", kind="error")
                 return
 
             if sale.invoice is not None and sale.invoice.sent_at is not None:
@@ -1704,21 +1717,33 @@ class POSScreen(QWidget):
             return None
 
     def _reject_bare_amount(self, query: str) -> bool:
-        """A bare "." / "-" (or the numpad's "0.") is an unfinished amount,
+        """A bare "." (or the numpad's "0.", "-0." …) is an unfinished amount,
         not a quantity — float() would choke on it or yield 0. Shows an
-        overlay and clears the input; returns True if the caller should stop."""
-        if query and not any(ch in "123456789" for ch in query):
+        overlay and clears the input; returns True if the caller should stop.
+        A lone "-" is let through: it means "take one off", which
+        _typed_quantity() resolves once the product is known."""
+        if query and query != "-" and not any(ch in "123456789" for ch in query):
             self._show_overlay("Enter a valid amount", kind="error")
             self.cart_input.clear()
             return True
         return False
 
-    @staticmethod
-    def _typed_quantity(amount: float, product) -> float:
+    def _typed_quantity(self, query: str, product) -> float | None:
         """The line quantity for an amount typed before adding a product.
         Under 1, a weight/volume item takes it as its exact weight; any
         other item just goes in as a single unit (sign kept for refunds).
-        Open-price items don't come through here — their amount is the price."""
+        A lone "-" is -1, but only for a fixed-price, non-weight item — a
+        weight or open-price item needs a real amount, so it's refused:
+        overlay shown, input cleared, None returned (the caller stops).
+        Open-price items with an amount don't come through here — their
+        amount is the price."""
+        if query == "-":
+            if product.unit in WEIGHT_UNITS or product.is_open_price:
+                self._show_overlay("Enter a valid amount", kind="error")
+                self.cart_input.clear()
+                return None
+            return -1
+        amount = float(query)
         if abs(amount) < 1:
             if product.unit in WEIGHT_UNITS:
                 return amount
@@ -1778,7 +1803,9 @@ class POSScreen(QWidget):
             if product is None:
                 self.cart_input.clear()
                 return
-            quantity = self._typed_quantity(float(query), product) if quantity_typed else 1
+            quantity = self._typed_quantity(query, product) if quantity_typed else 1
+            if quantity is None:
+                return
             open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
             if open_price == 0:
                 self._show_overlay("Enter an valid amount", kind="info")

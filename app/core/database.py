@@ -60,10 +60,22 @@ class _ColumnMigration(NamedTuple):
 # bigger step than one column — give it its own function, called from
 # _run_migrations(), instead.
 #
-# Empty on purpose: the schema was reset to a clean baseline (the models as
-# they stand) before the first shop went live, so no database predates it.
-# The history of how the schema got here is in git.
-_COLUMN_MIGRATIONS: list[_ColumnMigration] = []
+# The schema was reset to a clean baseline before the first shop went live;
+# everything below was added after that baseline. The history of how the
+# schema got to the baseline is in git.
+_COLUMN_MIGRATIONS: list[_ColumnMigration] = [
+    _ColumnMigration(
+        "invoices", "payment_method", "VARCHAR(20)",
+        why="Invoices snapshot how they were paid, so the reports' payment "
+            "breakdown still works after a Z report purges their sale. NULL on "
+            "older invoices — invoice_payment_breakdown() falls back to the sale.",
+    ),
+    _ColumnMigration(
+        "invoices", "payment_breakdown", "TEXT",
+        why="Per-method split of the invoice's payment (JSON), snapshotted "
+            "alongside payment_method for the same reason.",
+    ),
+]
 
 
 def _run_migrations():

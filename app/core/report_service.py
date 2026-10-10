@@ -129,8 +129,9 @@ def _discounts_and_mistakes(sales) -> tuple[dict, list[dict]]:
     discounts split into manual vs promo, and "mistakes" — lines voided on
     a reopened sale / unsent invoice (reversal lines). Refund-mode and
     credit-note lines are ordinary negative-quantity items, not reversals,
-    so they never count as mistakes. A mistake's qty/amount are those of
-    the line it voided."""
+    so they never count as mistakes; nor does a reversal on a reopened
+    refund (RF-) — its effect on revenue is already in the refund's own
+    re-saved totals. A mistake's qty/amount are those of the line it voided."""
     discounts = {"manual": 0.0, "promo": 0.0}
     mistakes = []
     for sale in sales:
@@ -142,7 +143,8 @@ def _discounts_and_mistakes(sales) -> tuple[dict, list[dict]]:
             kind = raw.get("type")
             if kind == "discount":
                 discounts["promo" if raw.get("is_promo") else "manual"] += raw.get("amount", 0.0)
-            elif kind == "item" and raw.get("is_reversal") and raw.get("quantity") is not None:
+            elif (kind == "item" and raw.get("is_reversal") and raw.get("quantity") is not None
+                  and not sale.is_refund):
                 qty = -raw["quantity"]
                 mistakes.append({
                     "name": raw.get("product_name", ""),

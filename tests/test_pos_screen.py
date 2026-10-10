@@ -127,6 +127,136 @@ def test_manual_barcode_keeps_typed_quantity_out_of_the_input(screen):
     assert screen.cart.entries[0].quantity == 3
 
 
+def test_lone_minus_adds_fixed_price_item_as_minus_one(screen):
+    pid, barcode, _ = _add_product(barcode="5411234567890")
+    screen.isAdmin = True
+
+    screen._on_ticket_text("-")
+    screen.add_product_by_id(pid)
+    screen._on_ticket_text("-")
+    screen._on_barcode_scan(barcode)
+    screen._on_ticket_text("-")
+    screen._open_barcode()
+    for ch in barcode:
+        screen._on_ticket_text(ch)
+    screen._on_barcode_enter()
+
+    assert [e.quantity for e in screen.cart.entries] == [-1, -1, -1]
+    assert screen.cart_input.text() == ""
+
+
+@pytest.mark.parametrize("overrides", [
+    {"unit": "kg"},
+    {"price": 0.0, "is_open_price": True},
+])
+def test_lone_minus_is_refused_for_weight_and_open_price_items(screen, overrides):
+    pid, barcode, _ = _add_product(barcode="5411234567890", **overrides)
+    screen.isAdmin = True
+
+    screen._on_ticket_text("-")
+    screen.add_product_by_id(pid)
+    screen._on_ticket_text("-")
+    screen._on_barcode_scan(barcode)
+
+    assert screen.cart.entries == []
+    assert not screen.overlay.isHidden()
+    assert screen.cart_input.text() == ""
+
+
+def test_sale_cannot_be_reopened_in_refund_mode(screen):
+    pid, _, _ = _add_product()
+    screen.isAdmin = True
+    screen.add_product_by_id(pid)
+    screen._open_payment("cash")
+    screen._rf_cn()  # finished ticket on screen: toggling is allowed
+
+    screen._reopen_ticket()
+
+    assert screen.sale_finished is True
+    assert not screen.overlay.isHidden()
+
+
+def test_refund_cannot_be_reopened_outside_refund_mode(screen):
+    pid, _, _ = _add_product()
+    screen.isAdmin = True
+    screen._rf_cn()
+    screen.add_product_by_id(pid)
+    screen._open_payment("cash")
+    screen._rf_cn()  # back to normal mode
+
+    screen._reopen_ticket()
+
+    assert screen.sale_finished is True
+    assert not screen.overlay.isHidden()
+
+
+def test_fully_reversed_reopened_refund_settles_at_zero(screen):
+    pid, _, _ = _add_product(price=10.0)
+    screen.isAdmin = True
+    screen._rf_cn()
+    screen.add_product_by_id(pid)
+    screen._open_payment("cash")
+    sale_id = screen._current_sale_id
+
+    screen._reopen_ticket()
+    screen._select_cart_row(0)
+    screen._remove_selected()  # appends the reversal line
+    assert screen.cart.total == 0
+    screen._open_payment("cash")
+
+    assert screen.sale_finished is True
+    with get_session() as session:
+        sale = session.get(Sale, sale_id)
+        assert sale.sale_number.startswith("RF-")
+        assert sale.final_amount == 0
+
+
+def test_reversed_refund_line_changes_revenue_but_is_not_a_mistake(screen):
+    """Sale of 2 x 10, then a refund of 1 x 10 + 1 x 5 that's reopened and
+    has its 5 line reversed: revenue ends at 20 - 10 = 10, and the reversal
+    doesn't show up under mistakes."""
+    from app.core.report_service import XZReportService
+
+    ten, _, _ = _add_product(name="Ten", price=10.0)
+    five, _, _ = _add_product(name="Five", price=5.0)
+    screen.isAdmin = True
+    screen.cart_input.setText("2")
+    screen.add_product_by_id(ten)
+    screen._open_payment("cash")
+
+    screen._rf_cn()
+    screen.add_product_by_id(ten)
+    screen.add_product_by_id(five)
+    screen._open_payment("cash")
+    with get_session() as session:
+        assert XZReportService.generate_x_report(session)["final_amount"] == 5.0
+
+    screen._reopen_ticket()
+    five_row = screen._row_to_entry.index(1)
+    screen._select_cart_row(five_row)
+    screen._remove_selected()  # reversal of the -1 x 5 line
+    screen._open_payment("cash")
+
+    with get_session() as session:
+        report = XZReportService.generate_x_report(session)
+        assert report["final_amount"] == 10.0
+        assert report["transaction_count"] == 2
+        assert report["mistakes"] == []
+        assert ProductService.get_by_id(session, five).stock_quantity == 100
+
+
+def test_new_refund_with_zero_total_is_still_refused(screen):
+    pid, _, _ = _add_product(price=0.0)
+    screen.isAdmin = True
+    screen._rf_cn()
+    screen.add_product_by_id(pid)
+
+    screen._open_payment("cash")
+
+    assert screen.sale_finished is False
+    assert not screen.overlay.isHidden()
+
+
 def test_typed_amount_is_capped_at_7_digits_and_3_decimals(screen):
     for ch in "12345678":
         screen._on_ticket_text(ch)

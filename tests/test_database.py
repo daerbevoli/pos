@@ -134,6 +134,24 @@ def test_column_migration_adds_missing_column_preserving_data(monkeypatch):
     assert rows == [(1, "a", "red")]
 
 
+def test_migrations_add_invoice_payment_columns_to_older_database(monkeypatch):
+    """A database whose invoices table predates the payment snapshot gets
+    both columns, and the full model then loads against it."""
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN payment_method")
+        conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN payment_breakdown")
+        conn.commit()
+    monkeypatch.setattr(database, "ENGINE", engine)
+
+    database._run_migrations()
+
+    with engine.connect() as conn:
+        cols = database._table_columns(conn, "invoices")
+    assert {"payment_method", "payment_breakdown"} <= cols
+
+
 def test_column_migration_skips_missing_table(monkeypatch):
     """A table that doesn't exist yet is left to create_all(), not created here."""
     engine = _memory_engine()

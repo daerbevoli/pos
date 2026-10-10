@@ -74,8 +74,9 @@ def test_amount_for_method_sums_matching_legs():
 
 
 class _SnapshotSale:
-    def __init__(self, cart):
+    def __init__(self, cart, is_refund=False):
         self.cart_snapshot = cart.to_snapshot()
+        self.is_refund = is_refund
 
 
 def _item(name, qty, price=2.0, **kw):
@@ -102,6 +103,14 @@ def test_mistakes_list_reversal_lines_with_voided_amount():
 
 def test_refund_lines_are_not_mistakes():
     sale = _SnapshotSale(Cart(entries=[_item("Cola", -2)], is_refund=True))
+    _, mistakes = _discounts_and_mistakes([sale])
+    assert mistakes == []
+
+
+def test_reversal_on_reopened_refund_is_not_a_mistake():
+    original = _item("Cola", -2, price=1.5, has_reversal=True)
+    reversal = _item("Cola", 2, price=1.5, is_reversal=True)
+    sale = _SnapshotSale(Cart(entries=[original, reversal], is_refund=True), is_refund=True)
     _, mistakes = _discounts_and_mistakes([sale])
     assert mistakes == []
 
