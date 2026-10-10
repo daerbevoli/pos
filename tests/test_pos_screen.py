@@ -62,9 +62,9 @@ def _scan(screen, text):
         break
 
     if prefix:
-        screen.combined_input.setText(prefix)
+        screen.cart_input.setText(prefix)
     screen._open_barcode()
-    screen.combined_input.setText(barcode)
+    screen.cart_input.setText(barcode)
     screen._on_barcode_enter()
 
 
@@ -93,7 +93,58 @@ def test_scan_known_barcode_adds_item(screen):
     assert item.product_id == pid
     assert item.quantity == 1
     assert item.unit_price == 2.5
-    assert screen.combined_input.text() == ""
+    assert screen.cart_input.text() == ""
+
+
+def test_manual_barcode_typed_key_by_key_is_not_length_limited(screen):
+    """Typed amounts are capped at 7 digits before the decimal point; the
+    Barcode button swaps in a digits-only, unlimited validator so a full
+    13-digit barcode typed digit by digit still gets through."""
+    pid, barcode, _ = _add_product(barcode="5411234567890")
+    screen._open_barcode()
+    assert screen.cart_input.text() == ""
+    assert screen.cart_input.placeholderText() == "Manual barcode"
+    for ch in barcode:
+        screen._on_ticket_text(ch)
+    screen._on_barcode_enter()
+
+    assert len(screen.cart.entries) == 1
+    assert screen.cart.entries[0].product_id == pid
+    assert screen.cart_input.text() == ""
+    assert screen.cart_input.placeholderText() == ""
+
+
+def test_manual_barcode_keeps_typed_quantity_out_of_the_input(screen):
+    pid, barcode, _ = _add_product(barcode="5411234567890")
+    screen._on_ticket_text("3")
+    screen._open_barcode()
+    assert screen.cart_input.text() == ""
+    for ch in barcode:
+        screen._on_ticket_text(ch)
+    screen._on_barcode_enter()
+
+    assert screen.cart.entries[0].product_id == pid
+    assert screen.cart.entries[0].quantity == 3
+
+
+def test_typed_amount_is_capped_at_7_digits_and_3_decimals(screen):
+    for ch in "12345678":
+        screen._on_ticket_text(ch)
+    assert screen.cart_input.text() == "1234567"
+    for ch in ".1234":
+        screen._on_ticket_text(ch)
+    assert screen.cart_input.text() == "1234567.123"
+
+
+def test_product_tap_during_manual_barcode_entry_cancels_it(screen):
+    pid, _, _ = _add_product()
+    screen._open_barcode()
+    screen._on_ticket_text("5")
+    screen.add_product_by_id(pid)
+
+    assert screen._barcode_entry_mode is False
+    assert len(screen.cart.entries) == 1
+    assert screen.cart.entries[0].quantity == 1
 
 
 def test_scan_unknown_barcode_shows_overlay(screen):
@@ -138,7 +189,7 @@ def test_entering_amount_resolves_pending_item(screen):
     _scan(screen, barcode)
     assert screen._selected_pending_item() is not None
 
-    screen.combined_input.setText("1.5")
+    screen.cart_input.setText("1.5")
     screen._on_barcode_enter()
 
     assert screen.cart.entries[0].quantity == 1.5
@@ -165,7 +216,7 @@ def test_add_product_by_id_from_inventory_navigation(screen):
 
 def test_add_product_by_id_with_typed_quantity(screen):
     pid, barcode, unit = _add_product()
-    screen.combined_input.setText("5")
+    screen.cart_input.setText("5")
     screen.add_product_by_id(pid)
     assert screen.cart.entries[0].quantity == 5
 
@@ -198,9 +249,9 @@ def test_increase_decrease_ignored_for_weight_units(screen):
 
 
 def test_remove_selected_backspaces_input_text_first(screen):
-    screen.combined_input.setText("123")
+    screen.cart_input.setText("123")
     screen._remove_selected()
-    assert screen.combined_input.text() == "12"
+    assert screen.cart_input.text() == "12"
 
 
 def test_remove_selected_removes_cart_item_without_prior_sale(screen):
@@ -223,7 +274,7 @@ def test_percent_discount_applies_to_last_item(screen):
     pid, barcode, _ = _add_product(barcode="d1", price=10.0)
     _scan(screen, barcode)  # line_total = 10.0
 
-    screen.combined_input.setText("10")
+    screen.cart_input.setText("10")
     screen._apply_percent_discount()
 
     discounts = [e for e in screen.cart.entries if isinstance(e, DiscountEntry)]
@@ -238,7 +289,7 @@ def test_amount_discount_capped_at_base(screen):
     pid, barcode, _ = _add_product(barcode="d2", price=10.0)
     _scan(screen, barcode)
 
-    screen.combined_input.setText("999")
+    screen.cart_input.setText("999")
     screen._apply_amount_discount()
 
     discount = next(e for e in screen.cart.entries if isinstance(e, DiscountEntry))
@@ -248,7 +299,7 @@ def test_amount_discount_capped_at_base(screen):
 def test_discount_without_amount_shows_overlay(screen):
     pid, barcode, _ = _add_product(barcode="d3")
     _scan(screen, barcode)
-    screen.combined_input.setText("")
+    screen.cart_input.setText("")
     screen._apply_percent_discount()
     assert not screen.overlay.isHidden()
     assert not any(isinstance(e, DiscountEntry) for e in screen.cart.entries)
@@ -256,7 +307,7 @@ def test_discount_without_amount_shows_overlay(screen):
 
 def test_discount_on_empty_cart_shows_overlay(screen):
     screen._unfreeze_ticket()
-    screen.combined_input.setText("10")
+    screen.cart_input.setText("10")
     screen._apply_percent_discount()
     assert not screen.overlay.isHidden()
 
@@ -268,7 +319,7 @@ def test_section_discount_applies_after_subtotal(screen):
     _scan(screen, b2)
     screen._show_subtotal()  # section total = 15.0
 
-    screen.combined_input.setText("10")
+    screen.cart_input.setText("10")
     screen._apply_amount_discount()
 
     discount = next(e for e in screen.cart.entries if isinstance(e, DiscountEntry))
@@ -331,7 +382,7 @@ def test_full_payment_with_overpayment_shows_change(screen):
     pid, barcode, _ = _add_product(barcode="pay2", price=10.0)
     _scan(screen, barcode)
 
-    screen.combined_input.setText("20")
+    screen.cart_input.setText("20")
     screen._open_payment("cash")
 
     assert screen._frozen_change == 10.0
@@ -348,7 +399,7 @@ def test_overpayment_breakdown_records_amount_tendered_not_remaining(screen):
     pid, barcode, _ = _add_product(barcode="pay2b", price=10.0)
     _scan(screen, barcode)
 
-    screen.combined_input.setText("20")
+    screen.cart_input.setText("20")
     screen._open_payment("cash")
 
     with get_session() as session:
@@ -373,7 +424,7 @@ def test_underpayment_creates_partial_payment_entry(screen):
     pid, barcode, _ = _add_product(barcode="pay4", price=20.0)
     _scan(screen, barcode)
 
-    screen.combined_input.setText("5")
+    screen.cart_input.setText("5")
     screen._open_payment("cash")
 
     assert screen.sale_finished is False
@@ -386,10 +437,10 @@ def test_underpayment_creates_partial_payment_entry(screen):
 def test_second_partial_payment_merges_same_method(screen):
     pid, barcode, _ = _add_product(barcode="pay5", price=20.0)
     _scan(screen, barcode)
-    screen.combined_input.setText("5")
+    screen.cart_input.setText("5")
     screen._open_payment("cash")
 
-    screen.combined_input.setText("5")
+    screen.cart_input.setText("5")
     screen._open_payment("cash")
 
     payments = [e for e in screen.cart.entries if isinstance(e, PaymentEntry)]
@@ -401,10 +452,10 @@ def test_switching_payment_method_mid_payment_is_blocked(screen):
     pid, barcode, _ = _add_product(barcode="pay6", price=20.0)
     _scan(screen, barcode)
 
-    screen.combined_input.setText("5")
+    screen.cart_input.setText("5")
     screen._open_payment("cash")  # partial cash
 
-    screen.combined_input.setText("15")
+    screen.cart_input.setText("15")
     screen._open_payment("card")  # blocked -> only cash/card, no mixing
 
     assert screen.sale_finished is False
@@ -416,7 +467,7 @@ def test_switching_payment_method_mid_payment_is_blocked(screen):
     assert payments[0].amount == 5.0
 
     # Finishing with the same method (cash) still works.
-    screen.combined_input.setText("15")
+    screen.cart_input.setText("15")
     screen._open_payment("cash")
     assert screen.sale_finished is True
     with get_session() as session:
@@ -427,7 +478,7 @@ def test_switching_payment_method_mid_payment_is_blocked(screen):
 def test_payment_guard_blocks_cart_mutation_mid_payment(screen):
     pid, barcode, _ = _add_product(barcode="pay7", price=20.0)
     _scan(screen, barcode)
-    screen.combined_input.setText("5")
+    screen.cart_input.setText("5")
     screen._open_payment("cash")  # partial payment outstanding
 
     screen._increase_product()  # should be blocked
@@ -438,7 +489,7 @@ def test_payment_guard_blocks_cart_mutation_mid_payment(screen):
 def test_payment_zero_amount_shows_overlay(screen):
     pid, barcode, _ = _add_product(barcode="pay8", price=10.0)
     _scan(screen, barcode)
-    screen.combined_input.setText("0")
+    screen.cart_input.setText("0")
     screen._open_payment("cash")
     assert not screen.overlay.isHidden()
     assert screen.sale_finished is False  # never settled
@@ -535,7 +586,7 @@ def test_open_price_item_entered_after_foreign_client_is_netted(screen):
     entry = screen.cart.entries[0]
     assert entry.pending
 
-    screen.combined_input.setText("10.00")
+    screen.cart_input.setText("10.00")
     screen._on_barcode_enter()
 
     assert entry.base_unit_price == 10.0
@@ -575,7 +626,7 @@ def test_open_price_typed_before_adding_does_not_lock_or_change_product(qtbot, f
     screen = POSScreen()
     qtbot.addWidget(screen)
 
-    screen.combined_input.setText("2.50")
+    screen.cart_input.setText("2.50")
     screen.add_product_by_id(pid)  # raised OperationalError before the fix
 
     entry = screen.cart.entries[-1]
@@ -588,7 +639,7 @@ def test_open_price_typed_before_adding_does_not_lock_or_change_product(qtbot, f
 def test_open_price_typed_before_adding_rejects_zero_price(screen):
     pid, _, _ = _add_product(name="Food", price=0.0, tax=6, is_open_price=True)
 
-    screen.combined_input.setText("0")
+    screen.cart_input.setText("0")
     screen.add_product_by_id(pid)
 
     assert not any(isinstance(e, CartItem) for e in screen.cart.entries)
@@ -597,7 +648,7 @@ def test_open_price_typed_before_adding_rejects_zero_price(screen):
 def test_negative_open_price_typed_before_adding_becomes_minus_one_at_positive_price(screen):
     pid, _, _ = _add_product(name="Food", price=0.0, tax=6, is_open_price=True)
 
-    screen.combined_input.setText("-5")
+    screen.cart_input.setText("-5")
     screen.add_product_by_id(pid)
 
     entry = screen.cart.entries[-1]
@@ -1097,7 +1148,7 @@ def test_rf_cn_mode_adds_products_with_negative_quantity(screen, qtbot):
     assert blocker.args == [True]
     assert screen.cart.is_refund is True
 
-    screen.combined_input.setText("3")
+    screen.cart_input.setText("3")
     screen.add_product_by_id(pid)
 
     assert screen.cart.entries[0].quantity == -3
@@ -1121,7 +1172,7 @@ def test_rf_cn_pending_weight_amount_goes_negative(screen):
     pid, _, _ = _add_product(barcode="rf3", unit="kg", price=10.0)
     _press_rf_cn(screen)
     screen.add_product_by_id(pid)
-    screen.combined_input.setText("0.5")
+    screen.cart_input.setText("0.5")
     screen._on_barcode_enter()
     assert screen.cart.entries[0].quantity == -0.5
     assert screen.cart.total == -5.0
@@ -1140,7 +1191,7 @@ def test_rf_cn_plus_minus_move_away_from_and_toward_zero(screen):
 def test_rf_cn_payment_saves_rf_sale_pays_out_and_stays_in_mode(screen):
     pid, _, _ = _add_product(barcode="rf5", price=5.0, stock_quantity=10)
     _press_rf_cn(screen)
-    screen.combined_input.setText("2")
+    screen.cart_input.setText("2")
     screen.add_product_by_id(pid)
     screen._open_payment("cash")
 

@@ -180,7 +180,7 @@ class POSScreen(QWidget):
 
         root.addLayout(self._build_bottom_grid(), stretch=4)
 
-        QTimer.singleShot(100, self.combined_input.setFocus)
+        QTimer.singleShot(100, self.cart_table.setFocus)
 
     # ── Time display (ticket header only) ──
 
@@ -252,13 +252,20 @@ class POSScreen(QWidget):
         self.ticket_total_lbl.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         self.ticket_total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.combined_input = QLineEdit()
-        self.combined_input.setObjectName("combinedInput")
-        self.combined_input.setMinimumHeight(CART_INFO_BAR_HEIGHT)
-        self.combined_input.setValidator(
-            QRegularExpressionValidator(QRegularExpression(r'-?[0-9]*[.,]?[0-9]*'))
+        self.cart_input = QLineEdit()
+        self.cart_input.setObjectName("cartInput")
+        self.cart_input.setMinimumHeight(CART_INFO_BAR_HEIGHT)
+        # Display only: every key goes through cart_table (scan detection,
+        # admin "-" guard, "0." handling), so clicking here must not steal focus.
+        self.cart_input.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # An amount is up to 7 digits before the decimal point and 3 after
+        # (12 chars max with the sign); a manually typed barcode is digits
+        # only, any length. Swapped by _set_barcode_entry_mode().
+        self._amount_validator = QRegularExpressionValidator(
+            QRegularExpression(r'-?[0-9]{0,7}([.,][0-9]{0,3})?'), self
         )
-        self.combined_input.returnPressed.connect(self._on_barcode_enter)
+        self._barcode_validator = QRegularExpressionValidator(QRegularExpression(r'[0-9]*'), self)
+        self.cart_input.setValidator(self._amount_validator)
 
         self.payment_footer = QWidget()
         self.payment_footer.setObjectName("paymentFooter")
@@ -279,7 +286,7 @@ class POSScreen(QWidget):
         _fl.addWidget(self.footer_change_lbl)
 
         self.input_stack = QStackedWidget()
-        self.input_stack.addWidget(self.combined_input)
+        self.input_stack.addWidget(self.cart_input)
         self.input_stack.addWidget(self.payment_footer)
 
         self.input_row = QHBoxLayout()
@@ -547,12 +554,12 @@ class POSScreen(QWidget):
         if idx == self._active_tab:
             return
         self._save_tab_state()
-        # combined_input / barcode-entry mode are transient scratch state, not tied
+        # cart_input / barcode-entry mode are transient scratch state, not tied
         # to any particular tab's cart. Cancel them here so leftover typed digits or
         # a pending barcode scan from the old tab don't bleed into the new one.
-        self._barcode_entry_mode     = False
+        self._set_barcode_entry_mode(False)
         self._barcode_entry_quantity = None
-        self.combined_input.clear()
+        self.cart_input.clear()
         self._active_tab = idx
         self._load_tab_state(idx)
 
@@ -702,13 +709,13 @@ class POSScreen(QWidget):
 
 
     def _numpad_press(self, label: str):
+        text = self.cart_input.text()
         if label == "⌫":
-            self.combined_input.setText(self.combined_input.text()[:-1])
+            self.cart_input.setText(text[:-1])
         elif label == ".":
-            if "." not in self.combined_input.text():
-                self.combined_input.insert(".")
+            self._insert_decimal_point()
         else:
-            self.combined_input.insert(label)
+            self.cart_input.insert(label)
         self.cart_table.setFocus()
 
     # ── Cart interactions ────────────────────────────────────────────────
@@ -720,10 +727,18 @@ class POSScreen(QWidget):
             self._show_overlay("Only admin", kind="error")
             return
         if text in ".,":
-            if "." in self.combined_input.text():
-                return
-            text = "."
-        self.combined_input.insert(text)
+            self._insert_decimal_point()
+            return
+        self.cart_input.insert(text)
+
+    def _insert_decimal_point(self):
+        """Shared by the numpad and keyboard "." / ",": at most one decimal
+        point, with a leading 0 when no digit has been typed yet (so "." gives
+        "0." and "-" then "." gives "-0.")."""
+        current = self.cart_input.text()
+        if "." in current:
+            return
+        self.cart_input.insert("." if current.lstrip("-") else "0.")
 
     def _selected_pending_item(self):
         """The selected CartItem if it's still awaiting an amount — a
@@ -742,7 +757,7 @@ class POSScreen(QWidget):
         """Shared entry point for barcode input: unfreezes a finished sale,
         blocks while a partial payment is outstanding, and if the selected
         item is still awaiting an amount (a weight/volume item's quantity,
-        or an open-price item's price), consumes combined_input as that
+        or an open-price item's price), consumes cart_input as that
         amount instead of a new scan. Returns True if the caller should
         return immediately (blocked, or handled as a pending amount); False
         if it should continue resolving a new barcode."""
@@ -753,13 +768,13 @@ class POSScreen(QWidget):
 
         pending_entry = self._selected_pending_item()
         if pending_entry is not None:
-            query = self.combined_input.text().strip()
+            query = self.cart_input.text().strip()
             # A barcode is always longer than a typed weight/volume amount —
             # treat anything over 6 characters (incl. the decimal point) as
             # an attempted scan and block it until the amount is filled in.
             if len(query) > 6:
                 self._show_overlay("Enter the pending amount before scanning another item", kind="info")
-                self.combined_input.clear()
+                self.cart_input.clear()
                 return True
             amount = self._read_amount_input()
             if amount is None or amount <= 0:
@@ -770,7 +785,7 @@ class POSScreen(QWidget):
             else:
                 self.cart.set_open_price(pending_entry, amount)
             self.cart.sync_promo_discounts()
-            self.combined_input.clear()
+            self.cart_input.clear()
             self._refresh_cart(select_last=True)
             return True
 
@@ -779,66 +794,75 @@ class POSScreen(QWidget):
     def _on_barcode_scan(self, barcode):
         if self._barcode_entry_mode:
             # A real scan interrupted manual barcode entry — whatever's in
-            # combined_input is a partial typed barcode, not a quantity.
-            self._barcode_entry_mode = False
+            # cart_input is a partial typed barcode, not a quantity.
+            self._set_barcode_entry_mode(False)
             self._barcode_entry_quantity = None
-            self.combined_input.clear()
+            self.cart_input.clear()
 
         if self._handle_pending_or_guards():
             return
 
-        query = self.combined_input.text().strip()
-        if query:
-            quantity = int(round(float(query)))
-        else:
-            quantity = 1
+        query = self.cart_input.text().strip()
+        if self._reject_bare_amount(query):
+            return
 
         with get_session() as session:
             product = ProductService.get_by_barcode(session, barcode)
             if product:
+                quantity = self._typed_quantity(float(query), product) if query else 1
                 self.cart.add_product(product, quantity=quantity)
                 self._refresh_cart(select_last=True)
-                self.combined_input.clear()
+                self.cart_input.clear()
             else:
                 self._show_overlay("Unknown barcode", kind="error")
-        self.combined_input.clear()
+        self.cart_input.clear()
 
     def _open_barcode(self):
         """Enter manual barcode-entry mode: whatever quantity was already
-        typed into combined_input carries over and applies to the item once
+        typed into cart_input carries over and applies to the item once
         an exact barcode match is confirmed."""
-        self.combined_input.setPlaceholderText("Manual barcode")
         if self._handle_pending_or_guards():
             return
-        prefix = self.combined_input.text().strip()
+        prefix = self.cart_input.text().strip()
+        if self._reject_bare_amount(prefix):
+            return
         try:
-            self._barcode_entry_quantity = int(round(float(prefix))) if prefix else None
+            self._barcode_entry_quantity = float(prefix) if prefix else None
         except ValueError:
             self._barcode_entry_quantity = None
-        self._barcode_entry_mode = True
+        # The quantity is stashed above; the input now holds only the barcode.
+        self.cart_input.clear()
+        self._set_barcode_entry_mode(True)
         self.cart_table.setFocus()
 
+    def _set_barcode_entry_mode(self, active: bool):
+        """Toggles manual barcode entry, swapping cart_input between the
+        amount rules (7.3 digits) and the barcode rules (digits, no limit)."""
+        self._barcode_entry_mode = active
+        self.cart_input.setValidator(self._barcode_validator if active else self._amount_validator)
+        self.cart_input.setPlaceholderText("Manual barcode" if active else "")
+
     def _on_barcode_enter(self):
-        self.combined_input.setPlaceholderText("")
         if self._handle_pending_or_guards():
             return
 
         if not self._barcode_entry_mode:
             return
 
-        self._barcode_entry_mode = False
-        code = self.combined_input.text().strip()
-        self.combined_input.clear()
+        self._set_barcode_entry_mode(False)
+        code = self.cart_input.text().strip()
+        self.cart_input.clear()
         if not code:
             return
         with get_session() as session:
             product = ProductService.get_by_barcode(session, code)
             if product:
-                quantity = self._barcode_entry_quantity
-                quantity_typed = quantity is not None
-                if product.unit in WEIGHT_UNITS and not quantity_typed:
+                amount = self._barcode_entry_quantity
+                if amount is not None:
+                    quantity = self._typed_quantity(amount, product)
+                elif product.unit in WEIGHT_UNITS:
                     quantity = None
-                elif quantity is None:
+                else:
                     quantity = 1
                 self.cart.add_product(product, quantity=quantity)
                 self._refresh_cart(select_last=True)
@@ -856,8 +880,8 @@ class POSScreen(QWidget):
             self.input_stack.setCurrentIndex(0)
             self.ticket_total_lbl.setVisible(False)
             self.cart.clear()
-            self.combined_input.setPlaceholderText("")
-            self.combined_input.clear()
+            self._set_barcode_entry_mode(False)
+            self.cart_input.clear()
             self.client_label.setVisible(False)
             self.client_id = None
             self.is_invoice = False
@@ -871,8 +895,8 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def _remove_selected(self):
-        if self.combined_input.text():
-            self.combined_input.setText(self.combined_input.text()[:-1])
+        if self.cart_input.text():
+            self.cart_input.setText(self.cart_input.text()[:-1])
             return
         if self.sale_finished:
             return
@@ -957,7 +981,7 @@ class POSScreen(QWidget):
         pct = min(value, 100.0)
         amount = round(base * pct / 100.0, 2)
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"MANUAL DISCOUNT {pct:g}%"))
-        self.combined_input.clear()
+        self.cart_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 
@@ -976,7 +1000,7 @@ class POSScreen(QWidget):
             return
         amount = round(min(value, base), 2)
         self.cart.entries.append(DiscountEntry(amount=amount, label=f"MANUAL DISCOUNT {amount:.2f}"))
-        self.combined_input.clear()
+        self.cart_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 
@@ -1280,7 +1304,7 @@ class POSScreen(QWidget):
             # A refund is paid out in full by the chosen method in one go —
             # no tendering, partial payments or change.
             payout = self.cart.total
-            self.combined_input.clear()
+            self.cart_input.clear()
             self._save_and_freeze([{"method": method, "amount": payout}], payout, method)
             return
 
@@ -1312,7 +1336,7 @@ class POSScreen(QWidget):
                 existing.amount = round(existing.amount + tendered, 2)
             else:
                 self.cart.entries.append(PaymentEntry(method=method, amount=tendered))
-            self.combined_input.clear()
+            self.cart_input.clear()
             self._refresh_cart(select_last=True)
             self.cart_table.setFocus()
             return
@@ -1377,7 +1401,7 @@ class POSScreen(QWidget):
         self._freeze_ticket(breakdown, change)
 
     def _set_frozen_style(self, frozen: bool):
-        for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date, self.combined_input, self.ticket_total_lbl):
+        for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date, self.cart_input, self.ticket_total_lbl):
             widget.setProperty("frozen", frozen)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
@@ -1389,7 +1413,7 @@ class POSScreen(QWidget):
         self._frozen_change    = change
         self._frozen_total     = self.cart.total
         self._set_frozen_style(True)
-        self.combined_input.clear()
+        self.cart_input.clear()
         self._update_payment_footer()
         self.input_stack.setCurrentIndex(1)
         self._refresh_cart(select_last=True)
@@ -1669,7 +1693,7 @@ class POSScreen(QWidget):
             self._refresh_cart()
 
     def _read_amount_input(self) -> float | None:
-        text = self.combined_input.text().strip()
+        text = self.cart_input.text().strip()
         if not text:
             return None
         try:
@@ -1678,6 +1702,28 @@ class POSScreen(QWidget):
             return max(0.0, float(text))
         except ValueError:
             return None
+
+    def _reject_bare_amount(self, query: str) -> bool:
+        """A bare "." / "-" (or the numpad's "0.") is an unfinished amount,
+        not a quantity — float() would choke on it or yield 0. Shows an
+        overlay and clears the input; returns True if the caller should stop."""
+        if query and not any(ch in "123456789" for ch in query):
+            self._show_overlay("Enter a valid amount", kind="error")
+            self.cart_input.clear()
+            return True
+        return False
+
+    @staticmethod
+    def _typed_quantity(amount: float, product) -> float:
+        """The line quantity for an amount typed before adding a product.
+        Under 1, a weight/volume item takes it as its exact weight; any
+        other item just goes in as a single unit (sign kept for refunds).
+        Open-price items don't come through here — their amount is the price."""
+        if abs(amount) < 1:
+            if product.unit in WEIGHT_UNITS:
+                return amount
+            return -1 if amount < 0 else 1
+        return int(round(amount))
 
     def _admin(self):
         self.isAdmin = True
@@ -1716,16 +1762,23 @@ class POSScreen(QWidget):
         if self._selected_pending_item() is not None:
             self._show_overlay("Enter the pending amount before adding another item", kind="info")
             return
+        if self._barcode_entry_mode:
+            # A product tap abandons manual barcode entry — the input holds a
+            # partial barcode, not a quantity.
+            self._set_barcode_entry_mode(False)
+            self._barcode_entry_quantity = None
+            self.cart_input.clear()
 
-        query = self.combined_input.text().strip()
+        query = self.cart_input.text().strip()
+        if self._reject_bare_amount(query):
+            return
         quantity_typed = bool(query)
-        quantity = int(round(float(query))) if quantity_typed else 1
-        # FIXME
         with get_session() as session:
             product = ProductService.get_by_id(session, product_id)
             if product is None:
-                self.combined_input.clear()
+                self.cart_input.clear()
                 return
+            quantity = self._typed_quantity(float(query), product) if quantity_typed else 1
             open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
             if open_price == 0:
                 self._show_overlay("Enter an valid amount", kind="info")
@@ -1735,7 +1788,6 @@ class POSScreen(QWidget):
             if product.unit in WEIGHT_UNITS and not quantity_typed:
                 quantity = None
             if open_price is not None:
-                print(open_price)
                 # A negative typed price takes the item back off: -1 at the
                 # positive price, the same way refunds and reversals do it.
                 quantity = -1 if open_price < 0 else 1
@@ -1743,7 +1795,7 @@ class POSScreen(QWidget):
             self.cart.add_product(product, quantity=quantity, price=open_price)
         # Outside the session: this autosaves the ticket through its own session.
         self._refresh_cart(select_last=True)
-        self.combined_input.clear()
+        self.cart_input.clear()
 
     def _rf_cn(self):
         """Toggles refund / credit-note mode for this tab's ticket. While on,

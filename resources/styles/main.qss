@@ -64,7 +64,7 @@ QLabel#ticketDate {
     color: #052F6C;
 }
 
-QLineEdit#combinedInput {
+QLineEdit#cartInput {
     background-color: #fbf3ee;
     border: none;
     border-top: 2px solid #4a90d9;
@@ -76,7 +76,7 @@ QLineEdit#combinedInput {
     selection-background-color: #4a90d9;
 }
 
-QLineEdit#combinedInput[frozen="true"] {
+QLineEdit#cartInput[frozen="true"] {
     background-color: #ccc5be;
     color: #665C57;
 }
