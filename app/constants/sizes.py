@@ -32,6 +32,7 @@ REPORT_ROW_HEIGHT = 30                 # rows of the sales, VAT and categories t
 
 # ── Settings screen ──────────────────────────────────────────────────────
 SETTINGS_OK_BUTTON_HEIGHT = 40         # OK (save) button at the bottom of the screen
+SETTINGS_FUNCTION_BUTTON_HEIGHT = 60   # Admin / RF-CN / Reports buttons in the Buttons box below the tabs
 LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height)
 
 # ── Dialogs ──────────────────────────────────────────────────────────────
@@ -72,6 +73,7 @@ __all__ = [
     "REPORTS_BUTTON_HEIGHT",
     "REPORT_ROW_HEIGHT",
     "SETTINGS_OK_BUTTON_HEIGHT",
+    "SETTINGS_FUNCTION_BUTTON_HEIGHT",
     "LOGO_PREVIEW_SIZE",
     "DIALOG_BUTTON_HEIGHT",
     "NUMPAD_DIALOG_WIDTH",

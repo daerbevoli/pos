@@ -168,7 +168,7 @@ def test_sale_cannot_be_reopened_in_refund_mode(screen):
     screen.isAdmin = True
     screen.add_product_by_id(pid)
     screen._open_payment("cash")
-    screen._rf_cn()  # finished ticket on screen: toggling is allowed
+    screen.set_rf_cn(True)
 
     screen._reopen_ticket()
 
@@ -179,10 +179,10 @@ def test_sale_cannot_be_reopened_in_refund_mode(screen):
 def test_refund_cannot_be_reopened_outside_refund_mode(screen):
     pid, _, _ = _add_product()
     screen.isAdmin = True
-    screen._rf_cn()
+    screen.set_rf_cn(True)
     screen.add_product_by_id(pid)
     screen._open_payment("cash")
-    screen._rf_cn()  # back to normal mode
+    screen.set_rf_cn(False)  # back to normal mode
 
     screen._reopen_ticket()
 
@@ -193,7 +193,7 @@ def test_refund_cannot_be_reopened_outside_refund_mode(screen):
 def test_fully_reversed_reopened_refund_settles_at_zero(screen):
     pid, _, _ = _add_product(price=10.0)
     screen.isAdmin = True
-    screen._rf_cn()
+    screen.set_rf_cn(True)
     screen.add_product_by_id(pid)
     screen._open_payment("cash")
     sale_id = screen._current_sale_id
@@ -224,7 +224,7 @@ def test_reversed_refund_line_changes_revenue_but_is_not_a_mistake(screen):
     screen.add_product_by_id(ten)
     screen._open_payment("cash")
 
-    screen._rf_cn()
+    screen.set_rf_cn(True)
     screen.add_product_by_id(ten)
     screen.add_product_by_id(five)
     screen._open_payment("cash")
@@ -248,7 +248,7 @@ def test_reversed_refund_line_changes_revenue_but_is_not_a_mistake(screen):
 def test_new_refund_with_zero_total_is_still_refused(screen):
     pid, _, _ = _add_product(price=0.0)
     screen.isAdmin = True
-    screen._rf_cn()
+    screen.set_rf_cn(True)
     screen.add_product_by_id(pid)
 
     screen._open_payment("cash")
@@ -1230,45 +1230,29 @@ def test_browsing_blocked_while_sale_active(screen):
     assert not screen.overlay.isHidden()
 
 
-# ── Admin / navigation gating ─────────────────────────────────────────────
+# ── Admin ─────────────────────────────────────────────────────────────
 
-def test_admin_grants_admin_flag_and_emits_salesperson(screen, qtbot):
-    with qtbot.waitSignal(screen.salesperson_changed, timeout=1000) as blocker:
-        screen._admin()
+def test_set_admin_sets_admin_flag(screen):
+    screen.set_admin(True)
     assert screen.isAdmin is True
-    assert blocker.args == ["Admin"]
-
-
-def test_reports_navigation_blocked_without_admin(screen):
-    screen._emit_signal(4)
-    assert not screen.overlay.isHidden()
-
-
-def test_reports_navigation_allowed_for_admin(screen, qtbot):
-    screen.isAdmin = True
-    with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
-        screen._emit_signal(4)
-    assert blocker.args == [4]
-
-
-def test_articles_navigation_always_allowed(screen, qtbot):
-    with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
-        screen._emit_signal(1)
-    assert blocker.args == [1]
 
 
 # ── Refund / credit-note (RF / CN) mode ──────────────────────────────────
 
+def test_tab_has_open_ticket_only_while_building(screen):
+    pid, _, _ = _add_product(barcode="rf0")
+    assert screen.tab_has_open_ticket(1) is False
+    screen.add_product_by_id(pid)
+    assert screen.tab_has_open_ticket(1) is True
+    assert screen.tab_has_open_ticket(2) is False
+    screen._open_payment("cash")
+    assert screen.tab_has_open_ticket(1) is False
+
+
 def _press_rf_cn(screen):
-    """The RF / CN button is admin-only."""
-    screen.isAdmin = True
-    screen._rf_cn()
-
-
-def test_rf_cn_mode_requires_admin(screen):
-    screen.isAdmin = False
-    screen._rf_cn()
-    assert screen.cart.is_refund is False
+    """The RF / CN button lives on the Settings screen, which does the admin
+    check; MainWindow then flips the active tab's mode via set_rf_cn()."""
+    screen.set_rf_cn(not screen.cart.is_refund)
 
 
 def test_rf_cn_mode_adds_products_with_negative_quantity(screen, qtbot):
@@ -1283,19 +1267,6 @@ def test_rf_cn_mode_adds_products_with_negative_quantity(screen, qtbot):
 
     assert screen.cart.entries[0].quantity == -3
     assert screen.cart.total == -15.0
-
-
-def test_rf_cn_mode_declined_stays_off(screen, monkeypatch):
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.No))
-    _press_rf_cn(screen)
-    assert screen.cart.is_refund is False
-
-
-def test_rf_cn_mode_blocked_with_items_in_cart(screen):
-    pid, _, _ = _add_product(barcode="rf2")
-    screen.add_product_by_id(pid)
-    _press_rf_cn(screen)
-    assert screen.cart.is_refund is False
 
 
 def test_rf_cn_pending_weight_amount_goes_negative(screen):

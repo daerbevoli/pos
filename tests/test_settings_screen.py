@@ -193,3 +193,41 @@ def test_edit_shortcut_without_selection_warns(screen, monkeypatch):
     screen.shortcuts_list.setCurrentRow(-1)
     screen._on_edit_sc()
     assert len(calls) == 1
+
+
+# ── Buttons tab (Admin / RF-CN / Reports) ─────────────────────────────────
+
+def test_admin_sets_flag_and_emits_signals(screen, qtbot):
+    with qtbot.waitSignals([screen.admin_changed, screen.salesperson_changed], timeout=1000) as blocker:
+        screen._admin()
+    assert screen.is_admin is True
+    assert [sig.args for sig in blocker.all_signals_and_args] == [(True,), ("Admin",)]
+
+
+def test_reports_blocked_without_admin(screen, monkeypatch, qtbot):
+    warnings = []
+    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.warning", lambda *a, **kw: warnings.append(a))
+    with qtbot.assertNotEmitted(screen.navigate):
+        screen._open_reports()
+    assert warnings
+
+
+def test_reports_navigates_for_admin(screen, qtbot):
+    screen._admin()
+    with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
+        screen._open_reports()
+    assert blocker.args == [4]
+
+
+def test_rf_cn_blocked_without_admin(screen, monkeypatch, qtbot):
+    warnings = []
+    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.warning", lambda *a, **kw: warnings.append(a))
+    with qtbot.assertNotEmitted(screen.rf_cn_requested):
+        screen._rf_cn()
+    assert warnings
+
+
+def test_rf_cn_requested_for_admin(screen, qtbot):
+    screen._admin()
+    with qtbot.waitSignal(screen.rf_cn_requested, timeout=1000):
+        screen._rf_cn()

@@ -112,8 +112,8 @@ def test_pos_screen_tab_updated_relabels_vtab_button(window):
     assert window._vtab_buttons[1].text() == "V 1\n12.50"
 
 
-def test_pos_screen_salesperson_changed_updates_label(window):
-    window.pos_screen.salesperson_changed.emit("Admin")
+def test_settings_screen_salesperson_changed_updates_label(window):
+    window.settings_screen.salesperson_changed.emit("Admin")
     assert window.salesperson_label.text() == "Admin"
 
 
@@ -123,8 +123,54 @@ def test_update_clock_sets_readable_text(window):
 
 
 def test_rf_cn_mode_shows_suffix_next_to_salesperson(window):
-    window.pos_screen.salesperson_changed.emit("Admin")
+    window.settings_screen.salesperson_changed.emit("Admin")
     window.pos_screen.rf_cn_mode_changed.emit(True)
     assert window.salesperson_label.text() == "Admin (RF / CN)"
     window.pos_screen.rf_cn_mode_changed.emit(False)
     assert window.salesperson_label.text() == "Admin"
+
+
+def test_settings_admin_button_enables_admin_on_pos(window):
+    window.settings_screen._admin()
+    assert window.pos_screen.isAdmin is True
+    assert window.salesperson_label.text() == "Admin"
+
+
+def test_settings_rf_cn_button_toggles_pos_mode_and_returns_to_pos(window):
+    window._navigate(3)
+    window.settings_screen._admin()
+    window.settings_screen._rf_cn()
+    assert window.stack.currentIndex() == 0
+    assert window._active_vtab == 1
+    assert window.pos_screen.cart.is_refund is True
+
+
+def _ring_up_item(window, barcode):
+    with get_session() as session:
+        p = ProductService.create(session, name="Item", price=5.0, tax=0, stock_quantity=100, unit="pcs", barcode=barcode)
+        pid = p.id
+    window.pos_screen.add_product_by_id(pid)
+
+
+def test_rf_cn_with_open_ticket_switches_to_free_vtab(window):
+    _ring_up_item(window, "rfmw1")
+    window.settings_screen._admin()
+    window.settings_screen._rf_cn()
+
+    assert window._active_vtab == 2
+    assert window.pos_screen.cart.is_refund is True
+    window._switch_vtab(1)
+    assert window.pos_screen.cart.is_refund is False
+    assert len(window.pos_screen.cart.entries) == 1
+
+
+def test_rf_cn_with_every_vtab_open_shows_overlay(window):
+    for i in range(1, MAX_VTABS + 1):
+        window._switch_vtab(i)
+        _ring_up_item(window, f"rfmw{i}0")
+    window.settings_screen._admin()
+    window.settings_screen._rf_cn()
+
+    assert window._active_vtab == MAX_VTABS
+    assert window.pos_screen.cart.is_refund is False
+    assert not window.pos_screen.overlay.isHidden()

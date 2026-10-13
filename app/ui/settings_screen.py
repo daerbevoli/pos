@@ -15,17 +15,23 @@ from app.core.label_service import LabelPrinterService
 from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.settings_service import SettingsService
-from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_OK_BUTTON_HEIGHT
+from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_FUNCTION_BUTTON_HEIGHT, SETTINGS_OK_BUTTON_HEIGHT, SPACING_XS
 from app.ui.dialogs.category_dialog import CategoryDialog
 from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
 from app.utils.utils import FunctionButton
 
+ADMIN_CODE = "2060"
+
 
 class SettingsScreen(QWidget):
     settings_saved = pyqtSignal()
     navigate = pyqtSignal(int)
+    salesperson_changed = pyqtSignal(str)  # cashier name update for header
+    admin_changed = pyqtSignal(bool)       # admin mode toggled, for POS's admin-only actions
+    rf_cn_requested = pyqtSignal()         # admin pressed RF / CN: toggle it on the active POS ticket
 
+    is_admin = False
 
     def __init__(self):
         super().__init__()
@@ -68,6 +74,7 @@ class SettingsScreen(QWidget):
         self.tabs.addTab(printers_tab, "Printers")
         self.tabs.addTab(catalog_tab, "Catalog")
         self.tabs.addTab(erp_tab, "ERP")
+
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -218,6 +225,21 @@ class SettingsScreen(QWidget):
         erp_form.addRow("", erp_test_btn)
 
         erp_row.addWidget(erp_group)
+
+        # ── Buttons (admin functions moved off the POS control grid) ─────────
+        buttons_group = QGroupBox("Buttons")
+        buttons_layout = QHBoxLayout(buttons_group)
+        buttons_layout.setSpacing(SPACING_XS)
+        self.btn_admin   = FunctionButton("Admin", "secFunc")
+        self.btn_rf_cn   = FunctionButton("Refund / \nCreditnote", "secFunc")
+        self.btn_reports = FunctionButton("Reports", "secFunc")
+        self.btn_admin.clicked.connect(self._admin)
+        self.btn_rf_cn.clicked.connect(self._rf_cn)
+        self.btn_reports.clicked.connect(self._open_reports)
+        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports):
+            btn.setFixedHeight(SETTINGS_FUNCTION_BUTTON_HEIGHT)
+            buttons_layout.addWidget(btn, 1)
+        layout.addWidget(buttons_group)
 
         ok_btn = FunctionButton("OK", "okBtn")
         ok_btn.setFixedHeight(SETTINGS_OK_BUTTON_HEIGHT)
@@ -521,6 +543,38 @@ class SettingsScreen(QWidget):
         self._save()
         self.tabs.setCurrentIndex(0)
         self.navigate.emit(0)
+
+    def _admin(self):
+        self.is_admin = True
+        self.admin_changed.emit(True)
+        self.salesperson_changed.emit("Admin")
+        # if self.is_admin:
+        #     self.is_admin = False
+        #     self.admin_changed.emit(False)
+        #     self.salesperson_changed.emit(self.cashier_name)
+        #     return
+        # dialog = NumpadDialog(title="Enter Code", parent=self)
+        # if dialog.exec():
+        #     if dialog.value == ADMIN_CODE:
+        #         self.is_admin = True
+        #         self.admin_changed.emit(True)
+        #         self.salesperson_changed.emit("Admin")
+
+    def _rf_cn(self):
+        """Asks MainWindow to toggle refund / credit-note mode on the active
+        POS ticket (see MainWindow._toggle_rf_cn())."""
+        if not self.is_admin:
+            QMessageBox.warning(self, "Refund / Creditnota", "Only admin.")
+            return
+        self.tabs.setCurrentIndex(0)
+        self.rf_cn_requested.emit()
+
+    def _open_reports(self):
+        if not self.is_admin:
+            QMessageBox.warning(self, "Reports", "Only admin.")
+            return
+        self.tabs.setCurrentIndex(0)
+        self.navigate.emit(4)
 
     def _test_print(self):
         try:

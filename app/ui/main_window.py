@@ -132,7 +132,9 @@ class MainWindow(QMainWindow):
         self.settings_screen.settings_saved.connect(self._refresh_salesperson)
         self.settings_screen.settings_saved.connect(self.pos_screen.reload_shortcuts)
         self.pos_screen.navigate.connect(self._navigate)
-        self.pos_screen.salesperson_changed.connect(self._set_salesperson)
+        self.settings_screen.salesperson_changed.connect(self._set_salesperson)
+        self.settings_screen.admin_changed.connect(self.pos_screen.set_admin)
+        self.settings_screen.rf_cn_requested.connect(self._toggle_rf_cn)
         self.pos_screen.rf_cn_mode_changed.connect(self._set_rf_cn_mode)
         self.pos_screen.tab_updated.connect(self._on_tab_updated)
         self.pos_screen.emit_all_tab_amounts()  # show carts recovered from a crash/close
@@ -211,6 +213,25 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(screen_idx)
         if screen_idx == 0:
             self.pos_screen.set_active_tab(self._active_vtab)
+
+    def _toggle_rf_cn(self):
+        """RF / CN is pressed on the Settings screen but acts on a POS ticket,
+        so go back to POS first — overlays then show where the cashier is
+        looking. The mode can't flip under an open ticket (see
+        POSScreen.set_rf_cn()), so if the active V-tab has one, leave it
+        untouched and switch the mode on the first free V-tab instead."""
+        self._navigate(0)
+        entering = not self.pos_screen.cart.is_refund
+        if self.pos_screen.tab_has_open_ticket(self._active_vtab):
+            free = next(
+                (i for i in range(1, MAX_VTABS + 1) if not self.pos_screen.tab_has_open_ticket(i)),
+                None,
+            )
+            if free is None:
+                self.pos_screen.overlay.show_message("All V-tabs have an open ticket", kind="error")
+                return
+            self._switch_vtab(free)
+        self.pos_screen.set_rf_cn(entering)
 
     # ── Tab label update (from POSScreen when a cart changes) ─────────────────
 
