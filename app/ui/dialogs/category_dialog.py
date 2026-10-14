@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.constants import DIALOG_BUTTON_HEIGHT
-from app.utils.utils import FunctionButton
+from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 
 class CategoryDialog(QDialog):
@@ -12,6 +12,8 @@ class CategoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Category")
         self.setFixedSize(400, 200)
+
+        self.overlay = TapToDismissOverlay(self)
 
         self._existing = {n.strip().lower() for n in (existing_names or [])}
         self._original = cat_name.strip().lower()
@@ -45,10 +47,10 @@ class CategoryDialog(QDialog):
     def on_ok(self):
         name = self.line_edit.text().strip()
         if not name:
-            QMessageBox.warning(self, "Category", "Name cannot be empty.")
+            self.overlay.show_message("Name cannot be empty")
             return
         if name.lower() != self._original and name.lower() in self._existing:
-            QMessageBox.warning(self, "Category", f"“{name}” already exists.")
+            self.overlay.show_message(f"{name} already exists")
             return
         self.cat_name = name
         self.accept()

@@ -19,7 +19,7 @@ from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS
 from app.ui.dialogs.category_dialog import CategoryDialog
 from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
-from app.utils.utils import FunctionButton
+from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 ADMIN_CODE = "2060"
 
@@ -35,6 +35,7 @@ class SettingsScreen(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.overlay = TapToDismissOverlay(parent=self)
         self._logo_path = ""
         self._build_ui()
         self._load()
@@ -357,7 +358,7 @@ class SettingsScreen(QWidget):
         with get_session() as session:
             created = ProductService.create_category(session, dialog.cat_name)
         if created is None:
-            QMessageBox.warning(self, "Category", "Could not add category — Category already exists.")
+            self._show_overlay("Category already exists")
         self._reload_categories()
 
     def _selected_shortcut(self):
@@ -374,7 +375,7 @@ class SettingsScreen(QWidget):
         with get_session() as session:
             created = ProductService.create_shortcut(session, dialog.sc_name)
             if created is None:
-                QMessageBox.warning(self, "Shortcut", "Could not add shortcut — that name is already in use.")
+                self._show_overlay("Shortcut already exists")
             else:
                 ProductService.set_shortcut_items(session, created.id, dialog.product_ids)
         self._reload_shortcuts()
@@ -382,7 +383,6 @@ class SettingsScreen(QWidget):
     def _on_edit_sc(self):
         sc_id, sc_name = self._selected_shortcut()
         if sc_id is None:
-            QMessageBox.information(self, "Shortcut", "Select a shortcut to edit.")
             return
         with get_session() as session:
             product_ids = ProductService.get_shortcut_product_ids(session, sc_id)
@@ -605,3 +605,6 @@ class SettingsScreen(QWidget):
             QMessageBox.warning(self, "Test ERP Failed", str(e))
         else:
             QMessageBox.information(self, "Test ERP Success", "Connected to the ERP successfully.")
+
+    def _show_overlay(self, message: str, kind: str = "info"):
+        self.overlay.show_message(message, kind=kind)

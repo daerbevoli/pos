@@ -120,8 +120,10 @@ class ShortcutDialog(QDialog):
         with get_session() as session:
             products = ProductService.search(session, term)
             for p in products:
+                if p.is_open_price:
+                    continue
                 self._names[p.id] = p.name
-                price_text = "open price" if p.is_open_price else p.price
+                price_text = p.price
                 item = QListWidgetItem(f"{p.name}  ·  {price_text}")
                 item.setData(Qt.ItemDataRole.UserRole, p.id)
                 if p.id in self.product_ids:
