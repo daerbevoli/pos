@@ -1139,7 +1139,7 @@ class POSScreen(QWidget):
                 if is_weight:
                     qty_text = "1" if pending else ("-1" if entry.quantity < 0 else "1")
                     weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
-                    name_text = f"{entry.product_name} | {weight_text}"
+                    name_text = f"{entry.product_name}  ·  {weight_text}"
                     price_text = f"{entry.unit_price:.2f}/{entry.unit}"
                     # A weight article is one line item, not `quantity` kg of them.
                     count_contribution = 0 if pending else (-1 if entry.quantity < 0 else 1)

@@ -84,9 +84,8 @@ def test_move_at_edges_is_noop(qtbot, products):
 
 def test_ok_rejects_blank_name(qtbot, products, monkeypatch):
     warned = []
-    monkeypatch.setattr("app.ui.dialogs.shortcut_dialog.QMessageBox.warning",
-                        lambda *a, **kw: warned.append(a))
     d = _make(qtbot)
+    monkeypatch.setattr(d.overlay, "show_message", lambda *a, **kw: warned.append(a))
     d.name_edit.setText("   ")
     d.on_ok()
     assert warned and d.result() != d.DialogCode.Accepted
@@ -94,9 +93,8 @@ def test_ok_rejects_blank_name(qtbot, products, monkeypatch):
 
 def test_ok_rejects_duplicate_name(qtbot, products, monkeypatch):
     warned = []
-    monkeypatch.setattr("app.ui.dialogs.shortcut_dialog.QMessageBox.warning",
-                        lambda *a, **kw: warned.append(a))
     d = _make(qtbot, existing_names=["Lunch", "Dinner"])
+    monkeypatch.setattr(d.overlay, "show_message", lambda *a, **kw: warned.append(a))
     d.name_edit.setText("dinner")
     d.on_ok()
     assert warned

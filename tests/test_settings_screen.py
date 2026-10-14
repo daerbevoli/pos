@@ -187,12 +187,12 @@ def test_remove_shortcut_deletes_it(screen, monkeypatch):
     assert _shortcut_rows(screen) == []
 
 
-def test_edit_shortcut_without_selection_warns(screen, monkeypatch):
-    calls = []
-    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.information", lambda *a, **kw: calls.append(a))
+def test_edit_shortcut_without_selection_does_nothing(screen, monkeypatch):
+    opened = []
+    monkeypatch.setattr("app.ui.settings_screen.ShortcutDialog", lambda *a, **kw: opened.append(a))
     screen.shortcuts_list.setCurrentRow(-1)
     screen._on_edit_sc()
-    assert len(calls) == 1
+    assert opened == []
 
 
 # ── Buttons tab (Admin / RF-CN / Reports) ─────────────────────────────────

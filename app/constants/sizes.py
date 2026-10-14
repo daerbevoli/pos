@@ -34,6 +34,7 @@ REPORT_ROW_HEIGHT = 30                 # rows of the sales, VAT and categories t
 SETTINGS_OK_BUTTON_HEIGHT = 40         # OK (save) button at the bottom of the screen
 SETTINGS_FUNCTION_BUTTON_HEIGHT = 60   # Admin / RF-CN / Reports buttons in the Buttons box below the tabs
 LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height)
+LOG_PANEL_MAX_LINES = 2000             # Logs tab: oldest lines are dropped beyond this (also the startup backlog size)
 
 # ── Dialogs ──────────────────────────────────────────────────────────────
 DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut and promo dialogs;
@@ -75,6 +76,7 @@ __all__ = [
     "SETTINGS_OK_BUTTON_HEIGHT",
     "SETTINGS_FUNCTION_BUTTON_HEIGHT",
     "LOGO_PREVIEW_SIZE",
+    "LOG_PANEL_MAX_LINES",
     "DIALOG_BUTTON_HEIGHT",
     "NUMPAD_DIALOG_WIDTH",
     "NUMPAD_DIALOG_KEY_HEIGHT",

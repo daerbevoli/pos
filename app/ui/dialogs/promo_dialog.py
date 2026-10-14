@@ -125,7 +125,6 @@ class PromoDialog(QDialog):
         self.search_edit.textChanged.connect(self._run_search)
         left.addWidget(self.search_edit)
         self.results_list = QListWidget()
-        self.results_list.itemDoubleClicked.connect(lambda _: self._add_selected_result())
         left.addWidget(self.results_list)
         self.add_btn = QPushButton("Add →")
         self.add_btn.clicked.connect(self._add_selected_result)
@@ -218,7 +217,10 @@ class PromoDialog(QDialog):
         with get_session() as session:
             products = ProductService.search(session, term)
             for p in products:
-                price_text = "open price" if p.is_open_price else f"{p.price:.2f}"
+                # No promo on open prices
+                if p.is_open_price:
+                    continue
+                price_text = f"{p.price:.2f}"
                 item = QListWidgetItem(f"{p.name}  ·  {price_text}")
                 item.setData(Qt.ItemDataRole.UserRole, p.id)
                 item.setData(Qt.ItemDataRole.UserRole + 1, p.name)

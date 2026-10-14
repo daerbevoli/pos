@@ -18,6 +18,9 @@ COLOR_ROW_DIVIDER_FROZEN = (184, 176, 168)  # divider line on a paid ticket
 
 # ── Settings screen ──────────────────────────────────────────────────────
 COLOR_LOGO_PREVIEW_BORDER = "#ccc"          # border around the receipt-logo preview box
+COLOR_LOG_DEBUG = (130, 130, 130)           # Logs tab: DEBUG lines (INFO uses the default text color)
+COLOR_LOG_WARNING = (204, 120, 0)           # Logs tab: WARNING lines
+COLOR_LOG_ERROR = (200, 40, 40)             # Logs tab: ERROR and CRITICAL lines
 
 __all__ = [
     "COLOR_ROW_PENDING",
@@ -28,4 +31,7 @@ __all__ = [
     "COLOR_ROW_FROZEN",
     "COLOR_ROW_DIVIDER_FROZEN",
     "COLOR_LOGO_PREVIEW_BORDER",
+    "COLOR_LOG_DEBUG",
+    "COLOR_LOG_WARNING",
+    "COLOR_LOG_ERROR",
 ]

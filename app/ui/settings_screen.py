@@ -1,6 +1,9 @@
 """
 Settings Screen
 Store info, receipt printer, label printer configuration.
+Catalog for add/edit/delete categories, shortcuts and promos.
+ERP details and connection
+Logs
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -19,7 +22,10 @@ from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS
 from app.ui.dialogs.category_dialog import CategoryDialog
 from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
+from app.ui.widgets.log_panel import LogPanel
 from app.utils.utils import FunctionButton, TapToDismissOverlay
+
+import logging
 
 ADMIN_CODE = "2060"
 
@@ -39,6 +45,7 @@ class SettingsScreen(QWidget):
         self._logo_path = ""
         self._build_ui()
         self._load()
+        self.logger = logging.getLogger(__name__)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -75,7 +82,7 @@ class SettingsScreen(QWidget):
         self.tabs.addTab(printers_tab, "Printers")
         self.tabs.addTab(catalog_tab, "Catalog")
         self.tabs.addTab(erp_tab, "ERP")
-
+        self.tabs.addTab(LogPanel(), "Logs")
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -220,11 +227,9 @@ class SettingsScreen(QWidget):
         erp_form.addRow("Database:", self.erp_db)
         erp_form.addRow("API Key:", self.erp_api_key)
 
-
         erp_test_btn = QPushButton("Test ERP")
         erp_test_btn.clicked.connect(self._test_erp_connection)
         erp_form.addRow("", erp_test_btn)
-
         erp_row.addWidget(erp_group)
 
         # ── Buttons (admin functions moved off the POS control grid) ─────────
@@ -247,7 +252,6 @@ class SettingsScreen(QWidget):
         ok_btn.clicked.connect(self._on_ok)
         layout.addWidget(ok_btn)
         layout.addStretch()
-
 
     def _show_logo_preview(self, path: str):
         pixmap = QPixmap(path)
@@ -459,7 +463,7 @@ class SettingsScreen(QWidget):
                 dialog.end_date, dialog.is_active,
             )
             if created is None:
-                QMessageBox.warning(self, "Promo", "Could not add promo — that name is already in use.")
+                self._show_overlay("Error adding promo")
             else:
                 ProductService.set_promo_items(session, created.id, dialog.items)
         self._reload_promos()
@@ -536,7 +540,7 @@ class SettingsScreen(QWidget):
             SettingsService.set(session, "erp_api_key", self.erp_api_key.text().strip())
             if getattr(self, "_logo_path", ""):
                 SettingsService.set(session, "logo_path", self._logo_path)
-        QMessageBox.information(self, "Saved", "Settings saved successfully.")
+        self.logger.warning("Settings saved successfully.")
         self.settings_saved.emit()
 
     def _on_ok(self):
@@ -564,14 +568,16 @@ class SettingsScreen(QWidget):
         """Asks MainWindow to toggle refund / credit-note mode on the active
         POS ticket (see MainWindow._toggle_rf_cn())."""
         if not self.is_admin:
-            QMessageBox.warning(self, "Refund / Creditnota", "Only admin.")
+            self._show_overlay("Only admin.")
+            self.logger.warning("RF/CN requested without admin.")
             return
         self.tabs.setCurrentIndex(0)
         self.rf_cn_requested.emit()
 
     def _open_reports(self):
         if not self.is_admin:
-            QMessageBox.warning(self, "Reports", "Only admin.")
+            self._show_overlay("Only admin.")
+            self.logger.warning("Reports requested without admin.")
             return
         self.tabs.setCurrentIndex(0)
         self.navigate.emit(4)
@@ -580,17 +586,21 @@ class SettingsScreen(QWidget):
         try:
             ReceiptService.test_print(self.receipt_vendor.text(), self.receipt_product.text())
         except PrinterError as e:
-            QMessageBox.warning(self, "Test Print Failed", str(e))
+            self._show_overlay("Test Print Failed", kind="error")
+            self.logger.error(f"Test Print Failed: {str(e)}")
         else:
-            QMessageBox.information(self, "Test Print", "Test page sent to the printer.")
+            self._show_overlay("Test Print Success")
+            self.logger.info("Test Print Success")
 
     def _test_print_label(self):
         try:
             LabelPrinterService.test_print(self.label_vendor.text(), self.label_product.text())
         except PrinterError as e:
-            QMessageBox.warning(self, "Test Print Failed", str(e))
+            self._show_overlay("Test Print Failed", kind="error")
+            self.logger.error(f"Test Print Failed: {str(e)}")
         else:
-            QMessageBox.information(self, "Test Print", "Test label sent to the printer.")
+            self._show_overlay("Test Print Success")
+            self.logger.info("Test Print Success")
 
     def _test_erp_connection(self):
         """Tests the values currently typed in the form, before they're saved."""
@@ -602,9 +612,11 @@ class SettingsScreen(QWidget):
             )
             erp.connect()
         except Exception as e:
-            QMessageBox.warning(self, "Test ERP Failed", str(e))
+            self._show_overlay("Test ERP connection Failed", kind="error")
+            self.logger.error(f"Test ERP connection Failed: {str(e)}")
         else:
-            QMessageBox.information(self, "Test ERP Success", "Connected to the ERP successfully.")
+            self._show_overlay("Test ERP connection Success")
+            self.logger.info("Test ERP connection Success")
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)

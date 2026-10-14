@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.constants import DIALOG_BUTTON_HEIGHT, SHORTCUT_DIALOG_MIN_SIZE
-from app.utils.utils import FunctionButton
+from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 
 class ShortcutDialog(QDialog):
@@ -23,6 +23,7 @@ class ShortcutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Shortcut")
         self.setMinimumSize(*SHORTCUT_DIALOG_MIN_SIZE)
+        self.overlay = TapToDismissOverlay(self)
 
         self._existing = {n.strip().lower() for n in (existing_names or [])}
         self._original = sc_name.strip().lower()
@@ -120,10 +121,8 @@ class ShortcutDialog(QDialog):
         with get_session() as session:
             products = ProductService.search(session, term)
             for p in products:
-                if p.is_open_price:
-                    continue
                 self._names[p.id] = p.name
-                price_text = p.price
+                price_text = "open price" if p.is_open_price else f"{p.price:.2f}"
                 item = QListWidgetItem(f"{p.name}  ·  {price_text}")
                 item.setData(Qt.ItemDataRole.UserRole, p.id)
                 if p.id in self.product_ids:
@@ -177,10 +176,10 @@ class ShortcutDialog(QDialog):
     def on_ok(self):
         name = self.name_edit.text().strip()
         if not name:
-            QMessageBox.warning(self, "Shortcut", "Name cannot be empty.")
+            self.overlay.show_message("Name cannot be empty")
             return
         if name.lower() != self._original and name.lower() in self._existing:
-            QMessageBox.warning(self, "Shortcut", f"“{name}” already exists.")
+            self.overlay.show_message(f"Shortcut {name} already exists")
             return
         self.sc_name = name
         self.accept()
