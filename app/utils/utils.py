@@ -1,3 +1,5 @@
+import logging
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget
 from sqlalchemy.orm import Session
@@ -11,6 +13,8 @@ from app.constants import (
     VTAB_BUTTON_HEIGHT,
 )
 from app.core.settings_service import SettingsService
+
+logger = logging.getLogger(__name__)
 
 
 class TicketTable(QTableWidget):
@@ -142,6 +146,11 @@ class TapToDismissOverlay(QWidget):
 
     def show_message(self, message: str, kind: str = "info"):
         """kind: 'info' | 'error' — controls the card's accent color."""
+        # Everything a cashier is told ends up in the log, word for word,
+        # tagged with the screen/dialog that showed it.
+        level = logging.WARNING if kind == "error" else logging.INFO
+        logger.log(level, "Shown to user on %s: %s",
+                   type(self.parentWidget()).__name__, message.replace("\n", " "))
         self.message_label.setText(message)
         for widget in (self.card, self.message_label):
             widget.setProperty("kind", kind)

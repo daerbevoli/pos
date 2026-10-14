@@ -8,14 +8,28 @@ import logging.handlers
 from collections import deque
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QtMsgType, pyqtSignal, qInstallMessageHandler
 from PyQt6.QtWidgets import QMessageBox
 
 from app.constants import LOG_PANEL_MAX_LINES
 
 logger = logging.getLogger("pos")
 
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+# pos.log gets everything (DEBUG+) with thread + line number for tracing;
+# the Settings > Logs panel gets INFO+ in the shorter format.
+FILE_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(threadName)s %(name)s:%(lineno)d: %(message)s"
+PANEL_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# Third-party loggers that flood DEBUG output; only their warnings are kept.
+_NOISY_LOGGERS = ("urllib3", "requests", "sqlalchemy", "PIL", "usb", "escpos")
+
+_QT_LOG_LEVELS = {
+    QtMsgType.QtDebugMsg: logging.DEBUG,
+    QtMsgType.QtInfoMsg: logging.INFO,
+    QtMsgType.QtWarningMsg: logging.WARNING,
+    QtMsgType.QtCriticalMsg: logging.ERROR,
+    QtMsgType.QtFatalMsg: logging.CRITICAL,
+}
 
 
 class _LogEmitter(QObject):
@@ -56,13 +70,27 @@ def setup_logging():
     handler = logging.handlers.RotatingFileHandler(
         log_dir / "pos.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8"
     )
-    handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    qt_log_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(FILE_LOG_FORMAT))
+    qt_log_handler.setLevel(logging.INFO)
+    qt_log_handler.setFormatter(logging.Formatter(PANEL_LOG_FORMAT))
 
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(logging.DEBUG)
     root.addHandler(handler)
     root.addHandler(qt_log_handler)
+
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    # Qt's own warnings (layout/stylesheet/signal problems) normally only go
+    # to stderr, which the windowed .exe doesn't have — route them in here.
+    qt_logger = logging.getLogger("qt")
+
+    def _qt_message_handler(mode, context, message):
+        qt_logger.log(_QT_LOG_LEVELS.get(mode, logging.WARNING), message)
+
+    qInstallMessageHandler(_qt_message_handler)
 
 
 def install_excepthook():

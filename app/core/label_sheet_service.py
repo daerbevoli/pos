@@ -4,12 +4,16 @@ Builds an A4 PDF of barcode labels (name, manufacturer, lot number, expiry
 date + barcode) for printing on standard adhesive label sheets with an
 ordinary printer.
 """
+import logging
+
 from reportlab.graphics import renderPDF
 from reportlab.graphics.barcode import createBarcodeDrawing
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
+
+logger = logging.getLogger(__name__)
 
 # Labels per page -> (columns, rows). The grids divide A4 edge to edge, which
 # matches common margin-less sheets (e.g. 24 = 70 x 37 mm, 40 = 52.5 x 29.7 mm).
@@ -127,3 +131,4 @@ def build_label_sheet_pdf(path: str, labels_per_page: int, barcode: str, name: s
             _draw_label(c, col * w, page_h - (row + 1) * h, w, h, name, details, barcode)
     c.showPage()
     c.save()
+    logger.info("Label sheet PDF written: %s (%d labels, barcode %s)", path, labels_per_page, barcode)

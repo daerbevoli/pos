@@ -7,7 +7,11 @@ queued back onto the thread that owns the receiving QObject (the UI thread),
 so slots connected to them run safely there.
 """
 
+import logging
+
 from PyQt6.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 class InvoiceSendWorker(QThread):
     """Creates + posts the ERP invoice from `invoice_data`, then sends it —
@@ -26,6 +30,9 @@ class InvoiceSendWorker(QThread):
         self.use_email = use_email
 
     def run(self):
+        inv_num = self.invoice_data.get("inv_num")
+        logger.info("Sending invoice %s to ERP (peppol=%s, email=%s)",
+                    inv_num, self.use_peppol, self.use_email)
         try:
             invoice_id, already_sent = self.erp.create_post_invoice(
                 invoice_data=self.invoice_data
@@ -37,9 +44,12 @@ class InvoiceSendWorker(QThread):
                     invoice_id, self.use_peppol, self.use_email
                 )
         except Exception as e:
+            logger.exception("Invoice %s: ERP create/post/send raised", inv_num)
             self.failed.emit(str(e))
             return
         if not sent:
+            logger.error("Invoice %s: ERP did not send it: %s", inv_num, message)
             self.failed.emit(message)
             return
+        logger.info("Invoice %s sent (ERP id %s): %s", inv_num, invoice_id, message)
         self.succeeded.emit(invoice_id, self.invoice_data["inv_num"], message)

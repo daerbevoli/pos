@@ -48,31 +48,24 @@ def test_save_emits_settings_saved_signal(screen, monkeypatch, qtbot):
         screen._save()
 
 
-def test_save_shows_confirmation_dialog(screen, monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        "app.ui.settings_screen.QMessageBox.information",
-        lambda *a, **kw: calls.append(a),
-    )
-    screen._save()
-    assert len(calls) == 1
+def test_save_emits_settings_saved(screen, qtbot):
+    with qtbot.waitSignal(screen.settings_saved, timeout=1000):
+        screen._save()
 
 
-def test_test_print_shows_success_dialog(screen, monkeypatch):
+def test_test_print_shows_success_overlay(screen, monkeypatch):
     calls = []
     monkeypatch.setattr(
         "app.ui.settings_screen.ReceiptService.test_print",
         lambda vendor_id, product_id: None,
     )
-    monkeypatch.setattr(
-        "app.ui.settings_screen.QMessageBox.information",
-        lambda *a, **kw: calls.append(a),
-    )
+    monkeypatch.setattr(screen, "_show_overlay", lambda *a, **kw: calls.append((a, kw)))
     screen._test_print()
     assert len(calls) == 1
+    assert calls[0][1].get("kind", "info") == "info"
 
 
-def test_test_print_shows_warning_on_failure(screen, monkeypatch):
+def test_test_print_shows_error_overlay_on_failure(screen, monkeypatch):
     from app.core.receipt_service import PrinterError
 
     calls = []
@@ -81,12 +74,10 @@ def test_test_print_shows_warning_on_failure(screen, monkeypatch):
         raise PrinterError("Vendor ID is not configured. Set it in Settings.")
 
     monkeypatch.setattr("app.ui.settings_screen.ReceiptService.test_print", _raise)
-    monkeypatch.setattr(
-        "app.ui.settings_screen.QMessageBox.warning",
-        lambda *a, **kw: calls.append(a),
-    )
+    monkeypatch.setattr(screen, "_show_overlay", lambda *a, **kw: calls.append((a, kw)))
     screen._test_print()
     assert len(calls) == 1
+    assert calls[0][1].get("kind") == "error"
 
 
 def test_load_logo_updates_path_and_preview(screen, monkeypatch):
@@ -206,7 +197,7 @@ def test_admin_sets_flag_and_emits_signals(screen, qtbot):
 
 def test_reports_blocked_without_admin(screen, monkeypatch, qtbot):
     warnings = []
-    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.warning", lambda *a, **kw: warnings.append(a))
+    monkeypatch.setattr(screen, "_show_overlay", lambda *a, **kw: warnings.append(a))
     with qtbot.assertNotEmitted(screen.navigate):
         screen._open_reports()
     assert warnings
@@ -221,7 +212,7 @@ def test_reports_navigates_for_admin(screen, qtbot):
 
 def test_rf_cn_blocked_without_admin(screen, monkeypatch, qtbot):
     warnings = []
-    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.warning", lambda *a, **kw: warnings.append(a))
+    monkeypatch.setattr(screen, "_show_overlay", lambda *a, **kw: warnings.append(a))
     with qtbot.assertNotEmitted(screen.rf_cn_requested):
         screen._rf_cn()
     assert warnings

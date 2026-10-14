@@ -1,5 +1,6 @@
 """Tests for app.utils.error_handling: logging setup and global excepthook."""
 import logging
+import logging.handlers
 import sys
 
 import pytest
@@ -34,10 +35,15 @@ def test_setup_logging_creates_log_file(tmp_path, monkeypatch):
     assert log_file.exists()
 
 
-def test_setup_logging_sets_root_level_info(tmp_path, monkeypatch):
+def test_setup_logging_file_gets_debug_panel_gets_info(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     error_handling.setup_logging()
-    assert logging.getLogger().level == logging.INFO
+    root = logging.getLogger()
+    file_handler = next(h for h in root.handlers
+                        if isinstance(h, logging.handlers.RotatingFileHandler))
+    assert root.level == logging.DEBUG
+    assert file_handler.level == logging.DEBUG
+    assert error_handling.qt_log_handler.level == logging.INFO
 
 
 def test_install_excepthook_passes_through_keyboard_interrupt(monkeypatch):

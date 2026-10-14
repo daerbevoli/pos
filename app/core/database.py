@@ -2,11 +2,14 @@
 Database Setup & Session Management
 Handles SQLite connection, table creation, and provides session access.
 """
+import logging
 import os
 from typing import NamedTuple
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from app.models.models import Base, Settings, Category
+
+logger = logging.getLogger(__name__)
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
@@ -34,6 +37,14 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+# Every failed statement (constraint violation, locked DB, bad SQL...) passes
+# through here, whichever service or screen issued it.
+@event.listens_for(ENGINE, "handle_error")
+def log_db_error(context):
+    logger.error("DB error: %s | statement: %s", context.original_exception, context.statement)
+    # Params can hold settings values (e.g. the ERP API key), so file-only.
+    logger.debug("DB error params: %s", context.parameters)
 
 SessionFactory = sessionmaker(bind=ENGINE, autoflush=True, autocommit=False)
 

@@ -12,7 +12,7 @@ from app.core.receipt_service import PrinterError, _get_backend, _parse_id
 from app.core.settings_service import SettingsService
 from app.models.models import Product
 
-logger = logging.getLogger("pos")
+logger = logging.getLogger(__name__)
 
 LABEL_WIDTH_DOTS = 448   # 56mm @ 203dpi
 LABEL_HEIGHT_DOTS = 256  # 32mm @ 203dpi
@@ -24,11 +24,17 @@ def _open(vendor_id: str, product_id: str):
     import usb.core
     import usb.util
 
-    vid = _parse_id(vendor_id, "Vendor ID")
-    pid = _parse_id(product_id, "Product ID")
+    logger.debug("Opening label printer USB %s:%s", vendor_id, product_id)
+    try:
+        vid = _parse_id(vendor_id, "Vendor ID")
+        pid = _parse_id(product_id, "Product ID")
+    except PrinterError as e:
+        logger.error("Label printer not usable: %s", e)
+        raise
 
     dev = usb.core.find(idVendor=vid, idProduct=pid, backend=backend)
     if dev is None:
+        logger.error("Label printer USB %s:%s not found", vendor_id, product_id)
         raise PrinterError(
             f"No USB device found with vendor ID '{vendor_id}' and product ID '{product_id}'. "
             "Check the printer is connected and the IDs are correct."
@@ -37,8 +43,9 @@ def _open(vendor_id: str, product_id: str):
     try:
         if dev.is_kernel_driver_active(0):
             dev.detach_kernel_driver(0)
-    except (NotImplementedError, usb.core.USBError):
-        pass  # not applicable on this platform, or already detached
+    except (NotImplementedError, usb.core.USBError) as e:
+        # not applicable on this platform, or already detached
+        logger.debug("Label printer kernel driver not detached: %r", e)
 
     try:
         dev.set_configuration()
@@ -51,10 +58,12 @@ def _open(vendor_id: str, product_id: str):
             == usb.util.ENDPOINT_OUT,
         )
         if out_ep is None:
+            logger.error("Label printer USB %s:%s has no OUT endpoint", vendor_id, product_id)
             raise PrinterError("Could not find an OUT endpoint on this USB device.")
 
         return dev, out_ep
     except usb.core.USBError as e:
+        logger.error("Could not connect to label printer USB %s:%s: %s", vendor_id, product_id, e)
         raise PrinterError(f"Could not connect to label printer: {e}") from e
 
 #TODO: check EAN-8 barcodes by scanning one in Notepad, then decide whether to use leading 0s or make label print EAN-8
@@ -130,6 +139,7 @@ class LabelPrinterService:
     @staticmethod
     def _print_zpl(vendor_id: str, product_id: str, zpl: str):
         dev, out_ep = _open(vendor_id, product_id)
+        logger.debug("Sending ZPL to label printer:%s", zpl)
         try:
             out_ep.write(zpl.encode("utf-8"))
         except Exception as e:
@@ -143,6 +153,7 @@ class LabelPrinterService:
     def test_print(vendor_id: str, product_id: str):
         zpl = _build_zpl("TEST LABEL", "000000000000", "0.00", "")
         LabelPrinterService._print_zpl(vendor_id, product_id, zpl)
+        logger.info("Label printer test label printed (USB %s:%s)", vendor_id, product_id)
 
     @staticmethod
     def print_product_label(session: Session, product: Product):
@@ -150,8 +161,12 @@ class LabelPrinterService:
         currency = settings.get("currency_symbol", "€")
         vendor_id = settings.get("label_printer_vendor_id", "")
         product_id = settings.get("label_printer_product_id", "")
+        promo = promo_label_data(product, currency)
         zpl = _build_zpl(
             product.name, product.barcode or "", f"{currency} {product.price:.2f}", product.unit,
-            promo=promo_label_data(product, currency),
+            promo=promo,
         )
         LabelPrinterService._print_zpl(vendor_id, product_id, zpl)
+        logger.info("Shelf label printed: product %s %r, barcode %s, %.2f%s",
+                    product.id, product.name, product.barcode, product.price,
+                    f" (promo {promo['price']})" if promo else "")

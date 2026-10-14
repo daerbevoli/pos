@@ -18,7 +18,7 @@ from app.core.sales_service import Cart, CartItem, DiscountEntry, SubtotalMarker
 from app.core.settings_service import SettingsService
 from app.models.models import Invoice, Sale, ZReport
 
-logger = logging.getLogger("pos")
+logger = logging.getLogger(__name__)
 
 LINE_WIDTH = 48  # 80mm paper at font A (12x24 dots -> 576px / 12)
 DRAWER_PIN = 2  # 2 = connector pin 2 (common default), 5 = connector pin 5
@@ -57,9 +57,11 @@ def _get_backend():
             else "x86_64" if platform.architecture()[0] == "64bit" else "x86")
     matches = glob.glob(os.path.join(pkg_dir, "**", arch, "libusb-1.0.dll"), recursive=True)
     if not matches:
+        logger.error("libusb-1.0.dll not found under %s for arch %s", pkg_dir, arch)
         raise PrinterError("libusb-1.0.dll not found for this platform/architecture.")
 
     backend = usb.backend.libusb1.get_backend(find_library=lambda x: matches[0])
+    logger.info("USB backend loaded: %s (backend %s)", matches[0], "OK" if backend else "None")
     original_find = usb.core.find
     usb.core.find = lambda *a, **kw: original_find(*a, **{**kw, "backend": backend})
     _backend = backend
@@ -84,33 +86,59 @@ def _open(vendor_id: str, product_id: str):
     from escpos.exceptions import Error as EscposError
     from escpos.printer import Usb
 
-    vid = _parse_id(vendor_id, "Vendor ID")
-    pid = _parse_id(product_id, "Product ID")
+    logger.debug("Opening receipt printer USB %s:%s", vendor_id, product_id)
+    try:
+        vid = _parse_id(vendor_id, "Vendor ID")
+        pid = _parse_id(product_id, "Product ID")
+    except PrinterError as e:
+        logger.error("Receipt printer not usable: %s", e)
+        raise
     try:
         return Usb(vid, pid, timeout=0, in_ep=0x81, out_ep=0x01)
     except (usb.core.USBError, EscposError) as e:
+        logger.error("Could not connect to receipt printer USB %s:%s: %s", vendor_id, product_id, e)
         raise PrinterError(f"Could not connect to receipt printer: {e}") from e
 
 
-def _print_logo(printer, settings: dict):
-    logo_path = settings.get("logo_path", "")
-    if not logo_path or not os.path.isfile(logo_path):
-        printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
-        printer.text(f"EUROSTAR SUPERMARKET\n")
-        printer.text("-" * LINE_WIDTH + "\n")
-        printer.set(align="left")
-        return
+def _print_text_header(printer):
+    printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
+    printer.text(f"EUROSTAR SUPERMARKET\n")
+    printer.text("-" * LINE_WIDTH + "\n")
+    printer.set(align="left")
+
+
+def _load_logo(logo_path: str) -> Image.Image | None:
+    """The logo scaled to paper width, or None if it can't be used. A bad
+    logo file must not stop the receipt from printing."""
+    if not logo_path:
+        return None
+    if not os.path.isfile(logo_path):
+        logger.warning("Receipt logo %s not found, printing text header instead", logo_path)
+        return None
     try:
-        with Image.open(logo_path) as img:
-            if img.width != LOGO_MAX_WIDTH_PX:
-                ratio = LOGO_MAX_WIDTH_PX / img.width
-                size = (LOGO_MAX_WIDTH_PX, max(1, round(img.height * ratio)))
-                img = img.resize(size, Image.LANCZOS)
-            printer.image(img, center=True)
-            printer.text("-" * LINE_WIDTH + "\n")
-            printer.set(align="left")
-    except PrinterError:
-        logger.exception("Failed to print logo image at %s", logo_path)
+        with Image.open(logo_path) as src:
+            if src.width == LOGO_MAX_WIDTH_PX:
+                return src.copy()
+            ratio = LOGO_MAX_WIDTH_PX / src.width
+            size = (LOGO_MAX_WIDTH_PX, max(1, round(src.height * ratio)))
+            return src.resize(size, Image.LANCZOS)
+    except Exception:
+        logger.warning("Receipt logo %s could not be read, printing text header instead",
+                       logo_path, exc_info=True)
+        return None
+
+
+def _print_logo(printer, settings: dict):
+    img = _load_logo(settings.get("logo_path", ""))
+    if img is None:
+        _print_text_header(printer)
+        return
+    # Outside the try above on purpose: a printer failure here is a real
+    # print failure and must fail the receipt, not fall back silently.
+    printer.image(img, center=True)
+    printer.text("-" * LINE_WIDTH + "\n")
+    printer.set(align="left")
+
 
 def _left_right(left: str, right: str, width: int = LINE_WIDTH) -> str:
     """One line with `left` flush left and `right` flush right; truncates `left` if both don't fit."""
@@ -356,7 +384,9 @@ class ReceiptService:
             printer.text("Printer connected OK\n")
             printer.text("-" * LINE_WIDTH + "\n")
             printer.cut(mode="PART")
+            logger.info("Receipt printer test page printed (USB %s:%s)", vendor_id, product_id)
         except Exception as e:
+            logger.exception("Receipt printer test page failed (USB %s:%s)", vendor_id, product_id)
             raise PrinterError(f"Printer connected but failed to print: {e}") from e
         finally:
             printer.close()
@@ -367,7 +397,9 @@ class ReceiptService:
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
             printer.cashdraw(DRAWER_PIN)
+            logger.info("Cash drawer opened")
         except Exception as e:
+            logger.exception("Could not open cash drawer")
             raise PrinterError(f"Could not open cash drawer: {e}") from e
         finally:
             printer.close()
@@ -388,6 +420,8 @@ class ReceiptService:
             _print_company_info(printer, settings)
 
             printer.cut(mode="PART")
+            logger.info("Receipt printed for sale %s%s", sale.sale_number,
+                        f" (invoice {sale.invoice.invoice_number})" if sale.invoice else "")
         except PrinterError:
             raise
         except Exception as e:
@@ -411,6 +445,7 @@ class ReceiptService:
             printer.text(f"Printed on {totals["period_end"]}")
 
             printer.cut(mode="PART")
+            logger.info("X-report %s printed", totals["report_number"])
         except PrinterError:
             raise
         except Exception as e:
@@ -446,6 +481,7 @@ class ReceiptService:
             printer.text(f"Printed on {z_report.period_end.strftime('%d/%m/%Y %H:%M')}")
 
             printer.cut(mode="PART")
+            logger.info("Z-report %s printed", z_report.report_number)
         except PrinterError:
             raise
         except Exception as e:

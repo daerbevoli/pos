@@ -1,6 +1,21 @@
+import logging
+import time
 from typing import Any
 import requests
 from app.core.sales_service import InvoiceLine
+
+logger = logging.getLogger(__name__)
+
+# Request/response bodies are logged at DEBUG (pos.log only); cap their size
+# so a big read() doesn't flood the file. Headers are never logged: they
+# carry the API key.
+_LOG_BODY_MAX = 2000
+
+
+def _clip(value) -> str:
+    text = str(value)
+    return text if len(text) <= _LOG_BODY_MAX else text[:_LOG_BODY_MAX] + f"... ({len(text)} chars)"
+
 
 class ErpService:
     """
@@ -20,6 +35,8 @@ class ErpService:
         }
 
     def _call(self, model: str, method: str, payload: dict) -> Any:
+        logger.debug("ERP -> %s.%s %s", model, method, _clip(payload))
+        started = time.monotonic()
         try:
             res = requests.post(
                 f"{self.base_url}/{model}/{method}",
@@ -28,16 +45,23 @@ class ErpService:
                 timeout=self.timeout,
             )
         except requests.RequestException as e:
+            logger.error("ERP %s.%s connection error after %.2fs: %s",
+                         model, method, time.monotonic() - started, e)
             raise Exception(f"Connection error: {e}")
+        elapsed = time.monotonic() - started
 
         if res.status_code != 200:
+            logger.error("ERP %s.%s HTTP %s after %.2fs: %s",
+                         model, method, res.status_code, elapsed, _clip(res.text))
             raise Exception(
                 f"HTTP {res.status_code} {model}.{method}: {res.text}"
             )
 
         data = res.json()
+        logger.debug("ERP <- %s.%s %.2fs %s", model, method, elapsed, _clip(data))
 
         if isinstance(data, dict) and data.get("error"):
+            logger.error("ERP %s.%s returned error: %s", model, method, data["error"])
             raise Exception(data["error"])
 
         return data
@@ -53,7 +77,9 @@ class ErpService:
         )
 
         if not user_context['uid']:
+            logger.error("ERP authentication failed for db %s (no uid returned)", self.db)
             raise PermissionError("Authentication failed: Check username/API key.")
+        logger.info("ERP connection OK: db %s, uid %s", self.db, user_context["uid"])
         return True
 
 
@@ -158,7 +184,7 @@ class ErpService:
                     "tax_ids": [(6, 0, [tax_id])]}))
         if not lines:
             raise ValueError("No invoice lines created. Check parsed totals.")
-        print(lines)
+        logger.debug("Built %d invoice lines: %s", len(lines), _clip(lines))
         return lines
 
 
@@ -176,6 +202,8 @@ class ErpService:
         if ids:
             partner_id = ids[0]
             partner_email = self.read(model="res.partner", ids=partner_id, fields=["email"])[0]["email"]
+            logger.info("ERP partner found: id %s (has email: %s)", partner_id, bool(partner_email))
+            logger.debug("ERP partner %s matched VAT %s", partner_id, vat)
             return partner_id, partner_email
 
 
@@ -201,6 +229,9 @@ class ErpService:
         )
 
         partner_email = self.read(model="res.partner", ids=new_partner, fields=["email"])[0]["email"]
+        logger.info("ERP partner created: id %s (has email: %s)", new_partner, bool(partner_email))
+        logger.debug("ERP partner %s created for %s, VAT %s, country %s",
+                     new_partner, customer_info["name"], vat, customer_info["country"])
 
         return new_partner, partner_email
 
@@ -242,10 +273,14 @@ class ErpService:
                 ids=[invoice_id],
                 fields=["state", "is_move_sent"],
             )[0]
+            logger.info("ERP %s %s already exists (id %s, state %s, sent %s), resuming",
+                        move_type, inv_num, invoice_id, move["state"], move["is_move_sent"])
             if move["state"] == "cancel":
+                logger.error("ERP %s %s (id %s) is cancelled in the ERP", move_type, inv_num, invoice_id)
                 raise Exception(f"Invoice {inv_num} is cancelled in the ERP")
             if move["state"] == "draft":
                 self.button("account.move", "action_post", [invoice_id])
+                logger.info("ERP %s %s (id %s) posted", move_type, inv_num, invoice_id)
             return invoice_id, bool(move["is_move_sent"])
 
         # 4. No duplicate -> create invoice
@@ -263,8 +298,12 @@ class ErpService:
         )
 
 
+        logger.info("ERP %s %s created: id %s, partner %s, %d lines",
+                    move_type, inv_num, invoice_id, partner_id, len(items))
+
         # 6. Post invoice
         self.button("account.move", "action_post", [invoice_id])
+        logger.info("ERP %s %s (id %s) posted", move_type, inv_num, invoice_id)
 
         return invoice_id, False
 
@@ -291,9 +330,8 @@ class ErpService:
             fields=["state", "partner_id", "peppol_move_state"],
         )[0]
 
-        print(invoice)
-
         if invoice["state"] != "posted":
+            logger.warning("ERP invoice id %s not sent: state is %s, not posted", invoice_id, invoice["state"])
             return False, "Invoice is not posted"
 
         partner_id = invoice["partner_id"][0]
@@ -304,7 +342,6 @@ class ErpService:
             ids=[partner_id],
             fields=["email", "peppol_verification_state"])[0]
 
-        print(partner)
         partner_state = partner["peppol_verification_state"]
 
         methods: list[str] = []
@@ -337,7 +374,9 @@ class ErpService:
                 notes.append("Partner has no email address")
 
         if not methods:
-            return False, "; ".join(notes) or "No sending method available"
+            reason = "; ".join(notes) or "No sending method available"
+            logger.warning("ERP invoice id %s not sent: %s", invoice_id, reason)
+            return False, reason
 
         # 4. Create the wizard. Building the context ourselves avoids an extra
         #    round trip; it is what the "Send & Print" button would pass.
@@ -374,4 +413,6 @@ class ErpService:
         message = "Invoice sent via " + " and ".join(methods)
         if notes:
             message += " (" + "; ".join(notes) + ")"
+        logger.info("ERP invoice id %s: send wizard %s created, methods %s, notes %s",
+                    invoice_id, wizard_id, methods, notes or "-")
         return True, message
