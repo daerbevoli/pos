@@ -540,7 +540,7 @@ class SettingsScreen(QWidget):
             SettingsService.set(session, "erp_api_key", self.erp_api_key.text().strip())
             if getattr(self, "_logo_path", ""):
                 SettingsService.set(session, "logo_path", self._logo_path)
-        self.logger.warning("Settings saved successfully.")
+        self.logger.info("Settings saved successfully.")
         self.settings_saved.emit()
 
     def _on_ok(self):

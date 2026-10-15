@@ -32,6 +32,33 @@ _QT_LOG_LEVELS = {
 }
 
 
+class _PauseFilter(logging.Filter):
+    """Drops DEBUG/INFO records while logging is paused — see pause_logging().
+    Warnings and errors always get through."""
+
+    paused = False
+
+    def filter(self, record):
+        return not self.paused or record.levelno >= logging.WARNING
+
+
+# Shared by the file and panel handlers, so one switch silences both.
+_pause_filter = _PauseFilter()
+
+
+def pause_logging(paused: bool):
+    """Silences DEBUG and INFO logging — pos.log and the Logs panel alike,
+    from every thread warnings and errors are still logged so failures
+    stay diagnosable. A single marker line on each side of the pause shows
+    the gap in the log is deliberate."""
+    if paused == _pause_filter.paused:
+        return
+    if paused:
+        _pause_filter.paused = True
+    else:
+        _pause_filter.paused = False
+
+
 class _LogEmitter(QObject):
     record = pyqtSignal(str, int)  # formatted line, levelno
 
@@ -48,6 +75,7 @@ class QtLogHandler(logging.Handler):
         super().__init__()
         self.emitter = _LogEmitter()
         self.backlog = deque(maxlen=LOG_PANEL_MAX_LINES)
+        self.addFilter(_pause_filter)
 
     def emit(self, record):
         try:
@@ -72,6 +100,7 @@ def setup_logging():
     )
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter(FILE_LOG_FORMAT))
+    handler.addFilter(_pause_filter)
     qt_log_handler.setLevel(logging.INFO)
     qt_log_handler.setFormatter(logging.Formatter(PANEL_LOG_FORMAT))
 

@@ -19,6 +19,7 @@ from app.ui.reports_screen import ReportsScreen
 from app.ui.settings_screen import SettingsScreen
 from app.core.database import get_session
 from app.core.product_service import ProductService
+from app.utils.error_handling import pause_logging
 from app.utils.utils import TicketTab
 from app.constants import (
     HEADER_MAX_HEIGHT,
@@ -183,6 +184,7 @@ class MainWindow(QMainWindow):
 
     def _set_rf_cn_mode(self, active: bool):
         self._rf_cn_mode = active
+        pause_logging(active)
         self._render_salesperson()
 
     def _render_salesperson(self):

@@ -10,6 +10,7 @@ Both cover till sales only (S-/RF-, see till_sales()): a sale invoiced as
 I-/CN- is booked through the ERP, so counting it here too would book it twice.
 """
 import json
+import logging
 from datetime import datetime
 
 from sqlalchemy import func
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.core.sales_service import Cart, calc_tax, SalesService, OpenTicketData, load_open_tickets
 from app.models.models import Invoice, Product, Sale, ZReport
+
+logger = logging.getLogger(__name__)
 
 VAT_RATES = (0, 6, 21, 12)
 
@@ -35,7 +38,9 @@ def _payment_breakdown(sale) -> list[dict]:
         try:
             return json.loads(sale.payment_breakdown)
         except (ValueError, TypeError):
-            pass
+            logger.warning("%s: unreadable payment breakdown, counted as %s %.2f",
+                           getattr(sale, "sale_number", None) or getattr(sale, "invoice_number", "?"),
+                           sale.payment_method, sale.final_amount)
     return [{"method": sale.payment_method, "amount": sale.final_amount}]
 
 
@@ -84,6 +89,8 @@ def invoice_vat_breakdown(invoices) -> dict:
         try:
             cart = Cart.from_snapshot(invoice.line_items_snapshot)
         except (ValueError, TypeError, KeyError):
+            logger.warning("Invoice %s: unreadable line snapshot, left out of the VAT breakdown",
+                           invoice.invoice_number)
             continue
         for entry, net_total in cart.net_line_totals():
             if entry.quantity is None:
@@ -119,6 +126,8 @@ def invoice_category_breakdown(session: Session, invoices) -> dict:
         try:
             cart = Cart.from_snapshot(invoice.line_items_snapshot)
         except (ValueError, TypeError, KeyError):
+            logger.warning("Invoice %s: unreadable line snapshot, left out of the category breakdown",
+                           invoice.invoice_number)
             continue
         for entry, net_total in cart.net_line_totals():
             if entry.quantity is None:
@@ -148,6 +157,8 @@ def _discounts_and_mistakes(sales) -> tuple[dict, list[dict]]:
         try:
             entries = json.loads(sale.cart_snapshot) if sale.cart_snapshot else []
         except (ValueError, TypeError):
+            logger.warning("Sale %s: unreadable cart snapshot, discounts/mistakes left out",
+                           getattr(sale, "sale_number", "?"))
             continue
         for raw in entries:
             kind = raw.get("type")
@@ -221,6 +232,8 @@ class XZReportService:
         totals["report_number"] = f"X-{XZReportService.current_period_number(session):04d}"
         totals["period_start"] = sales[0].created_at if sales else datetime.now()
         totals["period_end"] = datetime.now()
+        logger.info("X report %s generated: %d transactions, total %.2f",
+                    totals["report_number"], totals["transaction_count"], totals["final_amount"])
         return totals
 
     @staticmethod
@@ -258,6 +271,8 @@ class XZReportService:
         unsent = XZReportService.unsent_invoice_numbers(session)
         open_tickets = XZReportService.open_tickets(session)
         if unsent or open_tickets:
+            logger.warning("Z report refused: unsent invoices [%s], open tickets: %s",
+                           ", ".join(unsent), open_tickets)
             raise ValueError(f"Unsent invoices: {', '.join(unsent)}")
 
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
@@ -298,4 +313,9 @@ class XZReportService:
 
         session.commit()
         session.refresh(z_report)
+        logger.info("Z report %s closed (%s to %s): %d transactions, total %.2f, VAT %.2f; "
+                    "%d sales purged, payments %s",
+                    report_number, period_start, period_end, totals["transaction_count"],
+                    totals["final_amount"], totals["tax_amount"], len(sales),
+                    ", ".join(f"{p['method']} {p['amount']:.2f}" for p in totals["payment_breakdown"]) or "none")
         return z_report

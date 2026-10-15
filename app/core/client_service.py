@@ -2,8 +2,12 @@
 Client & Inventory Service
 All business logic for managing Clients and stock.
 """
+import logging
+
 from sqlalchemy.orm import Session
 from app.models.models import Client
+
+logger = logging.getLogger(__name__)
 
 class ClientService:
 
@@ -45,17 +49,21 @@ class ClientService:
         session.add(client)
         session.commit()
         session.refresh(client)
+        logger.info("Client created: %s %r", client.id, client.name)
         return client
 
     @staticmethod
     def update(session: Session, client_id: int, **kwargs) -> Client | None:
         client = session.query(Client).filter_by(id=client_id).first()
         if not client:
+            logger.warning("Client update: client %s not found", client_id)
             return None
         for key, value in kwargs.items():
             setattr(client, key, value)
         session.commit()
         session.refresh(client)
+        # Field names only: values are customer contact details.
+        logger.info("Client updated: %s %r (%s)", client.id, client.name, ", ".join(kwargs))
         return client
 
     @staticmethod
@@ -63,7 +71,9 @@ class ClientService:
         """Soft delete — keeps sales history intact."""
         client = session.query(Client).filter_by(id=client_id).first()
         if not client:
+            logger.warning("Client deactivate: client %s not found", client_id)
             return False
         client.is_active = False
         session.commit()
+        logger.info("Client deactivated: %s %r", client.id, client.name)
         return True

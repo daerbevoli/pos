@@ -3,6 +3,7 @@ Sales Service
 Handles checkout, sale creation, and sales history.
 """
 import json
+import logging
 from datetime import date, datetime, timedelta
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
@@ -10,6 +11,8 @@ from sqlalchemy import func
 
 from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket, NumberSequence
 from app.core.product_service import ProductService
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ReceiptEntry:
@@ -371,6 +374,9 @@ def _relink_reversals(items: list[CartItem], links: list[tuple[CartItem, int | N
         if original is not None:
             reversal.reversal_of = original
             claimed.add(id(original))
+        else:
+            logger.warning("Snapshot reversal of %r (qty %s) has no matching original line",
+                           reversal.product_name, reversal.quantity)
 
 
 @dataclass
@@ -408,12 +414,15 @@ def save_open_ticket(
     row.sale_id = sale_id
     row.is_refund = is_refund
     session.commit()
+    logger.debug("Open ticket saved: V-tab %s, %d entries, total %.2f",
+                 vtab_slot, len(cart.entries), cart.total)
 
 
 def clear_open_ticket(session: Session, vtab_slot: int) -> None:
     """Drops the crash-recovery snapshot for a V-tab once its ticket is no
     longer in progress (paid or explicitly cleared)."""
-    session.query(OpenTicket).filter_by(vtab_slot=vtab_slot).delete()
+    if session.query(OpenTicket).filter_by(vtab_slot=vtab_slot).delete():
+        logger.debug("Open ticket cleared: V-tab %s", vtab_slot)
     session.commit()
 
 
@@ -432,6 +441,10 @@ def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
             sale_id=row.sale_id,
             is_refund=cart.is_refund,
         )
+        logger.info("Recovered open ticket: V-tab %s, %d entries, total %.2f%s%s",
+                    row.vtab_slot, len(cart.entries), cart.total,
+                    f", client {row.client_name!r}" if row.client_id else "",
+                    f", reopened sale {row.sale_id}" if row.sale_id else "")
     return drafts
 
 
@@ -510,6 +523,8 @@ def generate_invoice_data(invoice: Invoice) -> dict:
     invoice_data["move_type"] = "out_refund" if invoice.is_credit_note else "out_invoice"
     invoice_data["items"] = items
     invoice_data["notes"] = "Thank you for shopping."
+    logger.debug("ERP payload built for %s: %s, %d lines",
+                 invoice.invoice_number, invoice_data["move_type"], len(items))
 
     return invoice_data
 
@@ -519,6 +534,35 @@ def generate_invoice_data(invoice: Invoice) -> dict:
 # zero-padded width ("S-ddmmyy-0042", "I-ddmmyy-042").
 SALE_NUMBER_MAX = 9999     # S- / RF-
 INVOICE_NUMBER_MAX = 999   # I- / CN-
+
+
+def _describe_sale(sale: Sale, cart: Cart) -> str:
+    """One-line summary of a saved sale for the log: total, VAT, line
+    counts and how it was paid. Runs after the sale is committed, so it
+    must never raise: a logging hiccup can't turn a saved sale into an error."""
+    try:
+        return _sale_summary(sale, cart)
+    except Exception:
+        logger.exception("Could not summarise sale %s for the log", sale.sale_number)
+        return f"total {sale.final_amount}"
+
+
+def _sale_summary(sale: Sale, cart: Cart) -> str:
+    items = [e for e in cart.entries if isinstance(e, CartItem)]
+    reversals = sum(1 for e in items if e.is_reversal)
+    discounts = round(sum(e.amount for e in cart.entries if isinstance(e, DiscountEntry)), 2)
+    paid = (", ".join(f"{leg.get('method')} {leg.get('amount', 0):.2f}"
+                      for leg in json.loads(sale.payment_breakdown))
+            if sale.payment_breakdown else sale.payment_method)
+    parts = [f"total {sale.final_amount:.2f}", f"VAT {sale.tax_amount:.2f}", f"{len(items)} lines"]
+    if reversals:
+        parts.append(f"{reversals} reversed")
+    if discounts:
+        parts.append(f"discounts {discounts:.2f}")
+    parts.append(f"paid {paid}")
+    if sale.change_given:
+        parts.append(f"change {sale.change_given:.2f}")
+    return ", ".join(parts)
 
 
 class SalesService:
@@ -538,6 +582,8 @@ class SalesService:
             suffix = latest[0].rsplit("-", 1)[1] if latest else ""
             row = NumberSequence(series=series, last_value=int(suffix) if suffix.isdigit() else 0)
             session.add(row)
+            logger.info("Number series %s- had no counter, starting after %s",
+                        series, latest[0] if latest else "nothing")
 
         today = date.today().strftime("%d%m%y")
         value = row.last_value
@@ -546,8 +592,11 @@ class SalesService:
             value = value % maximum + 1
             number = f"{series}-{today}-{value:0{width}d}"
             if session.query(column).filter(column == number).first() is None:
+                if value < row.last_value:
+                    logger.warning("Number series %s- wrapped back to %s", series, number)
                 row.last_value = value
                 return number
+        logger.error("All %d %s- numbers for today are in use", maximum, series)
         raise ValueError(f"All {maximum} {series}- numbers for today are in use.")
 
     @staticmethod
@@ -575,6 +624,7 @@ class SalesService:
                 session.add(NumberSequence(series=series, last_value=0))
             else:
                 row.last_value = 0
+        logger.info("Sale/refund number sequences reset")
 
     @staticmethod
     def finalize_sale(
@@ -616,6 +666,8 @@ class SalesService:
         sale.tax_amount = SalesService._add_sale_items(session, sale, cart)
         session.commit()
         session.refresh(sale)
+        logger.info("%s %s completed: %s", "Refund" if cart.is_refund else "Sale",
+                    sale.sale_number, _describe_sale(sale, cart))
         return sale
 
     @staticmethod
@@ -700,9 +752,13 @@ class SalesService:
 
         sale = session.query(Sale).filter_by(id=sale_id).first()
         if not sale:
+            logger.warning("Sale update refused: sale %s not found", sale_id)
             raise ValueError(f"Sale {sale_id} not found.")
         if sale.invoice is not None and sale.invoice.sent_at is not None:
+            logger.warning("Sale update refused: %s's invoice %s was already sent",
+                           sale.sale_number, sale.invoice.invoice_number)
             raise ValueError("This invoice has already been sent and can no longer be edited.")
+        old_total = sale.final_amount
 
         # Restore stock from the old line items before replacing them.
         for old_item in sale.items:
@@ -740,12 +796,17 @@ class SalesService:
         # Invoice.issued_at) — a sent one was already rejected above.
         client = session.query(Client).filter_by(id=client_id).first() if client_id else None
         if client_id and not client:
+            logger.warning("Sale update refused: %s, client %s not found", sale.sale_number, client_id)
             raise ValueError("An invoice requires a valid client.")
+        new_invoice = None
         if sale.invoice is None and client is not None:
             # Reopened receipt/refund turned into an invoice/credit note.
-            session.add(SalesService._new_invoice(session, sale, client, cart))
+            new_invoice = SalesService._new_invoice(session, sale, client, cart)
+            session.add(new_invoice)
         elif sale.invoice is not None:
             if client is not None and client.id != sale.invoice.client_id:
+                logger.info("Invoice %s moved from client %r to %r",
+                            sale.invoice.invoice_number, sale.invoice.client_name, client.name)
                 sale.invoice.client_id = client.id
                 sale.invoice.client_name = client.name
                 sale.invoice.client_vat_number = client.vatNumber
@@ -762,6 +823,12 @@ class SalesService:
 
         session.commit()
         session.refresh(sale)
+        logger.info("%s %s edited: total %.2f -> %s", "Refund" if sale.is_refund else "Sale",
+                    sale.sale_number, old_total, _describe_sale(sale, cart))
+        if new_invoice is not None:
+            logger.info("%s %s issued for reopened %s, client %r",
+                        "Credit note" if new_invoice.is_credit_note else "Invoice",
+                        new_invoice.invoice_number, sale.sale_number, client.name)
         return sale
 
     @staticmethod
@@ -771,6 +838,7 @@ class SalesService:
         corrections must go through a credit note instead."""
         sale = session.query(Sale).filter_by(id=sale_id).first()
         if not sale or not sale.invoice:
+            logger.warning("Mark invoice sent: sale %s has no invoice", sale_id)
             raise ValueError(f"Sale {sale_id} has no invoice.")
         return SalesService.mark_invoice_id_sent(session, sale.invoice.id)
 
@@ -780,12 +848,15 @@ class SalesService:
         sale a Z report has already purged (sale_id is NULL)."""
         invoice = session.get(Invoice, invoice_id)
         if invoice is None:
+            logger.warning("Mark invoice sent: invoice %s not found", invoice_id)
             raise ValueError(f"Invoice {invoice_id} not found.")
         if invoice.sent_at is not None:
+            logger.debug("Invoice %s already marked sent at %s", invoice.invoice_number, invoice.sent_at)
             return invoice
         invoice.sent_at = datetime.now()
         session.commit()
         session.refresh(invoice)
+        logger.info("Invoice %s marked sent and locked", invoice.invoice_number)
         return invoice
 
     @staticmethod
@@ -803,6 +874,7 @@ class SalesService:
 
         client = session.query(Client).filter_by(id=client_id).first() if client_id else None
         if not client:
+            logger.warning("Invoice refused: client %s not found", client_id)
             raise ValueError("An invoice requires a valid client.")
 
         sale_number = SalesService._generate_sale_number(session, "RF" if cart.is_refund else "S")
@@ -832,6 +904,9 @@ class SalesService:
         session.commit()
         session.refresh(sale)
         session.refresh(invoice)
+        logger.info("%s %s issued (%s), client %r: %s",
+                    "Credit note" if invoice.is_credit_note else "Invoice",
+                    invoice.invoice_number, sale.sale_number, client.name, _describe_sale(sale, cart))
         return invoice
 
     @staticmethod

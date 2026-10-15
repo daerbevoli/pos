@@ -2,10 +2,16 @@
 Settings Service
 Read and write application settings stored in the DB.
 """
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session, InstrumentedAttribute
 from app.models.models import Settings
+
+logger = logging.getLogger(__name__)
+
+# Keys whose values must never reach pos.log or the Logs panel.
+_SECRET_KEYS = ("erp_api_key",)
 
 
 class SettingsService:
@@ -18,11 +24,17 @@ class SettingsService:
     @staticmethod
     def set(session: Session, key: str, value: str):
         row = session.query(Settings).filter_by(key=key).first()
+        old = row.value if row else None
         if row:
             row.value = value
         else:
             session.add(Settings(key=key, value=value))
         session.commit()
+        if old != value:
+            if key in _SECRET_KEYS:
+                logger.info("Setting changed: %s (value hidden)", key)
+            else:
+                logger.info("Setting changed: %s %r -> %r", key, old, value)
 
     @staticmethod
     def get_all(session: Session) -> dict:

@@ -18,6 +18,7 @@ def _restore_root_logger_and_excepthook():
     original_level = root.level
     original_excepthook = sys.excepthook
     yield
+    error_handling.pause_logging(False)
     root.handlers = original_handlers
     root.level = original_level
     sys.excepthook = original_excepthook
@@ -44,6 +45,49 @@ def test_setup_logging_file_gets_debug_panel_gets_info(tmp_path, monkeypatch):
     assert root.level == logging.DEBUG
     assert file_handler.level == logging.DEBUG
     assert error_handling.qt_log_handler.level == logging.INFO
+
+
+def _file_lines(tmp_path):
+    for h in logging.getLogger().handlers:
+        h.flush()
+    return (tmp_path / "logs" / "pos.log").read_text().splitlines()
+
+
+def test_pause_logging_keeps_only_warnings_and_errors(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    error_handling.setup_logging()
+    panel = []
+    error_handling.qt_log_handler.emitter.record.connect(lambda line, lvl: panel.append(line))
+    log = logging.getLogger("app.core.sales_service")
+
+    error_handling.pause_logging(True)
+    log.debug("Stock move for RF-0001")
+    log.info("Refund RF-0001 completed")
+    log.warning("stock went negative during refund")
+    log.error("printer failed during refund")
+    error_handling.pause_logging(False)
+    log.info("Sale S-0002 completed")
+
+    for lines in (_file_lines(tmp_path), panel):
+        text = "\n".join(lines)
+        assert "RF-0001" not in text
+        assert "negative during refund" in text and "printer failed during refund" in text
+        assert "Logging paused" in text and "Logging resumed" in text
+        assert "S-0002" in text
+
+
+def test_pause_logging_repeated_state_logs_marker_once(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    error_handling.setup_logging()
+    # rf_cn_mode_changed re-emits the same state on every V-tab switch.
+    for _ in range(3):
+        error_handling.pause_logging(False)
+    error_handling.pause_logging(True)
+    error_handling.pause_logging(True)
+    error_handling.pause_logging(False)
+    lines = _file_lines(tmp_path)
+    assert sum("Logging paused" in l for l in lines) == 1
+    assert sum("Logging resumed" in l for l in lines) == 1
 
 
 def test_install_excepthook_passes_through_keyboard_interrupt(monkeypatch):

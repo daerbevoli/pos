@@ -2,10 +2,13 @@
 Product & Inventory Service
 All business logic for managing products and stock.
 """
+import logging
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo, PromoItem
+
+logger = logging.getLogger(__name__)
 
 class ProductService:
 
@@ -46,17 +49,28 @@ class ProductService:
         session.add(product)
         session.commit()
         session.refresh(product)
+        logger.info("Product created: %s %r, barcode %s, price %.2f",
+                    product.id, product.name, product.barcode, product.price)
         return product
 
     @staticmethod
     def update(session: Session, product_id: int, **kwargs) -> Product | None:
         product = session.query(Product).filter_by(id=product_id).first()
         if not product:
+            logger.warning("Product update: product %s not found", product_id)
             return None
+        changes = {
+            key: (getattr(product, key, None), value)
+            for key, value in kwargs.items()
+            if getattr(product, key, None) != value
+        }
         for key, value in kwargs.items():
             setattr(product, key, value)
         session.commit()
         session.refresh(product)
+        if changes:
+            logger.info("Product updated: %s %r: %s", product.id, product.name,
+                        ", ".join(f"{k} {old!r} -> {new!r}" for k, (old, new) in changes.items()))
         return product
 
     @staticmethod
@@ -64,9 +78,11 @@ class ProductService:
         """Soft delete — keeps sales history intact."""
         product = session.query(Product).filter_by(id=product_id).first()
         if not product:
+            logger.warning("Product deactivate: product %s not found", product_id)
             return False
         product.is_active = False
         session.commit()
+        logger.info("Product deactivated: %s %r", product.id, product.name)
         return True
 
     INTERNAL_BARCODE_PREFIX = "2060"
@@ -100,6 +116,7 @@ class ProductService:
         if seq > max_seq:
             seq = next((n for n in range(1, max_seq + 1) if n not in used), None)
             if seq is None:
+                logger.error("No free internal barcodes left (prefix %s)", prefix)
                 raise RuntimeError("No free internal barcodes left")
 
         first12 = f"{prefix}{seq:0{body_len}d}"
@@ -128,6 +145,9 @@ class ProductService:
         )
         if movement is not None:
             session.commit()
+            logger.info("Stock adjusted: product %s %+g (%s) -> %g%s",
+                        product_id, quantity_change, movement_type, movement.quantity_after,
+                        f", {notes}" if notes else "")
         return movement
 
     @staticmethod
@@ -145,6 +165,8 @@ class ProductService:
         SalesService.finalize_sale/finalize_invoice/update_sale)."""
         product = session.query(Product).filter_by(id=product_id).first()
         if not product:
+            logger.warning("Stock move skipped: product %s not found (%s, %s)",
+                           product_id, movement_type, reference)
             return None
 
         qty_before = product.stock_quantity
@@ -161,6 +183,12 @@ class ProductService:
         )
         session.add(movement)
         session.flush()
+        logger.debug("Stock move: product %s %+g (%s, %s): %g -> %g",
+                     product_id, quantity_change, movement_type, reference,
+                     qty_before, product.stock_quantity)
+        if product.stock_quantity < 0 <= qty_before:
+            logger.warning("Stock for product %s %r went negative: %g",
+                           product.id, product.name, product.stock_quantity)
         return movement
 
     @staticmethod
@@ -210,6 +238,7 @@ class ProductService:
         session.add(cat)
         session.commit()
         session.refresh(cat)
+        logger.info("Category created: %s %r", cat.id, cat.name)
         return cat
 
     @staticmethod
@@ -234,9 +263,11 @@ class ProductService:
         )
         if clash:
             return None
+        old_name = cat.name
         cat.name = new_name
         session.commit()
         session.refresh(cat)
+        logger.info("Category renamed: %s %r -> %r", cat.id, old_name, new_name)
         return cat
 
     @staticmethod
@@ -248,11 +279,13 @@ class ProductService:
         cat = session.query(Category).filter_by(id=category_id).first()
         if not cat:
             return False
-        session.query(Product).filter_by(category_id=category_id).update(
+        uncategorised = session.query(Product).filter_by(category_id=category_id).update(
             {Product.category_id: None}, synchronize_session=False
         )
+        name = cat.name
         session.delete(cat)
         session.commit()
+        logger.info("Category deleted: %s %r (%d products uncategorised)", category_id, name, uncategorised)
         return True
 
     # ── Promos ────────────────────────────────────────────────────────────────
@@ -282,6 +315,8 @@ class ProductService:
         session.add(promo)
         session.commit()
         session.refresh(promo)
+        logger.info("Promo created: %s %r (%s to %s, active=%s)",
+                    promo.id, promo.name, start_date, end_date, is_active)
         return promo
 
     @staticmethod
@@ -311,6 +346,8 @@ class ProductService:
         promo.is_active = is_active
         session.commit()
         session.refresh(promo)
+        logger.info("Promo updated: %s %r (%s to %s, active=%s)",
+                    promo.id, promo.name, start_date, end_date, is_active)
         return promo
 
     @staticmethod
@@ -320,8 +357,10 @@ class ProductService:
         promo = session.query(Promo).filter_by(id=promo_id).first()
         if not promo:
             return False
+        name = promo.name
         session.delete(promo)
         session.commit()
+        logger.info("Promo deleted: %s %r", promo_id, name)
         return True
 
     @staticmethod
@@ -349,9 +388,11 @@ class ProductService:
         wanted_ids = {it["product_id"] for it in items}
 
         if wanted_ids:
-            session.query(PromoItem).filter(
+            moved = session.query(PromoItem).filter(
                 PromoItem.product_id.in_(wanted_ids), PromoItem.promo_id != promo_id
             ).delete(synchronize_session=False)
+            if moved:
+                logger.info("Promo %s: %d products taken over from other promos", promo_id, moved)
 
         session.query(PromoItem).filter(
             PromoItem.promo_id == promo_id, ~PromoItem.product_id.in_(wanted_ids)
@@ -372,6 +413,7 @@ class ProductService:
                     discount_type=it["discount_type"], discount_value=it["discount_value"],
                 ))
         session.commit()
+        logger.info("Promo %s items set: %d products", promo_id, len(items))
 
     @staticmethod
     def get_all_shortcuts(session: Session) -> list[Shortcut]:
@@ -396,6 +438,7 @@ class ProductService:
         session.add(sc)
         session.commit()
         session.refresh(sc)
+        logger.info("Shortcut created: %s %r", sc.id, sc.name)
         return sc
 
     @staticmethod
@@ -432,9 +475,11 @@ class ProductService:
         )
         if clash:
             return None
+        old_name = sc.name
         sc.name = new_name
         session.commit()
         session.refresh(sc)
+        logger.info("Shortcut renamed: %s %r -> %r", sc.id, old_name, new_name)
         return sc
 
     @staticmethod
@@ -443,8 +488,10 @@ class ProductService:
         sc = session.query(Shortcut).filter_by(id=shortcut_id).first()
         if not sc:
             return False
+        name = sc.name
         session.delete(sc)
         session.commit()
+        logger.info("Shortcut deleted: %s %r", shortcut_id, name)
         return True
 
     @staticmethod
@@ -480,6 +527,9 @@ class ProductService:
         for position, pid in enumerate(ordered):
             session.add(ShortcutItem(shortcut_id=shortcut_id, product_id=pid, position=position))
         session.commit()
+        skipped = len(product_ids or []) - len(ordered)
+        logger.info("Shortcut %s items set: %d products%s", shortcut_id, len(ordered),
+                    f" ({skipped} unknown/duplicate ids skipped)" if skipped else "")
         return True
 
 
