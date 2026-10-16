@@ -13,14 +13,16 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
     QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog
 )
-from PyQt6.QtCore import Qt, QEvent, pyqtSignal
-from PyQt6.QtGui import QKeySequence
+from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QUrl
+from PyQt6.QtGui import QKeySequence, QDesktopServices
 
 from app.core.client_service import ClientService
+from app.core.client_listing_service import ClientListingService
 from app.models.models import Client
 from app.core.database import get_session
 from app.ui.widgets.form_fields import FieldRow
 from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.utils.validators import is_valid_vat
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
@@ -148,6 +150,7 @@ class ClientDetailPanel(QFrame):
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
         self.btn_down = FunctionButton("↓", "secFunc")
+        self.btn_listing = FunctionButton("Client\nListing", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
         layout_map = [
@@ -157,7 +160,8 @@ class ClientDetailPanel(QFrame):
             (self.btn_up, 1, 0), (self.btn_import, 1, 1),
             (self.btn_export, 1, 2), (self.btn_cancel, 1, 3),
 
-            (self.btn_down, 2, 0), (self.btn_search_key, 2, 2),
+            (self.btn_down, 2, 0), (self.btn_listing, 2, 1),
+            (self.btn_search_key, 2, 2),
             (self.btn_ok, 2, 3),
         ]
         for widget, r, c in layout_map:
@@ -180,6 +184,7 @@ class ClientDetailPanel(QFrame):
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_import.clicked.connect(self._on_import)
         self.btn_export.clicked.connect(self._on_export)
+        self.btn_listing.clicked.connect(self._on_client_listing)
         self.btn_search_key.clicked.connect(self._on_search_key)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
@@ -480,6 +485,34 @@ class ClientDetailPanel(QFrame):
                     })
 
         self._show_overlay(f"Exported {len(clients)} client(s).")
+
+    def _on_client_listing(self):
+        dialog = ClientListingDialog(parent=self)
+        if not dialog.exec():
+            return
+        start, end, fmt = dialog.start_date, dialog.end_date, dialog.file_format
+        default_name = f"client_listing_{start:%d%m%y}_{end:%d%m%y}.{fmt}"
+        file_filter = "PDF Files (*.pdf)" if fmt == "pdf" else "CSV Files (*.csv)"
+        path, _ = QFileDialog.getSaveFileName(self, "Save Client Listing", default_name, file_filter)
+        if not path:
+            return
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
+
+        try:
+            with get_session() as session:
+                rows = ClientListingService.build(session, start, end)
+            if fmt == "pdf":
+                ClientListingService.write_pdf(rows, path, start, end)
+            else:
+                ClientListingService.write_csv(rows, path)
+        except OSError as e:
+            logger.error("Client listing: couldn't write %s: %s", path, e)
+            self._show_overlay(f"Couldn't save client listing: {e}", kind="error")
+            return
+
+        # Open in the default PDF viewer so it can be printed straight away.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_import(self):
         path = ""
