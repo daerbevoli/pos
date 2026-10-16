@@ -7,6 +7,7 @@ vat, OK/Cancel). New/Modify client edit the fields inline in the panel
 itself, mirroring the inventory screen's article editing.
 """
 import csv
+import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
@@ -31,6 +32,8 @@ from app.constants import (
     SPACING_XS,
 )
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
+logger = logging.getLogger(__name__)
+
 CLIENT_CSV_FIELDS = ["name", "vat", "street", "zip", "city", "country", "phone", "email", "active"]
 
 
@@ -544,11 +547,11 @@ class ClientDetailPanel(QFrame):
                 except Exception as e:
                     session.rollback()
                     clients_skipped += 1
-                    print(f"Skipped {row.get('name')!r}: {e}")
+                    logger.warning("Client import: skipped %r: %s", row.get("name"), e)
 
             session.commit()
 
-        print(f"{clients_added} added, {clients_skipped} skipped")
+        logger.info("Client import from %s: %d added, %d skipped", path, clients_added, clients_skipped)
         self.parent_screen.refresh()
 
     def _on_search_key(self):

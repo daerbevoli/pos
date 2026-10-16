@@ -146,8 +146,7 @@ class TapToDismissOverlay(QWidget):
 
     def show_message(self, message: str, kind: str = "info"):
         """kind: 'info' | 'error' — controls the card's accent color."""
-        # Everything a cashier is told ends up in the log, word for word,
-        # tagged with the screen/dialog that showed it.
+        # Shows the overlay message in logs
         level = logging.WARNING if kind == "error" else logging.INFO
         logger.log(level, "Shown to user on %s: %s",
                    type(self.parentWidget()).__name__, message.replace("\n", " "))

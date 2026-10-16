@@ -49,8 +49,7 @@ _pause_filter = _PauseFilter()
 def pause_logging(paused: bool):
     """Silences DEBUG and INFO logging — pos.log and the Logs panel alike,
     from every thread warnings and errors are still logged so failures
-    stay diagnosable. A single marker line on each side of the pause shows
-    the gap in the log is deliberate."""
+    stay diagnosable."""
     if paused == _pause_filter.paused:
         return
     if paused:

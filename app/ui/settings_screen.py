@@ -27,6 +27,8 @@ from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 import logging
 
+logger = logging.getLogger(__name__)
+
 ADMIN_CODE = "2060"
 
 
@@ -45,7 +47,6 @@ class SettingsScreen(QWidget):
         self._logo_path = ""
         self._build_ui()
         self._load()
-        self.logger = logging.getLogger(__name__)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -82,7 +83,8 @@ class SettingsScreen(QWidget):
         self.tabs.addTab(printers_tab, "Printers")
         self.tabs.addTab(catalog_tab, "Catalog")
         self.tabs.addTab(erp_tab, "ERP")
-        self.tabs.addTab(LogPanel(), "Logs")
+        self.log_panel = LogPanel()
+        self.tabs.addTab(self.log_panel, "Logs")
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -540,7 +542,6 @@ class SettingsScreen(QWidget):
             SettingsService.set(session, "erp_api_key", self.erp_api_key.text().strip())
             if getattr(self, "_logo_path", ""):
                 SettingsService.set(session, "logo_path", self._logo_path)
-        self.logger.info("Settings saved successfully.")
         self.settings_saved.emit()
 
     def _on_ok(self):
@@ -550,6 +551,7 @@ class SettingsScreen(QWidget):
 
     def _admin(self):
         self.is_admin = True
+        logger.info("Admin mode enabled")
         self.admin_changed.emit(True)
         self.salesperson_changed.emit("Admin")
         # if self.is_admin:
@@ -569,7 +571,7 @@ class SettingsScreen(QWidget):
         POS ticket (see MainWindow._toggle_rf_cn())."""
         if not self.is_admin:
             self._show_overlay("Only admin.")
-            self.logger.warning("RF/CN requested without admin.")
+            logger.info("RF/CN refused: not in admin mode")
             return
         self.tabs.setCurrentIndex(0)
         self.rf_cn_requested.emit()
@@ -577,7 +579,7 @@ class SettingsScreen(QWidget):
     def _open_reports(self):
         if not self.is_admin:
             self._show_overlay("Only admin.")
-            self.logger.warning("Reports requested without admin.")
+            logger.info("Reports refused: not in admin mode")
             return
         self.tabs.setCurrentIndex(0)
         self.navigate.emit(4)
@@ -585,22 +587,18 @@ class SettingsScreen(QWidget):
     def _test_print(self):
         try:
             ReceiptService.test_print(self.receipt_vendor.text(), self.receipt_product.text())
-        except PrinterError as e:
+        except PrinterError:
             self._show_overlay("Test Print Failed", kind="error")
-            self.logger.error(f"Test Print Failed: {str(e)}")
         else:
             self._show_overlay("Test Print Success")
-            self.logger.info("Test Print Success")
 
     def _test_print_label(self):
         try:
             LabelPrinterService.test_print(self.label_vendor.text(), self.label_product.text())
-        except PrinterError as e:
+        except PrinterError:
             self._show_overlay("Test Print Failed", kind="error")
-            self.logger.error(f"Test Print Failed: {str(e)}")
         else:
             self._show_overlay("Test Print Success")
-            self.logger.info("Test Print Success")
 
     def _test_erp_connection(self):
         """Tests the values currently typed in the form, before they're saved."""
@@ -612,11 +610,13 @@ class SettingsScreen(QWidget):
             )
             erp.connect()
         except Exception as e:
+            logger.warning("ERP connection test failed: %s", e)
             self._show_overlay("Test ERP connection Failed", kind="error")
-            self.logger.error(f"Test ERP connection Failed: {str(e)}")
         else:
             self._show_overlay("Test ERP connection Success")
-            self.logger.info("Test ERP connection Success")
+
+    def show_logs(self):
+        self.tabs.setCurrentWidget(self.log_panel)
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)

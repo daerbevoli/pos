@@ -7,6 +7,7 @@ driven externally by MainWindow via set_active_tab().
 """
 import datetime
 import json
+import logging
 from functools import partial
 
 from PyQt6.QtWidgets import (
@@ -48,6 +49,8 @@ from app.constants import (
 
 
 from datetime import date
+
+logger = logging.getLogger(__name__)
 
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
@@ -1607,8 +1610,9 @@ class POSScreen(QWidget):
         # HTTP calls are blocking (create_post_invoice + send_invoice is many
         # sequential round trips) and a SQLAlchemy Session isn't safe to hold
         # open across threads.
+        # No overlays from here on: the send runs in the background and the
+        # cashier keeps working — InvoiceSendWorker logs the outcome.
         self.btn_send_invoice.setEnabled(False)
-        self._show_overlay("Sending invoice…", kind="info")
         self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data, False, True)
         # Bind the sale now: the cashier may switch tab/ticket before the
         # worker finishes, and it's this sale that must be locked.
@@ -1620,20 +1624,15 @@ class POSScreen(QWidget):
         self._invoice_worker.start()
 
     def _on_invoice_send_succeeded(self, sale_id: int, invoice_id: int, inv_num: str, message: str):
-        print(f"invoice {invoice_id} ({inv_num}): {message}")
+        self.btn_send_invoice.setEnabled(True)
         try:
             with get_session() as session:
                 SalesService.mark_invoice_sent(session, sale_id)
         except ValueError as e:
-            self.btn_send_invoice.setEnabled(True)
-            self._show_overlay(f"Invoice sent, but failed to lock the sale: {e}", kind="error")
-            return
-        self.btn_send_invoice.setEnabled(True)
-        self._show_overlay("Invoice sent", kind="info")
+            logger.error("Invoice %s sent, but sale %s could not be locked: %s", inv_num, sale_id, e)
 
     def _on_invoice_send_failed(self, message: str):
         self.btn_send_invoice.setEnabled(True)
-        self._show_overlay(message, kind="error")
 
     def _open_drawer(self):
         with get_session() as session:

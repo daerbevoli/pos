@@ -9,6 +9,7 @@ Tax/Unit/Category field is focused, the product table is swapped out for a
 choice-button grid in the same spot.
 """
 import csv
+import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
@@ -39,6 +40,8 @@ from app.constants import (
 )
 
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
+logger = logging.getLogger(__name__)
+
 ARTICLE_CSV_FIELDS = ["barcode", "name", "price", "is_open_price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
 
 
@@ -734,10 +737,11 @@ class ArticleDetailPanel(QFrame):
                 except Exception as e:
                     session.rollback()
                     skipped += 1
-                    print(f"Skipped {row.get('name')!r}: {e}")
+                    logger.warning("Product import: skipped %r: %s", row.get("name"), e)
 
             session.commit()
 
+        logger.info("Product import from %s: %d added, %d skipped", path, added, skipped)
         self.parent_screen.refresh()
         self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
 

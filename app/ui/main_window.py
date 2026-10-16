@@ -21,6 +21,7 @@ from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.utils.error_handling import pause_logging
 from app.utils.utils import TicketTab
+from app.ui.widgets.error_badge import ErrorBadge
 from app.constants import (
     HEADER_MAX_HEIGHT,
     HEADER_MIN_HEIGHT,
@@ -70,6 +71,10 @@ class MainWindow(QMainWindow):
         self._set_store_label(self.store_label)
         hl.addWidget(self.store_label)
         hl.addStretch()
+
+        self.error_badge = ErrorBadge()
+        self.error_badge.clicked.connect(self._open_logs)
+        hl.addWidget(self.error_badge)
 
         info_col = QVBoxLayout()
         info_col.setSpacing(0)
@@ -215,6 +220,12 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(screen_idx)
         if screen_idx == 0:
             self.pos_screen.set_active_tab(self._active_vtab)
+
+    def _open_logs(self):
+        """Error badge tapped: show the log and count the errors as seen."""
+        self._navigate(3)
+        self.settings_screen.show_logs()
+        self.error_badge.acknowledge()
 
     def _toggle_rf_cn(self):
         """RF / CN is pressed on the Settings screen but acts on a POS ticket,

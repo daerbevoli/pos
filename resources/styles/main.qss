@@ -616,6 +616,16 @@ QWidget#header {
 
 }
 
+QPushButton#errorBadge {
+    background-color: #F54444;
+    color: white;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+}
+
 QWidget#header[frozen="true"] {
     background-color: #ccc5be;
 

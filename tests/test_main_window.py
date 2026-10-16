@@ -2,6 +2,8 @@
 Tests for app.ui.main_window.MainWindow: screen wiring, V-tab switching,
 and cross-screen signal plumbing (client/product selection into POS).
 """
+import logging
+
 import pytest
 
 from app.ui.main_window import MainWindow, MAX_VTABS
@@ -174,3 +176,11 @@ def test_rf_cn_with_every_vtab_open_shows_overlay(window):
     assert window._active_vtab == MAX_VTABS
     assert window.pos_screen.cart.is_refund is False
     assert not window.pos_screen.overlay.isHidden()
+
+
+def test_error_badge_opens_logs_and_acknowledges(window):
+    window.error_badge._on_record("ERROR printer failed", logging.ERROR)
+    window.error_badge.click()
+    assert window.stack.currentWidget() is window.settings_screen
+    assert window.settings_screen.tabs.currentWidget() is window.settings_screen.log_panel
+    assert window.error_badge.isHidden() and window.error_badge.count == 0
