@@ -35,8 +35,13 @@ class ProductService:
         return session.query(Product).filter_by(id=product_id).first()
 
     @staticmethod
-    def get_by_barcode(session: Session, barcode: str) -> Product | None:
-        return session.query(Product).filter_by(barcode=barcode, is_active=True).first()
+    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> Product | None:
+        """include_inactive: also match deactivated products — `barcode` is
+        unique across all of them, so a duplicate check must see those too."""
+        query = session.query(Product).filter_by(barcode=barcode)
+        if not include_inactive:
+            query = query.filter_by(is_active=True)
+        return query.first()
 
     @staticmethod
     def search(session: Session, query: str) -> list[Product]:

@@ -136,6 +136,37 @@ def test_new_product_validation_blocks_zero_price(screen):
         assert ProductService.get_all(session) == []
 
 
+def test_new_product_validation_blocks_existing_barcode(screen):
+    _add_product(name="First", barcode="5400000000001")
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.barcode.setText("5400000000001")
+    panel.name.setText("Second")
+    panel.price.setValue(1.0)
+    panel._on_ok()
+
+    assert panel._mode == "new"
+    assert not panel.overlay.isHidden()
+    assert "First" in panel.overlay.message_label.text()
+    with get_session() as session:
+        assert len(ProductService.get_all(session)) == 1
+
+
+def test_new_product_validation_blocks_barcode_of_inactive_product(screen):
+    pid = _add_product(name="Retired", barcode="5400000000002")
+    with get_session() as session:
+        ProductService.deactivate(session, pid)
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.barcode.setText("5400000000002")
+    panel.name.setText("Second")
+    panel.price.setValue(1.0)
+    panel._on_ok()
+
+    assert panel._mode == "new"
+    assert "(inactive)" in panel.overlay.message_label.text()
+
+
 def test_new_product_picker_sets_tax_unit_category(screen):
     with get_session() as session:
         cat = ProductService.create_category(session, "Cat X")
@@ -192,6 +223,37 @@ def test_edit_product_updates_existing(screen):
         product = ProductService.get_by_id(session, pid)
     assert product.name == "Updated"
     assert product.price == 2.5
+
+
+def test_edit_product_keeping_own_barcode_saves(screen):
+    pid = _add_product(name="Old", barcode="5400000000003")
+    screen.refresh()
+    screen.table.selectRow(0)
+
+    panel = screen.detail_panel
+    panel._start_edit()
+    panel.name.setText("Renamed")
+    panel._on_ok()
+
+    assert panel._mode == "display"
+    with get_session() as session:
+        assert ProductService.get_by_id(session, pid).name == "Renamed"
+
+
+def test_edit_product_to_another_products_barcode_is_blocked(screen):
+    _add_product(name="Taken", barcode="5400000000004")
+    pid = _add_product(name="Mine", barcode="5400000000005")
+    screen.refresh()
+    assert screen._select_product_row(pid)
+
+    panel = screen.detail_panel
+    panel._start_edit()
+    panel.barcode.setText("5400000000004")
+    panel._on_ok()
+
+    assert panel._mode == "edit"
+    with get_session() as session:
+        assert ProductService.get_by_id(session, pid).barcode == "5400000000005"
 
 
 def test_edit_product_keeps_negative_stock(screen):

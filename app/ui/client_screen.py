@@ -22,7 +22,7 @@ from app.models.models import Client
 from app.core.database import get_session
 from app.ui.widgets.form_fields import FieldRow
 from app.ui.dialogs.file_dialog import FileDialog
-from app.ui.dialogs.client_listing_dialog import ClientListingDialog
+# from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.utils.validators import is_valid_vat
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
@@ -487,32 +487,33 @@ class ClientDetailPanel(QFrame):
         self._show_overlay(f"Exported {len(clients)} client(s).")
 
     def _on_client_listing(self):
-        dialog = ClientListingDialog(parent=self)
-        if not dialog.exec():
-            return
-        start, end, fmt = dialog.start_date, dialog.end_date, dialog.file_format
-        default_name = f"client_listing_{start:%d%m%y}_{end:%d%m%y}.{fmt}"
-        file_filter = "PDF Files (*.pdf)" if fmt == "pdf" else "CSV Files (*.csv)"
-        path, _ = QFileDialog.getSaveFileName(self, "Save Client Listing", default_name, file_filter)
-        if not path:
-            return
-        if not path.lower().endswith(f".{fmt}"):
-            path += f".{fmt}"
-
-        try:
-            with get_session() as session:
-                rows = ClientListingService.build(session, start, end)
-            if fmt == "pdf":
-                ClientListingService.write_pdf(rows, path, start, end)
-            else:
-                ClientListingService.write_csv(rows, path)
-        except OSError as e:
-            logger.error("Client listing: couldn't write %s: %s", path, e)
-            self._show_overlay(f"Couldn't save client listing: {e}", kind="error")
-            return
-
-        # Open in the default PDF viewer so it can be printed straight away.
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        # dialog = ClientListingDialog(parent=self)
+        # if not dialog.exec():
+        #     return
+        # start, end, fmt = dialog.start_date, dialog.end_date, dialog.file_format
+        # default_name = f"client_listing_{start:%d%m%y}_{end:%d%m%y}.{fmt}"
+        # file_filter = "PDF Files (*.pdf)" if fmt == "pdf" else "CSV Files (*.csv)"
+        # path, _ = QFileDialog.getSaveFileName(self, "Save Client Listing", default_name, file_filter)
+        # if not path:
+        #     return
+        # if not path.lower().endswith(f".{fmt}"):
+        #     path += f".{fmt}"
+        #
+        # try:
+        #     with get_session() as session:
+        #         rows = ClientListingService.build(session, start, end)
+        #     if fmt == "pdf":
+        #         ClientListingService.write_pdf(rows, path, start, end)
+        #     else:
+        #         ClientListingService.write_csv(rows, path)
+        # except OSError as e:
+        #     logger.error("Client listing: couldn't write %s: %s", path, e)
+        #     self._show_overlay(f"Couldn't save client listing: {e}", kind="error")
+        #     return
+        #
+        # # Open in the default PDF viewer so it can be printed straight away.
+        # QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        pass
 
     def _on_import(self):
         path = ""

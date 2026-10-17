@@ -522,6 +522,16 @@ class ArticleDetailPanel(QFrame):
         if not self._is_open_price and self.price.value() <= 0:
             self._show_overlay("Price must be greater than 0.")
             return False
+        barcode = self.barcode.text().strip()
+        if barcode:
+            with get_session() as session:
+                owner = ProductService.get_by_barcode(session, barcode, include_inactive=True)
+                # In edit mode the product's own barcode isn't a clash.
+                if owner and owner.id != self.current_product_id:
+                    inactive = "" if owner.is_active else " (inactive)"
+                    self._show_overlay(f"Barcode {barcode} is already used by {owner.name}{inactive}.",
+                                       kind="error")
+                    return False
         return True
 
     def _collect_data(self) -> dict:

@@ -40,6 +40,16 @@ def test_switch_vtab_updates_active_tab_and_pos_screen(window):
     assert window._vtab_buttons[3].isChecked() is True
 
 
+def test_overlay_covers_whole_window_including_vtab_bar(window):
+    window.pos_screen.overlay.show_message("msg")
+    overlay = window.pos_screen.overlay
+    assert overlay.parentWidget() is window
+    assert overlay.geometry() == window.rect()
+    tab_btn = window._vtab_buttons[2]
+    centre = tab_btn.mapTo(window, tab_btn.rect().center())
+    assert window.childAt(centre) in (overlay, overlay.card, overlay.message_label)
+
+
 def test_switch_to_same_tab_is_noop(window):
     window._switch_vtab(1)
     assert window._active_vtab == 1

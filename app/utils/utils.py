@@ -114,9 +114,14 @@ class TapToDismissOverlay(QWidget):
     Full-screen modal-style overlay: dims the background, shows a centered
     message card, and blocks all other input. Disappears when clicked
     anywhere on it (including the card itself).
+
+    Created with the owning screen as parent, but shown over that screen's
+    top-level window, so the header and V-tab bar are covered too — otherwise
+    a tab switch could slip past it and leave it over another tab's ticket.
     """
     def __init__(self, parent):
         super().__init__(parent)
+        self._owner = parent  # the screen that shows this overlay, for logging
         self.setObjectName("tapDismissOverlay")
         # Always cover the full parent, regardless of when shown
         self.setGeometry(parent.rect())
@@ -149,14 +154,18 @@ class TapToDismissOverlay(QWidget):
         # Shows the overlay message in logs
         level = logging.WARNING if kind == "error" else logging.INFO
         logger.log(level, "Shown to user on %s: %s",
-                   type(self.parentWidget()).__name__, message.replace("\n", " "))
+                   type(self._owner).__name__, message.replace("\n", " "))
         self.message_label.setText(message)
         for widget in (self.card, self.message_label):
             widget.setProperty("kind", kind)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
 
-        self.setGeometry(self.parentWidget().rect())
+        # Resolved at show time: screens are built before MainWindow adopts them.
+        host = self._owner.window()
+        if self.parentWidget() is not host:
+            self.setParent(host)
+        self.setGeometry(host.rect())
         self.raise_()
         self.show()
         self.grabKeyboard()

@@ -13,7 +13,7 @@ from datetime import datetime
 
 from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
-from app.ui.pos_screen import POSScreen
+from app.ui.pos_screen import POSScreen, TABS
 from app.ui.inventory_screen import InventoryScreen
 from app.ui.reports_screen import ReportsScreen
 from app.ui.settings_screen import SettingsScreen
@@ -32,7 +32,7 @@ from app.constants import (
     TAB_BAR_MIN_HEIGHT,
 )
 
-MAX_VTABS = 5
+MAX_VTABS = TABS  # one source of truth: POSScreen keeps a state slot per V-tab
 
 
 class MainWindow(QMainWindow):

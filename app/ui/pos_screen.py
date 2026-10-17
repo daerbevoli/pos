@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
-TABS = 8
+TABS = 5  # number of V-tabs, slots 1..TABS; MainWindow builds one tab button per slot
 
 
 def _cart_font(bold: bool) -> QFont:
@@ -91,7 +91,7 @@ class POSScreen(QWidget):
         super().__init__()
         # id: V-tab slot (1-5) -> its saved _TabState snapshot; swapped in/out by
         # _save_tab_state()/_load_tab_state() whenever set_active_tab() fires.
-        self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, TABS)}
+        self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, TABS + 1)}
         self._active_tab        = 1   # id: which V-tab slot (key into _tab_states) is currently on screen
         self.cart               = self._tab_states[1].cart  # active tab's Cart; re-pointed on tab switch
         self.sale_finished      = True   # whether the current ticket has been paid/frozen (vs. still being built)
