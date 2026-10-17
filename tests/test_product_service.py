@@ -1,7 +1,9 @@
 """Tests for app.core.product_service.ProductService."""
+import logging
+
 import pytest
 
-from app.core.product_service import ProductService
+from app.core.product_service import ProductService, STOCK_MAX, STOCK_MIN
 from app.models.models import Product, Category, StockMovement
 
 
@@ -189,6 +191,31 @@ def test_adjust_stock_can_go_negative_for_sales(db_session):
     ProductService.adjust_stock(db_session, p.id, quantity_change=-8, movement_type="sale")
     db_session.refresh(p)
     assert p.stock_quantity == -3
+
+
+def test_adjust_stock_negative_is_not_logged_as_warning(db_session, caplog):
+    p = _make_product(db_session, stock_quantity=0)
+    with caplog.at_level(logging.DEBUG, logger="app.core.product_service"):
+        ProductService.adjust_stock(db_session, p.id, quantity_change=-2, movement_type="sale")
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_adjust_stock_is_held_at_stock_min(db_session):
+    p = _make_product(db_session, stock_quantity=STOCK_MIN + 3)
+    movement = ProductService.adjust_stock(db_session, p.id, quantity_change=-10, movement_type="sale")
+    db_session.refresh(p)
+    assert p.stock_quantity == STOCK_MIN
+    # The ledger records the change actually applied, so before + change == after.
+    assert movement.quantity == -3
+    assert movement.quantity_before + movement.quantity == movement.quantity_after
+
+
+def test_adjust_stock_is_held_at_stock_max(db_session):
+    p = _make_product(db_session, stock_quantity=STOCK_MAX - 1)
+    movement = ProductService.adjust_stock(db_session, p.id, quantity_change=5, movement_type="purchase")
+    db_session.refresh(p)
+    assert p.stock_quantity == STOCK_MAX
+    assert movement.quantity == 1
 
 
 def test_adjust_stock_nonexistent_product_returns_none(db_session):

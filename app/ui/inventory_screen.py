@@ -22,8 +22,9 @@ from PyQt6.QtGui import QDesktopServices
 
 from app.core.database import get_session
 from app.core.label_service import LabelPrinterService
+from app.core.inventory_report_service import InventoryReportService
 from app.core.label_sheet_service import build_label_sheet_pdf
-from app.core.product_service import ProductService
+from app.core.product_service import ProductService, STOCK_MIN, STOCK_MAX, clamp_stock
 from app.core.receipt_service import PrinterError
 from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
@@ -139,7 +140,7 @@ class ArticleDetailPanel(QFrame):
 
         self.stock = QDoubleSpinBox()
         self.stock.setLocale(QLocale.c())
-        self.stock.setMaximum(999999)
+        self.stock.setRange(STOCK_MIN, STOCK_MAX)  # negative: sold more than was counted in
         self.stock.setDecimals(2)
         self.stock.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
@@ -226,6 +227,7 @@ class ArticleDetailPanel(QFrame):
 
         self.barcode_generate_btn = FunctionButton("Generate \nBarcode", "secFunc")
         self.btn_print_barcodes = FunctionButton("Print\nbarcodes", "secFunc")
+        self.btn_inventory = FunctionButton("Print\nInventory", "secFunc")
 
 
         layout_map = [
@@ -238,7 +240,7 @@ class ArticleDetailPanel(QFrame):
             (self.btn_down, 2, 0), (self.btn_print_label, 2, 1),
             (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3),
 
-            (self.barcode_generate_btn, 3, 0), (self.btn_print_barcodes, 3, 1),
+            (self.barcode_generate_btn, 3, 0), (self.btn_print_barcodes, 3, 1), (self.btn_inventory, 3, 2),
         ]
         for widget, r, c in layout_map:
             widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
@@ -267,6 +269,7 @@ class ArticleDetailPanel(QFrame):
 
         self.barcode_generate_btn.clicked.connect(self._generate_barcode)
         self.btn_print_barcodes.clicked.connect(self._on_print_barcodes)
+        self.btn_inventory.clicked.connect(self._on_inventory)
 
         self._set_edit_mode(False)
 
@@ -629,6 +632,59 @@ class ArticleDetailPanel(QFrame):
         # Open in the default PDF viewer so it can be printed straight away.
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
+    def _on_inventory(self):
+        """Takes the inventory as of now — before the save dialog opens, so
+        the file reflects the moment the button was pressed."""
+        with get_session() as session:
+            snapshot = InventoryReportService.take_snapshot(session)
+
+        file_format = self._ask_inventory_format()
+        if file_format is None:
+            return
+        as_csv = file_format == "csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Inventory", f"inventory_{snapshot.taken_at:%Y%m%d}.{file_format}",
+            "CSV Files (*.csv)" if as_csv else "PDF Files (*.pdf)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(f".{file_format}"):
+            path += f".{file_format}"
+
+        try:
+            if as_csv:
+                InventoryReportService.write_csv(path, snapshot)
+            else:
+                InventoryReportService.write_pdf(path, snapshot)
+        except OSError as e:
+            logger.error("Inventory could not be saved to %s: %s", path, e)
+            self._show_overlay(f"Could not save inventory: {e}", kind="error")
+            return
+
+        if as_csv:
+            self._show_overlay(f"Inventory saved: {len(snapshot.lines)} article(s), "
+                               f"total €{snapshot.total:.2f}.")
+        else:
+            # Open in the default PDF viewer so it can be printed straight away.
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _ask_inventory_format(self) -> str | None:
+        """"pdf", "csv", or None when cancelled."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Inventory")
+        box.setText("Save the inventory as:")
+        pdf_btn = box.addButton("PDF", QMessageBox.ButtonRole.AcceptRole)
+        csv_btn = box.addButton("CSV", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(pdf_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is pdf_btn:
+            return "pdf"
+        if clicked is csv_btn:
+            return "csv"
+        return None
+
     def _on_search_key(self):
         self.parent_screen.search_input.setFocus()
         self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
@@ -712,7 +768,7 @@ class ArticleDetailPanel(QFrame):
                     except (ValueError, OverflowError):
                         tax = 0
                     try:
-                        stock_quantity = float(row.get("stock_quantity") or 0)
+                        stock_quantity = clamp_stock(float(row.get("stock_quantity") or 0))
                     except ValueError:
                         stock_quantity = 0.0
                     try:

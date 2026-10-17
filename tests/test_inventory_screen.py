@@ -194,6 +194,24 @@ def test_edit_product_updates_existing(screen):
     assert product.price == 2.5
 
 
+def test_edit_product_keeps_negative_stock(screen):
+    """Stock sold below zero must survive an unrelated edit — the stock
+    field used to clamp at 0 and silently reset it."""
+    pid = _add_product(name="Oversold", stock_quantity=-3)
+    screen.refresh()
+    screen.table.selectRow(0)
+
+    panel = screen.detail_panel
+    panel._start_edit()
+    assert panel.stock.value() == -3
+    panel.price.setValue(2.5)
+    panel._on_ok()
+
+    with get_session() as session:
+        product = ProductService.get_by_id(session, pid)
+    assert product.stock_quantity == -3
+
+
 # ── Delete flow ──────────────────────────────────────────────────────────
 
 def test_delete_product_confirmed_deactivates(screen, monkeypatch):
@@ -317,6 +335,64 @@ def test_export_writes_all_products_including_inactive(screen, monkeypatch, tmp_
 def test_export_cancelled_dialog_is_noop(screen, monkeypatch):
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **kw: ("", "")))
     screen.detail_panel._on_export()  # must not raise, and there's nothing to assert on disk
+
+
+@pytest.mark.parametrize("file_format, typed", [
+    ("csv", "inventory.csv"),
+    ("csv", "inventory"),   # extension added when left off
+    ("pdf", "inventory.pdf"),
+    ("pdf", "inventory"),
+])
+def test_inventory_saves_in_chosen_format(screen, monkeypatch, tmp_path, file_format, typed):
+    _add_product(name="Apple", price=1.21, tax=21)
+    monkeypatch.setattr(screen.detail_panel, "_ask_inventory_format", lambda: file_format)
+    filters = []
+
+    def fake_save(*args, **kwargs):
+        filters.append(args[3])
+        return str(tmp_path / typed), args[3]
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(fake_save))
+    opened = []
+    monkeypatch.setattr("app.ui.inventory_screen.QDesktopServices.openUrl", lambda url: opened.append(url))
+
+    screen.detail_panel._on_inventory()
+
+    assert filters == ["CSV Files (*.csv)" if file_format == "csv" else "PDF Files (*.pdf)"]
+    out = tmp_path / f"inventory.{file_format}"
+    assert out.exists()
+    if file_format == "csv":
+        with open(out, newline="", encoding="utf-8") as f:
+            assert list(csv.reader(f))[-1] == ["", "Total", "", "1.00", "1.21"]
+        assert not opened
+    else:
+        assert out.read_bytes().startswith(b"%PDF")
+        assert len(opened) == 1
+
+
+def test_inventory_format_cancelled_skips_save_dialog(screen, monkeypatch, tmp_path):
+    monkeypatch.setattr(screen.detail_panel, "_ask_inventory_format", lambda: None)
+    asked = []
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **kw: asked.append(a) or ("", "")))
+    screen.detail_panel._on_inventory()
+    assert not asked
+    assert not list(tmp_path.iterdir())
+
+
+def test_inventory_save_dialog_cancelled_writes_nothing(screen, monkeypatch, tmp_path):
+    monkeypatch.setattr(screen.detail_panel, "_ask_inventory_format", lambda: "pdf")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **kw: ("", "")))
+    screen.detail_panel._on_inventory()
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("button_text, expected", [("PDF", "pdf"), ("CSV", "csv"), ("Cancel", None)])
+def test_ask_inventory_format_returns_clicked_choice(screen, monkeypatch, button_text, expected):
+    def fake_exec(box):
+        next(b for b in box.buttons() if b.text().replace("&", "") == button_text).click()
+        return 0
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    assert screen.detail_panel._ask_inventory_format() == expected
 
 
 # ── CSV import ───────────────────────────────────────────────────────────

@@ -10,6 +10,16 @@ from app.models.models import Product, Category, StockMovement, Shortcut, Shortc
 
 logger = logging.getLogger(__name__)
 
+# Stock isn't counted in on every delivery yet, so sales routinely push it
+# below zero; it's only held within these bounds, never refused.
+STOCK_MIN = -999999
+STOCK_MAX = 999999
+
+
+def clamp_stock(quantity: float) -> float:
+    return max(STOCK_MIN, min(STOCK_MAX, quantity))
+
+
 class ProductService:
 
     # ── Product CRUD ──────────────────────────────────────────────────────────
@@ -170,7 +180,11 @@ class ProductService:
             return None
 
         qty_before = product.stock_quantity
-        product.stock_quantity += quantity_change
+        product.stock_quantity = clamp_stock(qty_before + quantity_change)
+        if product.stock_quantity != qty_before + quantity_change:
+            logger.info("Stock for product %s %r held at %g (change %+g)",
+                        product.id, product.name, product.stock_quantity, quantity_change)
+        quantity_change = product.stock_quantity - qty_before
 
         movement = StockMovement(
             product_id=product_id,
@@ -186,9 +200,6 @@ class ProductService:
         logger.debug("Stock move: product %s %+g (%s, %s): %g -> %g",
                      product_id, quantity_change, movement_type, reference,
                      qty_before, product.stock_quantity)
-        if product.stock_quantity < 0 <= qty_before:
-            logger.warning("Stock for product %s %r went negative: %g",
-                           product.id, product.name, product.stock_quantity)
         return movement
 
     @staticmethod

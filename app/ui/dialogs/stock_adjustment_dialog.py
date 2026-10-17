@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QLocale
 from app.models.models import Product
 from app.constants import STOCK_ADJUST_DIALOG_WIDTH
+from app.core.product_service import STOCK_MAX
 
 
 class StockAdjustmentDialog(QDialog):
@@ -33,7 +34,7 @@ class StockAdjustmentDialog(QDialog):
 
         self.quantity = QDoubleSpinBox()
         self.quantity.setLocale(QLocale.c())
-        self.quantity.setMaximum(999999)
+        self.quantity.setMaximum(STOCK_MAX)
         self.quantity.setDecimals(2)
         self.quantity.setValue(1)
         form.addRow("Quantity:", self.quantity)
