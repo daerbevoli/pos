@@ -240,6 +240,18 @@ QPushButton#clearBtn:hover {
     background-color: #c2402f;
 }
 
+QPushButton#closePosBtn {
+    background-color: #f2b8b0;
+    border: 1px solid #e0897d;
+    color: #6b1d14;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+QPushButton#closePosBtn:hover {
+    background-color: #eaa298;
+}
+
 QPushButton#discountBtn {
     background-color: #b9c3d6;
     border: 1px solid #8e9bb5;

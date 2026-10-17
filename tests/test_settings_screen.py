@@ -222,3 +222,24 @@ def test_rf_cn_requested_for_admin(screen, qtbot):
     screen._admin()
     with qtbot.waitSignal(screen.rf_cn_requested, timeout=1000):
         screen._rf_cn()
+
+
+def test_close_pos_blocked_without_admin(screen, monkeypatch):
+    warnings, quits = [], []
+    monkeypatch.setattr(screen, "_show_overlay", lambda *a, **kw: warnings.append(a))
+    monkeypatch.setattr("app.ui.settings_screen.QApplication.quit", lambda: quits.append(True))
+    screen._close_pos()
+    assert warnings
+    assert quits == []
+
+
+@pytest.mark.parametrize("answer, should_quit", [("Yes", True), ("No", False)])
+def test_close_pos_asks_confirmation_for_admin(screen, monkeypatch, answer, should_quit):
+    from app.ui.settings_screen import QMessageBox
+    quits = []
+    monkeypatch.setattr("app.ui.settings_screen.QMessageBox.question",
+                        lambda *a, **kw: getattr(QMessageBox.StandardButton, answer))
+    monkeypatch.setattr("app.ui.settings_screen.QApplication.quit", lambda: quits.append(True))
+    screen._admin()
+    screen._close_pos()
+    assert bool(quits) is should_quit

@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 source venv/bin/activate        # Linux/Mac (venv/ already exists in this repo)
 pip install -r requirements.txt # app deps AND test deps (pytest, pytest-qt) live in one file — no requirements-dev.txt
-python main.py                  # run the app
+python main.py                  # run the app (full screen, no title bar — close via Alt+F4 / Task Manager)
+python main.py --windowed       # run in a normal window with title bar (development)
 
 pytest                          # run full suite (no pytest.ini/pyproject.toml — plain pytest discovery of tests/)
 pytest tests/test_sales_service.py            # single file

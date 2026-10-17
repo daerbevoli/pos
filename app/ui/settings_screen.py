@@ -8,7 +8,7 @@ Logs
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QGroupBox, QLabel, QMessageBox, QFileDialog,
-    QListWidget, QListWidgetItem, QTabWidget
+    QListWidget, QListWidgetItem, QTabWidget, QApplication
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -241,10 +241,12 @@ class SettingsScreen(QWidget):
         self.btn_admin   = FunctionButton("Admin", "secFunc")
         self.btn_rf_cn   = FunctionButton("Refund / \nCreditnote", "secFunc")
         self.btn_reports = FunctionButton("Reports", "secFunc")
+        self.btn_close_pos = FunctionButton("Close POS", "closePosBtn")
         self.btn_admin.clicked.connect(self._admin)
         self.btn_rf_cn.clicked.connect(self._rf_cn)
         self.btn_reports.clicked.connect(self._open_reports)
-        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports):
+        self.btn_close_pos.clicked.connect(self._close_pos)
+        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_close_pos):
             btn.setFixedHeight(SETTINGS_FUNCTION_BUTTON_HEIGHT)
             buttons_layout.addWidget(btn, 1)
         layout.addWidget(buttons_group)
@@ -583,6 +585,20 @@ class SettingsScreen(QWidget):
             return
         self.tabs.setCurrentIndex(0)
         self.navigate.emit(4)
+
+    def _close_pos(self):
+        """The app runs full screen without a title bar, so this is the
+        in-app way to quit. Open tickets survive it: they're autosaved and
+        restored on the next launch."""
+        if not self.is_admin:
+            self._show_overlay("Only admin.")
+            logger.info("Close POS refused: not in admin mode")
+            return
+        if QMessageBox.question(self, "Close POS", "Are you sure you want to close the POS?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        logger.info("Close POS confirmed by admin")
+        QApplication.quit()
 
     def _test_print(self):
         try:

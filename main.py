@@ -51,7 +51,10 @@ def main():
 
     # Launch main window
     window = MainWindow()
-    window.show()
+    if "--windowed" in sys.argv:
+        window.show()            # development: normal window with title bar
+    else:
+        window.showFullScreen()  # till: no title bar / close buttons, covers the taskbar
 
     exit_code = app.exec()
     logger.info("POS exiting (code %s)", exit_code)

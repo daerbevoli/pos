@@ -50,7 +50,8 @@ pip install -r requirements.txt
 
 ### 3. Run the app
 ```bash
-python main.py
+python main.py             # full screen, no title bar (close via Alt+F4 / Task Manager)
+python main.py --windowed  # normal window, for development
 ```
 
 The SQLite database is created automatically at:
