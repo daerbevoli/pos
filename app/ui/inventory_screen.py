@@ -6,7 +6,8 @@ function-key grid on the right (New/Modify/Deactivate/Reactivate article, Price 
 Shelf label, Pre-pack, Print shelf, Search by barcode/key, OK/Cancel).
 New/Modify article edit the fields inline in the panel itself; while a
 Tax/Unit/Category field is focused, the product table is swapped out for a
-choice-button grid in the same spot.
+choice-button grid in the same spot. "Search by shortcut" swaps it for the
+POS shortcut grid instead; tapping a product there shows it in the panel.
 """
 import csv
 import logging
@@ -28,7 +29,8 @@ from app.core.product_service import ProductService, STOCK_MIN, STOCK_MAX, clamp
 from app.core.receipt_service import PrinterError
 from app.models.models import Product
 from app.ui.widgets.form_fields import PickerDisplay, FieldRow
-from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
+from app.ui.widgets.shortcut_grid import ShortcutGrid
+# from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
@@ -61,7 +63,7 @@ class ArticleDetailPanel(QFrame):
         super().__init__(parent_screen)
         self.parent_screen = parent_screen
         self.current_product_id = None
-        self._mode = "display"  # "display" | "new" | "edit"
+        self._mode = "display" # mode for show / new / edit
 
         # Picker state
         self._tax_val = "0"
@@ -70,8 +72,6 @@ class ArticleDetailPanel(QFrame):
         self._category_name = "— No Category —"
         self._categories: list[tuple[str, int]] = []
         self._promo_name = "— No Promo —"  # read-only display; assigned via Settings > Promos
-        self._is_open_price = False
-
         self._active_row: FieldRow | None = None
         self._active_picker: str | None = None
 
@@ -135,8 +135,8 @@ class ArticleDetailPanel(QFrame):
         self.price.setDecimals(2)
         self.price.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.price.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-
-        self.price_mode_display = PickerDisplay("Fixed price")
+        # A blank / 0 price makes the product open-price (typed in at sale) — see _collect_data().
+        self.price.setSpecialValueText("Open price")
 
         self.tax_display = PickerDisplay(f"{self._tax_val} %")
 
@@ -163,7 +163,6 @@ class ArticleDetailPanel(QFrame):
             ("Barcode",          self.barcode,          None),
             ("Name *",           self.name,             None),
             ("Selling Price *",  self.price,            None),
-            ("Price Mode",       self.price_mode_display, "price_mode"),
             ("Tax *",              self.tax_display,    "tax"),
             ("Stock Quantity",   self.stock,            None),
             ("Min Stock Level",  self.min_stock,        None),
@@ -220,12 +219,12 @@ class ArticleDetailPanel(QFrame):
         self.btn_print_label = FunctionButton("Print\nlabel", "secFunc")
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
-        self.btn_up = FunctionButton("↑", "SecFunc")
+        self.btn_up = FunctionButton("↑", "navBtn")
         self.btn_export = FunctionButton("Export\narticles", "secFunc")
         self.btn_import = FunctionButton("Import\narticles", "secFunc")
-        self.btn_down = FunctionButton("↓", "SecFunc")
+        self.btn_down = FunctionButton("↓", "navBtn")
 
-        self.btn_search_key = FunctionButton("Search by\nkey", "secFunc")
+        self.btn_search_sc = FunctionButton("Search by\nshortcut", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
         self.barcode_generate_btn = FunctionButton("Generate \nBarcode", "secFunc")
@@ -235,16 +234,16 @@ class ArticleDetailPanel(QFrame):
 
         layout_map = [
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
-            (self.btn_deactivate, 0, 2), (self.btn_reactivate, 0, 3),
+            (self.btn_deactivate, 0, 2), (self.btn_error, 0, 3),
 
-            (self.btn_up, 1, 0), (self.btn_export, 1, 1),
-            (self.btn_import, 1, 2), (self.btn_cancel, 1, 3),
+            (self.btn_up, 1, 0), (self.btn_print_label, 1, 1),
+            (self.btn_reactivate, 1, 2), (self.btn_cancel, 1, 3),
 
-            (self.btn_down, 2, 0), (self.btn_print_label, 2, 1),
-            (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3),
+            (self.btn_down, 2, 0), (self.btn_import, 2, 1),
+            (self.btn_export, 2, 2), (self.btn_ok, 2, 3),
 
             (self.barcode_generate_btn, 3, 0), (self.btn_print_barcodes, 3, 1), (self.btn_inventory, 3, 2),
-            (self.btn_error, 3, 3),
+            (self.btn_search_sc, 3, 3),
         ]
         for widget, r, c in layout_map:
             widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
@@ -266,7 +265,7 @@ class ArticleDetailPanel(QFrame):
         self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_print_label.clicked.connect(self._on_print_label)
-        self.btn_search_key.clicked.connect(self._on_search_key)
+        self.btn_search_sc.clicked.connect(self._on_search_sc)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
         self.btn_export.clicked.connect(self._on_export)
@@ -340,7 +339,7 @@ class ArticleDetailPanel(QFrame):
             self._picker_title.setText("")
             return
 
-        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category", "price_mode": "Price Mode"}
+        titles = {"tax": "Tax Rate", "unit": "Unit", "category": "Category"}
         self._picker_title.setText(titles[picker_key])
 
         if picker_key == "tax":
@@ -351,10 +350,6 @@ class ArticleDetailPanel(QFrame):
             options = [(v, v) for v in ["pcs", "kg", "g", "liter", "ml", "pack", "box"]]
             current = self._unit_val
             cols = 4
-        elif picker_key == "price_mode":
-            options = [("Fixed price", False), ("Open (enter at sale)", True)]
-            current = self._is_open_price
-            cols = 2
         else:  # category
             options = [("— None —", None)] + [(name, cid) for name, cid in self._categories]
             current = self._category_id
@@ -381,10 +376,6 @@ class ArticleDetailPanel(QFrame):
             self._category_id = value
             self._category_name = label
             self.category_display.setText(label)
-        elif self._active_picker == "price_mode":
-            self._is_open_price = value
-            self.price_mode_display.setText(label)
-            self._sync_price_enabled()
         self._refresh_picker(self._active_picker)
 
     # ── Mode switching ───────────────────────────────────────────────────
@@ -397,29 +388,16 @@ class ArticleDetailPanel(QFrame):
                     widget.clearFocus()
             else:
                 widget.setEnabled(enabled)
-        self.btn_new.setEnabled(not enabled)
-        self.btn_modify.setEnabled(not enabled and self.current_product_id is not None)
-        self.btn_deactivate.setEnabled(not enabled and self.current_product_id is not None)
-        self.btn_reactivate.setEnabled(not enabled and self.current_product_id is not None)
         self.parent_screen.table.setEnabled(not enabled)
         if not enabled:
             if self._active_row:
                 self._active_row.set_active(False)
                 self._active_row = None
             self.parent_screen._show_table_page()
-        self._edit_enabled = enabled
-        self._sync_price_enabled()
-
-    def _sync_price_enabled(self):
-        """Price is meaningless (and left at 0) for an open-price product —
-        it's typed in per sale instead, so the field is locked while
-        editing one."""
-        self.price.setEnabled(self._edit_enabled and not self._is_open_price)
 
     def _reset_fields_to_placeholder(self):
         self.barcode.clear()
         self.name.clear()
-        self.price.setSpecialValueText(" ")
         self.price.setValue(self.price.minimum())
         self.stock.setSpecialValueText(" ")
         self.stock.setValue(self.stock.minimum())
@@ -433,8 +411,6 @@ class ArticleDetailPanel(QFrame):
         self.category_display.setText(self._category_name)
         self._promo_name = "— No Promo —"
         self.promo_display.setText(self._promo_name)
-        self._is_open_price = False
-        self.price_mode_display.setText("Fixed price")
 
     def _refresh_promo_display(self, product_id: int):
         """Re-queried by product id (rather than relying on a passed-in
@@ -451,9 +427,6 @@ class ArticleDetailPanel(QFrame):
         self.price.setValue(product.price)
         self.stock.setValue(product.stock_quantity)
         self.min_stock.setValue(product.min_stock_level)
-
-        self._is_open_price = getattr(product, "is_open_price", False)
-        self.price_mode_display.setText("Open (enter at sale)" if self._is_open_price else "Fixed price")
 
         self._tax_val = str(product.tax)
         self.tax_display.setText(f"{product.tax} %")
@@ -525,9 +498,6 @@ class ArticleDetailPanel(QFrame):
         if not self.name.text().strip():
             self._show_overlay("Product name is required.")
             return False
-        if not self._is_open_price and self.price.value() <= 0:
-            self._show_overlay("Price must be greater than 0.")
-            return False
         barcode = self.barcode.text().strip()
         if barcode:
             with get_session() as session:
@@ -544,8 +514,8 @@ class ArticleDetailPanel(QFrame):
         return {
             "barcode": self.barcode.text().strip() or None,
             "name": self.name.text().strip(),
-            "price": 0.0 if self._is_open_price else self.price.value(),
-            "is_open_price": self._is_open_price,
+            "price": self.price.value(),
+            "is_open_price": self.price.value() == 0,
             "tax": int(self._tax_val),
             "stock_quantity": self.stock.value(),
             "min_stock_level": self.min_stock.value(),
@@ -603,15 +573,16 @@ class ArticleDetailPanel(QFrame):
         else:
             self.parent_screen.table.clearSelection()
             self._clear()
+            self.parent_screen._set_shortcut_mode(False)
         self.parent_screen.search_input.setFocus()
 
     def _on_deactivate(self):
-        if self.current_product_id is None:
+        if self.current_product_id is None or self._mode != "display":
             return
         self.parent_screen._deactivate_product(self.current_product_id)
 
     def _on_reactivate(self):
-        if self.current_product_id is None:
+        if self.current_product_id is None or self._mode != "display":
             return
         self.parent_screen._reactivate_product(self.current_product_id)
 
@@ -624,7 +595,7 @@ class ArticleDetailPanel(QFrame):
                 self._show_overlay("Product not found.", kind="error")
                 return
             if product.is_open_price:
-                self._show_overlay("Open-price products have no fixed price to print.", kind="error")
+                self._show_overlay("No label for open price.", kind="info")
                 return
             try:
                 LabelPrinterService.print_product_label(session, product)
@@ -706,9 +677,10 @@ class ArticleDetailPanel(QFrame):
             return "csv"
         return None
 
-    def _on_search_key(self):
-        self.parent_screen.search_input.setFocus()
-        self.parent_screen.search_input.setPlaceholderText("Search by name or barcode…")
+    def _on_search_sc(self):
+        if self._mode != "display":
+            return
+        self.parent_screen._set_shortcut_mode(not self.parent_screen._shortcut_mode)
 
     def _on_export(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export Articles", "articles.csv", "CSV Files (*.csv)")
@@ -782,8 +754,9 @@ class ArticleDetailPanel(QFrame):
                     except ValueError:
                         price = 0.0
                     is_open_price = (row.get("is_open_price") or "").strip().lower() in ("1", "true", "yes")
-                    if is_open_price:
-                        price = 0.0
+                    if is_open_price or price <= 0:
+                        # Same rule as the edit form: no price means open price.
+                        is_open_price, price = True, 0.0
                     try:
                         tax = int(float(row.get("tax") or 0))
                     except (ValueError, OverflowError):
@@ -841,6 +814,9 @@ class InventoryScreen(QWidget):
 
     def __init__(self):
         super().__init__()
+        # While on, the POS shortcut grid stands in for the product table, so
+        # the most-repriced products are a tap away — see _set_shortcut_mode().
+        self._shortcut_mode = False
         self._build_ui()
         self.refresh()
 
@@ -884,11 +860,11 @@ class InventoryScreen(QWidget):
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 
-        self.low_stock_btn = QPushButton("Low Stock")
-        self.low_stock_btn.setCheckable(True)
-        self.low_stock_btn.setFixedHeight(LIST_FILTER_HEIGHT)
-        self.low_stock_btn.toggled.connect(self.refresh)
-        toolbar.addWidget(self.low_stock_btn)
+        # self.low_stock_btn = QPushButton("Low Stock")
+        # self.low_stock_btn.setCheckable(True)
+        # self.low_stock_btn.setFixedHeight(LIST_FILTER_HEIGHT)
+        # self.low_stock_btn.toggled.connect(self.refresh)
+        # toolbar.addWidget(self.low_stock_btn)
 
         self.show_inactive_check = QCheckBox("Show inactive")
         self.show_inactive_check.setFixedHeight(LIST_FILTER_HEIGHT)
@@ -902,6 +878,9 @@ class InventoryScreen(QWidget):
         self.table_stack.addWidget(self.table)
         self.table_stack.addWidget(self.detail_panel.picker_page)
         self.table_stack.addWidget(self.detail_panel.blank_page)
+        self.shortcut_grid = ShortcutGrid(show_prices=True)
+        self.shortcut_grid.product_pressed.connect(self._on_shortcut_product)
+        self.table_stack.addWidget(self.shortcut_grid)
         layout.addWidget(self.table_stack, stretch=1)
 
         # ── Summary row ───────────────────────────────────────────────────────
@@ -916,16 +895,40 @@ class InventoryScreen(QWidget):
 
     def _show_table_page(self):
         if hasattr(self, "table_stack"):
-            self.table_stack.setCurrentWidget(self.table)
+            page = self.shortcut_grid if self._shortcut_mode else self.table
+            self.table_stack.setCurrentWidget(page)
+            self.search_input.show()
+            self.category_filter.show()
+            self.show_inactive_check.show()
+
+    def _set_shortcut_mode(self, enabled: bool):
+        self._shortcut_mode = enabled
+        self.detail_panel.btn_search_sc.setText("Product\nlist" if enabled else "Search by\nshortcut")
+        if enabled:
+            self.shortcut_grid.reload()
+        self._show_table_page()
+
+    def _on_shortcut_product(self, product_id: int):
+        """Tapping a product in the shortcut grid shows it in the detail
+        panel; Modify then edits it (usually its price) as usual."""
+        if self.detail_panel._mode != "display":
+            return
+        with get_session() as session:
+            product = ProductService.get_by_id(session, product_id)
+        if not product:
+            return
+        if not self._select_product_row(product_id):
+            self.detail_panel.show_product(product)
+        panel = self.detail_panel
+        panel.price.setFocus()
 
     def _show_blank_page(self):
         if hasattr(self, "table_stack"):
             self.table_stack.setCurrentWidget(self.detail_panel.blank_page)
             if hasattr(self, "search_input"):
-                self.search_input.setVisible(False)
-                self.category_filter.setVisible(False)
-                self.low_stock_btn.setVisible(False)
-                self.show_inactive_check.setVisible(False)
+                self.search_input.hide()
+                self.category_filter.hide()
+                self.show_inactive_check.hide()
 
     def refresh(self):
         with get_session() as session:
@@ -955,13 +958,14 @@ class InventoryScreen(QWidget):
             if cat_id:
                 products = [p for p in products if p.category_id == cat_id]
 
-            if self.low_stock_btn.isChecked():
-                products = [p for p in products if p.is_low_stock]
+            # if self.low_stock_btn.isChecked():
+            #     products = [p for p in products if p.is_low_stock]
 
             self._populate_table(products, session)
+            if self._shortcut_mode:
+                self.shortcut_grid.reload()  # slot labels show prices, which may just have changed
             self.summary_label.setText(
                 f"{len(products)} product(s) shown"
-                + (f" — {sum(1 for p in products if p.is_low_stock)} low stock" if products else "")
             )
         self.search_input.setFocus()
 
@@ -1015,16 +1019,17 @@ class InventoryScreen(QWidget):
         self.detail_panel.current_product_id = product_id
         self.detail_panel._start_edit()
 
-    def _adjust_stock(self, product_id: int):
-        with get_session() as session:
-            product = ProductService.get_by_id(session, product_id)
-            if not product:
-                return
-            dialog = StockAdjustmentDialog(product, self)
-            if dialog.exec():
-                data = dialog.get_data()
-                ProductService.adjust_stock(session, product_id, **data)
-        self.refresh()
+    # Commented out for now along with ProductService.adjust_stock (never wired to a button).
+    # def _adjust_stock(self, product_id: int):
+    #     with get_session() as session:
+    #         product = ProductService.get_by_id(session, product_id)
+    #         if not product:
+    #             return
+    #         dialog = StockAdjustmentDialog(product, self)
+    #         if dialog.exec():
+    #             data = dialog.get_data()
+    #             ProductService.adjust_stock(session, product_id, **data)
+    #     self.refresh()
 
     def _deactivate_product(self, product_id: int):
         with get_session() as session:

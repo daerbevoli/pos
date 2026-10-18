@@ -147,28 +147,25 @@ class ClientDetailPanel(QFrame):
         self.btn_reactivate = FunctionButton("Reactivate\nClient", "secFunc")
         self.btn_error = FunctionButton("Error", "errorBtn")
 
-        self.btn_up = FunctionButton("↑", "secFunc")
+        self.btn_up = FunctionButton("↑", "navBtn")
         self.btn_import = FunctionButton("Import", "secFunc")
         self.btn_export = FunctionButton("Export", "secFunc")
-        self.btn_search_key = FunctionButton("Search by\nvat", "secFunc")
         self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
 
-        self.btn_down = FunctionButton("↓", "secFunc")
+        self.btn_down = FunctionButton("↓", "navBtn")
         self.btn_listing = FunctionButton("Client\nListing", "secFunc")
         self.btn_ok = FunctionButton("OK", "okBtn")
 
         layout_map = [
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
-            (self.btn_deactivate, 0, 2), (self.btn_reactivate, 0, 3),
+            (self.btn_deactivate, 0, 2), (self.btn_error, 0, 3),
 
-            (self.btn_up, 1, 0), (self.btn_import, 1, 1),
-            (self.btn_export, 1, 2), (self.btn_cancel, 1, 3),
+            (self.btn_up, 1, 0), (self.btn_listing, 1, 1),
+            (self.btn_reactivate, 1, 2), (self.btn_cancel, 1, 3),
 
-            (self.btn_down, 2, 0), (self.btn_listing, 2, 1),
-            (self.btn_search_key, 2, 2),
-            (self.btn_ok, 2, 3),
+            (self.btn_down, 2, 0), (self.btn_import, 2, 1),
+            (self.btn_export, 2, 2), (self.btn_ok, 2, 3),
 
-            (self.btn_error, 3, 3),
         ]
         for widget, r, c in layout_map:
             widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
@@ -192,7 +189,6 @@ class ClientDetailPanel(QFrame):
         self.btn_import.clicked.connect(self._on_import)
         self.btn_export.clicked.connect(self._on_export)
         self.btn_listing.clicked.connect(self._on_client_listing)
-        self.btn_search_key.clicked.connect(self._on_search_key)
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
         self.country.currentIndexChanged.connect(self._on_country_selected)
@@ -271,10 +267,6 @@ class ClientDetailPanel(QFrame):
     def _set_edit_mode(self, enabled: bool):
         for widget in self._fields:
             widget.setEnabled(enabled)
-        self.btn_new.setEnabled(not enabled)
-        self.btn_modify.setEnabled(not enabled and self.current_client_id is not None)
-        self.btn_deactivate.setEnabled(not enabled and self.current_client_id is not None)
-        self.btn_reactivate.setEnabled(not enabled and self.current_client_id is not None)
         self.parent_screen.table.setEnabled(not enabled)
         if not enabled:
             if self._active_row:
@@ -465,12 +457,12 @@ class ClientDetailPanel(QFrame):
         self.parent_screen.search_input.setFocus()
 
     def _on_deactivate(self):
-        if self.current_client_id is None:
+        if self.current_client_id is None or self._mode != "display":
             return
         self.parent_screen._deactivate_client(self.current_client_id)
 
     def _on_reactivate(self):
-        if self.current_client_id is None:
+        if self.current_client_id is None or self._mode != "display":
             return
         self.parent_screen._reactivate_client(self.current_client_id)
 
@@ -600,9 +592,6 @@ class ClientDetailPanel(QFrame):
         logger.info("Client import from %s: %d added, %d skipped", path, clients_added, clients_skipped)
         self.parent_screen.refresh()
 
-    def _on_search_key(self):
-        self.parent_screen.search_input.setFocus()
-        self.parent_screen.search_input.setPlaceholderText("Search by name or VAT…")
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)

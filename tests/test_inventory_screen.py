@@ -8,7 +8,6 @@ import pytest
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
 from app.ui.inventory_screen import InventoryScreen
-from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.core.product_service import ProductService
 from app.core.database import get_session
 from app.models.models import Product
@@ -57,16 +56,6 @@ def test_search_filters_table(screen):
     screen.search_input.setText("Cola")
     assert screen.table.rowCount() == 1
     assert screen.table.item(0, 1).text() == "Cola"
-
-
-def test_low_stock_filter(screen):
-    _add_product(name="Low", stock_quantity=1, min_stock_level=5)
-    _add_product(name="Plenty", stock_quantity=50, min_stock_level=5)
-    screen.refresh()
-
-    screen.low_stock_btn.setChecked(True)
-    assert screen.table.rowCount() == 1
-    assert screen.table.item(0, 1).text() == "Low"
 
 
 def test_category_filter_restricts_products(screen):
@@ -125,15 +114,46 @@ def test_new_product_validation_blocks_empty_name(screen):
         assert ProductService.get_all(session) == []
 
 
-def test_new_product_validation_blocks_zero_price(screen):
+def test_new_product_without_price_is_open_price(screen):
     panel = screen.detail_panel
     panel._start_new()
     panel.name.setText("No Price")
+    panel._on_ok()
+
+    with get_session() as session:
+        found = session.query(Product).filter_by(name="No Price").one()
+    assert found.is_open_price is True
+    assert found.price == 0.0
+
+
+def test_giving_open_price_product_a_price_makes_it_fixed(screen):
+    pid = _add_product(name="Loose", price=0.0, is_open_price=True)
+    screen.refresh()
+    screen.table.selectRow(0)
+    panel = screen.detail_panel
+    assert panel.price.text() == "Open price"
+
+    panel._start_edit()
+    panel.price.setValue(2.25)
+    panel._on_ok()
+
+    with get_session() as session:
+        found = ProductService.get_by_id(session, pid)
+    assert found.is_open_price is False
+    assert found.price == 2.25
+
+
+def test_clearing_price_makes_product_open_price(screen):
+    pid = _add_product(name="Bread", price=2.0)
+    screen.refresh()
+    screen.table.selectRow(0)
+    panel = screen.detail_panel
+    panel._start_edit()
     panel.price.setValue(0.0)
     panel._on_ok()
 
     with get_session() as session:
-        assert ProductService.get_all(session) == []
+        assert ProductService.get_by_id(session, pid).is_open_price is True
 
 
 def test_new_product_validation_blocks_existing_barcode(screen):
@@ -357,35 +377,6 @@ def test_show_inactive_applies_to_search(screen):
 
     screen.show_inactive_check.setChecked(True)
     assert screen.table.rowCount() == 1
-
-
-# ── Stock adjustment ─────────────────────────────────────────────────────
-
-def test_adjust_stock_applies_dialog_data(screen, monkeypatch):
-    pid = _add_product(name="Stocked", stock_quantity=10)
-
-    monkeypatch.setattr(StockAdjustmentDialog, "exec", lambda self: True)
-    monkeypatch.setattr(
-        StockAdjustmentDialog, "get_data",
-        lambda self: {"quantity_change": 5, "movement_type": "purchase", "notes": None},
-    )
-
-    screen._adjust_stock(pid)
-
-    with get_session() as session:
-        product = ProductService.get_by_id(session, pid)
-    assert product.stock_quantity == 15
-
-
-def test_adjust_stock_cancelled_dialog_makes_no_change(screen, monkeypatch):
-    pid = _add_product(name="Stocked", stock_quantity=10)
-    monkeypatch.setattr(StockAdjustmentDialog, "exec", lambda self: False)
-
-    screen._adjust_stock(pid)
-
-    with get_session() as session:
-        product = ProductService.get_by_id(session, pid)
-    assert product.stock_quantity == 10
 
 
 # ── Barcode scan ─────────────────────────────────────────────────────────
@@ -783,3 +774,131 @@ def test_print_barcodes_cancelled_dialog_writes_nothing(screen, monkeypatch, tmp
     assert built == []
     assert not out_path.exists()
     assert opened == []
+
+
+# ── Search by shortcut ───────────────────────────────────────────────────
+
+def _shortcut(name, product_ids):
+    with get_session() as session:
+        sc = ProductService.create_shortcut(session, name)
+        ProductService.set_shortcut_items(session, sc.id, product_ids)
+        return sc.id
+
+
+def test_search_by_shortcut_swaps_table_for_shortcut_grid(screen):
+    _shortcut("Fruit", [_add_product(name="Apple")])
+    screen.detail_panel.btn_search_sc.click()
+
+    assert screen.table_stack.currentWidget() is screen.shortcut_grid
+    assert screen.shortcut_grid.shortcut_buttons[0].text() == "Fruit"
+
+    screen.detail_panel.btn_search_sc.click()
+    assert screen.table_stack.currentWidget() is screen.table
+
+
+def test_shortcut_slots_show_current_price(screen):
+    _shortcut("Fruit", [_add_product(name="Apple", price=1.25)])
+    screen.detail_panel.btn_search_sc.click()
+    screen.shortcut_grid.shortcut_buttons[0].click()
+
+    assert screen.shortcut_grid.slot_buttons[0].text() == "Apple\n€1.25"
+
+
+def test_tapping_shortcut_product_shows_it(screen):
+    pid = _add_product(name="Apple", price=1.25)
+    _shortcut("Fruit", [pid])
+    screen.refresh()
+    screen.detail_panel.btn_search_sc.click()
+    screen.shortcut_grid.shortcut_buttons[0].click()
+    screen.shortcut_grid.slot_buttons[0].click()
+
+    panel = screen.detail_panel
+    assert panel.current_product_id == pid
+    assert panel._mode == "display"
+    assert panel.price.value() == 1.25
+    assert screen.table_stack.currentWidget() is screen.shortcut_grid
+
+
+def test_saving_price_from_shortcut_returns_to_grid_with_new_price(screen):
+    pid = _add_product(name="Apple", price=1.25)
+    _shortcut("Fruit", [pid])
+    screen.refresh()
+    screen.detail_panel.btn_search_sc.click()
+    screen.shortcut_grid.shortcut_buttons[0].click()
+    screen.shortcut_grid.slot_buttons[0].click()
+    screen.detail_panel.btn_modify.click()
+
+    screen.detail_panel.price.setValue(1.99)
+    screen.detail_panel.btn_ok.click()
+
+    with get_session() as session:
+        assert ProductService.get_by_id(session, pid).price == 1.99
+    assert screen.table_stack.currentWidget() is screen.shortcut_grid
+    assert screen.shortcut_grid.slot_buttons[0].text() == "Apple\n€1.99"
+
+
+def test_search_by_shortcut_ignored_while_editing(screen):
+    screen.detail_panel.btn_new.click()
+    screen.detail_panel.btn_search_sc.click()
+    assert screen._shortcut_mode is False
+
+
+def test_cancel_in_display_mode_leaves_shortcut_grid(screen):
+    screen.detail_panel.btn_search_sc.click()
+    screen.detail_panel.btn_cancel.click()
+    assert screen.table_stack.currentWidget() is screen.table
+
+
+def test_search_bar_hidden_while_editing_and_back_after_save(screen):
+    _add_product(name="Apple")
+    screen.refresh()
+    screen.table.selectRow(0)
+    screen.detail_panel.btn_modify.click()
+    screen.detail_panel.name.setFocus()
+    screen._show_blank_page()  # what FocusIn on a non-picker field does while editing
+    assert screen.search_input.isHidden()
+
+    screen.detail_panel.btn_ok.click()
+    assert not screen.search_input.isHidden()
+    assert not screen.category_filter.isHidden()
+
+
+def test_search_bar_back_after_cancelling_edit(screen):
+    _add_product(name="Apple")
+    screen.refresh()
+    screen.table.selectRow(0)
+    screen.detail_panel.btn_modify.click()
+    screen._show_blank_page()
+
+    screen.detail_panel.btn_cancel.click()
+    assert not screen.search_input.isHidden()
+
+
+# ── Buttons stay pressable; handlers check the conditions ───────────────
+
+def test_action_buttons_stay_enabled_without_selection_or_while_editing(screen):
+    panel = screen.detail_panel
+    buttons = [panel.btn_new, panel.btn_modify, panel.btn_deactivate, panel.btn_reactivate]
+    assert all(b.isEnabled() for b in buttons)
+    panel._start_new()
+    assert all(b.isEnabled() for b in buttons)
+
+
+def test_deactivate_pressed_while_editing_does_nothing(screen, monkeypatch):
+    pid = _add_product(name="Apple")
+    screen.refresh()
+    screen.table.selectRow(0)
+    screen.detail_panel._start_edit()
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: asked.append(a)))
+
+    screen.detail_panel.btn_deactivate.click()
+
+    assert asked == []
+    with get_session() as session:
+        assert ProductService.get_by_id(session, pid).is_active is True
+
+
+def test_modify_pressed_without_selection_does_nothing(screen):
+    screen.detail_panel.btn_modify.click()
+    assert screen.detail_panel._mode == "display"

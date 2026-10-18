@@ -31,11 +31,11 @@ class ProductService:
         return q.order_by(Product.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, product_id: int) -> type[Product] | None:
+    def get_by_id(session: Session, product_id: int) -> Product | None:
         return session.query(Product).filter_by(id=product_id).first()
 
     @staticmethod
-    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> type[Product] | None:
+    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> Product | None:
         """include_inactive: also match deactivated products — `barcode` is
         unique across all of them, so a duplicate check must see those too."""
         query = session.query(Product).filter_by(barcode=barcode)
@@ -44,7 +44,7 @@ class ProductService:
         return query.first()
 
     @staticmethod
-    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Product]]:
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[Product]:
         """Search by name or barcode."""
         term = f"%{query}%"
         q = session.query(Product).filter(
@@ -152,30 +152,31 @@ class ProductService:
 
     # ── Stock Management ──────────────────────────────────────────────────────
 
-    @staticmethod
-    def adjust_stock(
-        session: Session,
-        product_id: int,
-        quantity_change: float,
-        movement_type: str,
-        reference: str = None,
-        notes: str = None
-    ) -> Optional[StockMovement]:
-        """
-        Adjust stock for a product, committed on its own — for a standalone
-        adjustment (inventory screen). Inside a larger save, use move_stock().
-        quantity_change: positive = stock in, negative = stock out
-        movement_type: 'purchase', 'sale', 'adjustment', 'return', 'waste'
-        """
-        movement = ProductService.move_stock(
-            session, product_id, quantity_change, movement_type, reference, notes
-        )
-        if movement is not None:
-            session.commit()
-            logger.info("Stock adjusted: product %s %+g (%s) -> %g%s",
-                        product_id, quantity_change, movement_type, movement.quantity_after,
-                        f", {notes}" if notes else "")
-        return movement
+    # Commented out for now: nothing in the app calls these yet (only tests did).
+    # @staticmethod
+    # def adjust_stock(
+    #     session: Session,
+    #     product_id: int,
+    #     quantity_change: float,
+    #     movement_type: str,
+    #     reference: str = None,
+    #     notes: str = None
+    # ) -> Optional[StockMovement]:
+    #     """
+    #     Adjust stock for a product, committed on its own — for a standalone
+    #     adjustment (inventory screen). Inside a larger save, use move_stock().
+    #     quantity_change: positive = stock in, negative = stock out
+    #     movement_type: 'purchase', 'sale', 'adjustment', 'return', 'waste'
+    #     """
+    #     movement = ProductService.move_stock(
+    #         session, product_id, quantity_change, movement_type, reference, notes
+    #     )
+    #     if movement is not None:
+    #         session.commit()
+    #         logger.info("Stock adjusted: product %s %+g (%s) -> %g%s",
+    #                     product_id, quantity_change, movement_type, movement.quantity_after,
+    #                     f", {notes}" if notes else "")
+    #     return movement
 
     @staticmethod
     def move_stock(
@@ -186,9 +187,9 @@ class ProductService:
         reference: str = None,
         notes: str = None
     ) -> Optional[StockMovement]:
-        """adjust_stock() without the commit: the stock change and its
-        movement row are only flushed, so they commit or roll back together
-        with the caller's transaction (a sale and its invoice — see
+        """Change a product's stock and record a StockMovement, without
+        committing: the stock change and its movement row are only flushed,
+        so they commit or roll back together with the caller's transaction (a sale and its invoice — see
         SalesService.finalize_sale/finalize_invoice/update_sale)."""
         product = session.query(Product).filter_by(id=product_id).first()
         if not product:
@@ -219,27 +220,28 @@ class ProductService:
                      qty_before, product.stock_quantity)
         return movement
 
-    @staticmethod
-    def get_low_stock_products(session: Session) -> list[Product]:
-        return (
-            session.query(Product)
-            .filter(
-                Product.is_active == True,
-                Product.stock_quantity <= Product.min_stock_level
-            )
-            .order_by(Product.stock_quantity)
-            .all()
-        )
-
-    @staticmethod
-    def get_stock_movements(session: Session, product_id: int) -> list[StockMovement]:
-        return (
-            session.query(StockMovement)
-            .filter_by(product_id=product_id)
-            .order_by(StockMovement.created_at.desc())
-            .limit(100)
-            .all()
-        )
+    # Commented out for now: unused (the inventory Low Stock filter uses Product.is_low_stock).
+    # @staticmethod
+    # def get_low_stock_products(session: Session) -> list[Product]:
+    #     return (
+    #         session.query(Product)
+    #         .filter(
+    #             Product.is_active == True,
+    #             Product.stock_quantity <= Product.min_stock_level
+    #         )
+    #         .order_by(Product.stock_quantity)
+    #         .all()
+    #     )
+    #
+    # @staticmethod
+    # def get_stock_movements(session: Session, product_id: int) -> list[StockMovement]:
+    #     return (
+    #         session.query(StockMovement)
+    #         .filter_by(product_id=product_id)
+    #         .order_by(StockMovement.created_at.desc())
+    #         .limit(100)
+    #         .all()
+    #     )
 
     # ── Categories ────────────────────────────────────────────────────────────
 

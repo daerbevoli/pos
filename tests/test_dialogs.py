@@ -1,13 +1,12 @@
 """
 Tests for the small standalone dialogs: NumpadDialog, PaymentDialog,
-StockAdjustmentDialog, FileDialog.
+FileDialog.
 """
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QPushButton
 
 from app.ui.dialogs.numpad_dialog import NumpadDialog
 from app.ui.dialogs.payment_dialog import PaymentDialog
-from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog
 from app.ui.dialogs.file_dialog import FileDialog
 from app.core.sales_service import Cart, CartItem
 
@@ -163,53 +162,6 @@ def test_payment_dialog_card_confirm_always_accepts(qtbot):
     qtbot.addWidget(dlg)
     dlg._confirm()
     assert dlg.result() == QDialog.DialogCode.Accepted
-
-
-# ── StockAdjustmentDialog ────────────────────────────────────────────────
-
-class _FakeProduct:
-    def __init__(self):
-        self.name = "Widget"
-        self.stock_quantity = 10.0
-        self.unit = "pcs"
-
-
-def test_stock_adjustment_dialog_positive_direction(qtbot):
-    dlg = StockAdjustmentDialog(_FakeProduct())
-    qtbot.addWidget(dlg)
-    dlg.quantity.setValue(5)
-    dlg.direction.setCurrentIndex(0)  # Add to stock (+)
-    dlg.movement_type.setCurrentText("purchase")
-
-    data = dlg.get_data()
-    assert data["quantity_change"] == 5
-    assert data["movement_type"] == "purchase"
-    assert data["notes"] is None
-
-
-def test_stock_adjustment_dialog_negative_direction(qtbot):
-    dlg = StockAdjustmentDialog(_FakeProduct())
-    qtbot.addWidget(dlg)
-    dlg.quantity.setValue(3)
-    dlg.direction.setCurrentIndex(1)  # Remove from stock (-)
-
-    data = dlg.get_data()
-    assert data["quantity_change"] == -3
-
-
-def test_stock_adjustment_dialog_notes_stripped(qtbot):
-    dlg = StockAdjustmentDialog(_FakeProduct())
-    qtbot.addWidget(dlg)
-    dlg.notes.setText("   delivery from ACME   ")
-
-    data = dlg.get_data()
-    assert data["notes"] == "delivery from ACME"
-
-
-def test_stock_adjustment_dialog_title_includes_product_name(qtbot):
-    dlg = StockAdjustmentDialog(_FakeProduct())
-    qtbot.addWidget(dlg)
-    assert "Widget" in dlg.windowTitle()
 
 
 # ── FileDialog ───────────────────────────────────────────────────────────

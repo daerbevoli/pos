@@ -28,7 +28,8 @@ from app.constants.countries import BELGIUM
 from app.models.models import Sale, Invoice
 from app.core.settings_service import SettingsService, get_erp_data
 from app.core.receipt_service import PrinterError, ReceiptService
-from app.utils.utils import CategoryButton, FunctionButton, TapToDismissOverlay, TicketTable
+from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
+from app.ui.widgets.shortcut_grid import ShortcutGrid
 from app.core.erp_worker import InvoiceSendWorker
 from app.constants import (
     CART_INFO_BAR_HEIGHT,
@@ -105,21 +106,7 @@ class POSScreen(QWidget):
         self.sale_ids           = []     # id: all of today's completed sale ids, chronological, shared across tabs — see _browse_index()
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
         self._barcode_entry_quantity = None   # quantity text typed before the Barcode button was pressed, if any (may be a lone "-")
-
-        # Shortcut / product-slot grid state (buttons built in _build_bottom_grid(), see there).
-        self.slot_buttons: list[CategoryButton] = []       # the product-slot button widgets, index-aligned with _slot_product_ids
-        # id: slot index -> DB Product.id currently shown in that slot (None if blank).
-        # Set in _show_shortcut(), cleared in _clear_slots(), read in _on_slot_pressed()
-        # to call add_product_by_id() when a slot is tapped.
-        self._slot_product_ids: list[int | None] = [None] * self.SLOT_COUNT
-        self.shortcut_buttons: list[CategoryButton] = []   # the shortcut-selector button widgets, index-aligned with _shortcuts
-        # id: (DB Shortcut.id, name) pairs, one per button, in display order.
-        # Refetched in reload_shortcuts(); index paired positionally with shortcut_buttons.
-        self._shortcuts: list[tuple[int, str]] = []
-        # id: DB Shortcut.id of the currently selected shortcut button (None if none selected).
-        # Set in _show_shortcut(), read in reload_shortcuts() (to preserve selection across
-        # reloads) and _sync_active_shortcut_style() (to highlight the matching button).
-        self._active_shortcut_id: int | None = None
+        self._invoice_send_in_progress = False  # an InvoiceSendWorker is running; Send invoice is ignored until it finishes
 
         self.overlay = TapToDismissOverlay(self)
         self._load_settings()
@@ -328,7 +315,7 @@ class POSScreen(QWidget):
         self.btn_ok   = FunctionButton("OK", "okBtn")
 
         self.btn_articles = FunctionButton("Articles", "secFunc")
-        self.btn_client   = FunctionButton("Client", "customerBtn")
+        self.btn_client   = FunctionButton("Client", "secFunc")
         self.btn_settings = FunctionButton("Settings", "secFunc")
 
         layout_map = [
@@ -407,44 +394,14 @@ class POSScreen(QWidget):
 
     # ── Bottom: numpad + shortcut/product grid ───────────────────────────
 
-    SLOT_COUNT = 24  # rows 0-2 x 8 columns
-
     def _build_bottom_grid(self):
         row = QHBoxLayout()
         row.setSpacing(SPACING_XS)
 
-        self.shortcut_grid = QGridLayout()
-        self.shortcut_grid.setSpacing(SPACING_XS)
-
-        # Rows 0-2: product slots, filled from whichever shortcut is selected.
-        # Tapping a filled slot adds that product to the cart.
-        # (self.slot_buttons / self._slot_product_ids are declared in __init__.)
-        for r in range(3):
-            for c in range(8):
-                i = len(self.slot_buttons)
-                btn = CategoryButton("", "blankBtnLight")
-                btn.setEnabled(False)
-                btn.clicked.connect(lambda _, idx=i: self._on_slot_pressed(idx))
-                self.shortcut_grid.addWidget(btn, r, c)
-                self.slot_buttons.append(btn)
-
-        # Rows 3-4: shortcut selector buttons, populated from the DB.
-        # (self.shortcut_buttons / self._shortcuts / self._active_shortcut_id are declared in __init__.)
-        shortcut_cells = [(r, c) for r in (3, 4) for c in range(8)]
-        for r, c in shortcut_cells:
-            i = len(self.shortcut_buttons)
-            btn = CategoryButton("", "blankBtnLight")
-            btn.setEnabled(False)
-            btn.clicked.connect(lambda _, idx=i: self._on_shortcut_pressed(idx))
-            self.shortcut_grid.addWidget(btn, r, c)
-            self.shortcut_buttons.append(btn)
-
-        for c in range(8):
-            self.shortcut_grid.setColumnStretch(c, 1)
-        for r in range(5):
-            self.shortcut_grid.setRowStretch(r, 1)
-
-        row.addLayout(self.shortcut_grid, stretch=4)
+        # Product slots + shortcut selectors; tapping a filled slot adds that product to the cart.
+        self.shortcut_grid = ShortcutGrid()
+        self.shortcut_grid.product_pressed.connect(self.add_product_by_id)
+        row.addWidget(self.shortcut_grid, stretch=4)
 
         self.reload_shortcuts()
 
@@ -566,7 +523,7 @@ class POSScreen(QWidget):
         s.frozen_change    = self._frozen_change
         s.frozen_total     = self._frozen_total
         s.sale_id          = self._current_sale_id
-        s.active_shortcut_id = self._active_shortcut_id
+        s.active_shortcut_id = self.shortcut_grid.active_shortcut_id
 
     def _load_tab_state(self, idx: int):
         s = self._tab_states[idx]
@@ -603,12 +560,7 @@ class POSScreen(QWidget):
 
         # Each tab keeps its own selected shortcut; drop it if it was deleted
         # (reload_shortcuts() only prunes the tab on screen at the time).
-        if s.active_shortcut_id in {sid for sid, _ in self._shortcuts}:
-            self._show_shortcut(s.active_shortcut_id)
-        else:
-            self._active_shortcut_id = None
-            self._clear_slots()
-            self._sync_active_shortcut_style()
+        self.shortcut_grid.restore(s.active_shortcut_id)
 
         self.ticket_title.setText(f"V {idx}")
         self._refresh_cart()
@@ -619,82 +571,9 @@ class POSScreen(QWidget):
     # ── Shortcut / product slot grid ────────────────────────────────────
 
     def reload_shortcuts(self):
-        """Refresh the selector buttons from the DB. Safe to call whenever
+        """Refresh the shortcut grid from the DB. Safe to call whenever
         shortcuts may have changed (e.g. after leaving the settings screen)."""
-        with get_session() as session:
-            self._shortcuts = [
-                (sc.id, sc.name) for sc in ProductService.get_all_shortcuts(session)
-            ]
-
-        for i, btn in enumerate(self.shortcut_buttons):
-            if i < len(self._shortcuts):
-                btn.setText(self._shortcuts[i][1])
-                btn.setEnabled(True)
-                self._apply_button_role(btn, "categoryBtn")
-            else:
-                btn.setText("")
-                btn.setEnabled(False)
-                btn.setProperty("active", False)
-                self._apply_button_role(btn, "blankBtnLight")
-
-        # Keep the current selection if it still exists, otherwise blank the slots.
-        live_ids = {sid for sid, _ in self._shortcuts}
-        if self._active_shortcut_id in live_ids:
-            self._show_shortcut(self._active_shortcut_id)
-        else:
-            self._active_shortcut_id = None
-            self._clear_slots()
-            self._sync_active_shortcut_style()
-
-    def _on_shortcut_pressed(self, index: int):
-        if index >= len(self._shortcuts):
-            return
-        self._show_shortcut(self._shortcuts[index][0])
-
-    def _show_shortcut(self, shortcut_id: int):
-        with get_session() as session:
-            product_ids = ProductService.get_shortcut_product_ids(session, shortcut_id)
-            rows = []
-            for pid in product_ids:
-                product = ProductService.get_by_id(session, pid)
-                if product and product.is_active:
-                    rows.append((product.id, product.name, product.price, product.is_open_price))
-
-        self._active_shortcut_id = shortcut_id
-        self._clear_slots()
-        for i, (pid, name, price, is_open_price) in enumerate(rows[: self.SLOT_COUNT]):
-            btn = self.slot_buttons[i]
-            btn.setText(f"{name}")
-            btn.setEnabled(True)
-            self._apply_button_role(btn, "productBtn")
-            self._slot_product_ids[i] = pid
-
-        self._sync_active_shortcut_style()
-
-    def _clear_slots(self):
-        for i, btn in enumerate(self.slot_buttons):
-            btn.setText("")
-            btn.setEnabled(False)
-            self._apply_button_role(btn, "blankBtnLight")
-            self._slot_product_ids[i] = None
-
-    def _on_slot_pressed(self, index: int):
-        if 0 <= index < len(self._slot_product_ids):
-            pid = self._slot_product_ids[index]
-            if pid is not None:
-                self.add_product_by_id(pid)
-
-    def _sync_active_shortcut_style(self):
-        for (sid, _), btn in zip(self._shortcuts, self.shortcut_buttons):
-            btn.setProperty("active", sid == self._active_shortcut_id)
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
-
-    def _apply_button_role(self, btn: CategoryButton, role: str):
-        if btn.objectName() != role:
-            btn.setObjectName(role)
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
+        self.shortcut_grid.reload()
 
     # ── Numpad / scan input helpers ──────────────────────────────────────
 
@@ -881,7 +760,7 @@ class POSScreen(QWidget):
             self.is_invoice = False
             self._current_sale_id = None
             self._set_frozen_style(True)
-            self._clear_slots()
+            self.shortcut_grid.clear_slots()
             self._refresh_cart()
             self._tick_time(override=True)
             self.sale_finished = True
@@ -1574,6 +1453,8 @@ class POSScreen(QWidget):
         """Transmits the invoice (Peppol) and locks it: SalesService.update_sale()
         refuses to touch a sale once its invoice.sent_at is set, so this is the
         point of no return — corrections after this go through a credit note."""
+        if self._invoice_send_in_progress:
+            return
         if self._current_sale_id is None:
             self._show_overlay("No ticket to send", kind="error")
             return
@@ -1612,7 +1493,7 @@ class POSScreen(QWidget):
         # open across threads.
         # No overlays from here on: the send runs in the background and the
         # cashier keeps working — InvoiceSendWorker logs the outcome.
-        self.btn_send_invoice.setEnabled(False)
+        self._invoice_send_in_progress = True
         self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data, False, True)
         # Bind the sale now: the cashier may switch tab/ticket before the
         # worker finishes, and it's this sale that must be locked.
@@ -1624,7 +1505,7 @@ class POSScreen(QWidget):
         self._invoice_worker.start()
 
     def _on_invoice_send_succeeded(self, sale_id: int, invoice_id: int, inv_num: str, message: str):
-        self.btn_send_invoice.setEnabled(True)
+        self._invoice_send_in_progress = False
         try:
             with get_session() as session:
                 SalesService.mark_invoice_sent(session, sale_id)
@@ -1632,7 +1513,7 @@ class POSScreen(QWidget):
             logger.error("Invoice %s sent, but sale %s could not be locked: %s", inv_num, sale_id, e)
 
     def _on_invoice_send_failed(self, message: str):
-        self.btn_send_invoice.setEnabled(True)
+        self._invoice_send_in_progress = False
 
     def _open_drawer(self):
         with get_session() as session:

@@ -185,12 +185,12 @@ def test_generate_barcode_unsupported_type(db_session):
 
 # ── Stock management ─────────────────────────────────────────────────────
 
-def test_adjust_stock_increases_and_records_movement(db_session):
+def test_move_stock_increases_and_records_movement(db_session):
     p = _make_product(db_session, price=1.0)
     db_session.refresh(p)
     assert p.stock_quantity == 0
 
-    movement = ProductService.adjust_stock(
+    movement = ProductService.move_stock(
         db_session, p.id, quantity_change=10, movement_type="purchase", reference="PO-1"
     )
 
@@ -204,23 +204,23 @@ def test_adjust_stock_increases_and_records_movement(db_session):
     assert p.stock_quantity == 10
 
 
-def test_adjust_stock_can_go_negative_for_sales(db_session):
+def test_move_stock_can_go_negative_for_sales(db_session):
     p = _make_product(db_session, stock_quantity=5)
-    ProductService.adjust_stock(db_session, p.id, quantity_change=-8, movement_type="sale")
+    ProductService.move_stock(db_session, p.id, quantity_change=-8, movement_type="sale")
     db_session.refresh(p)
     assert p.stock_quantity == -3
 
 
-def test_adjust_stock_negative_is_not_logged_as_warning(db_session, caplog):
+def test_move_stock_negative_is_not_logged_as_warning(db_session, caplog):
     p = _make_product(db_session, stock_quantity=0)
     with caplog.at_level(logging.DEBUG, logger="app.core.product_service"):
-        ProductService.adjust_stock(db_session, p.id, quantity_change=-2, movement_type="sale")
+        ProductService.move_stock(db_session, p.id, quantity_change=-2, movement_type="sale")
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-def test_adjust_stock_is_held_at_stock_min(db_session):
+def test_move_stock_is_held_at_stock_min(db_session):
     p = _make_product(db_session, stock_quantity=STOCK_MIN + 3)
-    movement = ProductService.adjust_stock(db_session, p.id, quantity_change=-10, movement_type="sale")
+    movement = ProductService.move_stock(db_session, p.id, quantity_change=-10, movement_type="sale")
     db_session.refresh(p)
     assert p.stock_quantity == STOCK_MIN
     # The ledger records the change actually applied, so before + change == after.
@@ -228,58 +228,16 @@ def test_adjust_stock_is_held_at_stock_min(db_session):
     assert movement.quantity_before + movement.quantity == movement.quantity_after
 
 
-def test_adjust_stock_is_held_at_stock_max(db_session):
+def test_move_stock_is_held_at_stock_max(db_session):
     p = _make_product(db_session, stock_quantity=STOCK_MAX - 1)
-    movement = ProductService.adjust_stock(db_session, p.id, quantity_change=5, movement_type="purchase")
+    movement = ProductService.move_stock(db_session, p.id, quantity_change=5, movement_type="purchase")
     db_session.refresh(p)
     assert p.stock_quantity == STOCK_MAX
     assert movement.quantity == 1
 
 
-def test_adjust_stock_nonexistent_product_returns_none(db_session):
-    assert ProductService.adjust_stock(db_session, 99999, 1, "purchase") is None
-
-
-def test_get_low_stock_products(db_session):
-    low = _make_product(db_session, name="Low", stock_quantity=1, min_stock_level=5)
-    ok = _make_product(db_session, name="OK", stock_quantity=50, min_stock_level=5)
-
-    result = ProductService.get_low_stock_products(db_session)
-    assert result == [low]
-    assert ok not in result
-
-
-def test_get_low_stock_excludes_inactive(db_session):
-    p = _make_product(db_session, stock_quantity=0, min_stock_level=5)
-    ProductService.deactivate(db_session, p.id)
-    assert ProductService.get_low_stock_products(db_session) == []
-
-
-def test_get_stock_movements_ordered_desc_and_limited(db_session):
-    from datetime import datetime, timedelta
-
-    p = _make_product(db_session)
-    # created_at defaults to datetime.now(), whose resolution can tie across
-    # several rapid inserts — pin explicit, strictly increasing timestamps so
-    # the ORDER BY created_at DESC being tested isn't at the mercy of that.
-    base = datetime(2024, 1, 1)
-    for i in range(5):
-        movement = ProductService.adjust_stock(db_session, p.id, quantity_change=1, movement_type="purchase", reference=str(i))
-        movement.created_at = base + timedelta(seconds=i)
-    db_session.commit()
-
-    movements = ProductService.get_stock_movements(db_session, p.id)
-    assert len(movements) == 5
-    # Most recent first
-    assert movements[0].reference == "4"
-    assert movements[-1].reference == "0"
-
-
-def test_get_stock_movements_limit_100(db_session):
-    p = _make_product(db_session)
-    for i in range(110):
-        ProductService.adjust_stock(db_session, p.id, quantity_change=1, movement_type="purchase")
-    assert len(ProductService.get_stock_movements(db_session, p.id)) == 100
+def test_move_stock_nonexistent_product_returns_none(db_session):
+    assert ProductService.move_stock(db_session, 99999, 1, "purchase") is None
 
 
 # ── Categories ───────────────────────────────────────────────────────────

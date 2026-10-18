@@ -68,7 +68,7 @@ class InventoryReportService:
         for p in products:
             if p.is_open_price:
                 continue
-            lines.append(InventoryLine(p.barcode, p.name, p.tax, round(p.price, 2)))
+            lines.append(InventoryLine(p.barcode or "", p.name, p.tax, round(p.price, 2)))
         snapshot = InventorySnapshot(datetime.now(), lines)
         logger.info("Inventory taken: %d products, total %.2f (excl. VAT %.2f)",
                     len(lines), snapshot.total, snapshot.total_excl_vat)

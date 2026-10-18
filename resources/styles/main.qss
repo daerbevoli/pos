@@ -169,7 +169,7 @@ QPushButton:hover {
 }
 
 QPushButton:pressed {
-    background-color: #aeb7c5;
+    background-color: #f4e84a;  /* see "Pressed state" at the end of this file */
 }
 
 /* ── Reports screen: view-switch / filter toggle buttons ─── */
@@ -694,4 +694,44 @@ QWidget#tapDismissMessage[kind="error"] {
     background-color: #F54444;
     font-size: 22px;
     font-weight: 700;
+}
+
+
+/* ── Pressed state (all buttons) ───────────────────────────
+   Kept last and listing every styled button by name: an #id rule outranks
+   plain QPushButton:pressed, and coming after each button's own :hover /
+   [active] rules lets it win while the button is held down. Add new
+   button object names here too. */
+QPushButton:pressed,
+QPushButton#blankBtnLight:pressed,
+QPushButton#cardBtn:pressed,
+QPushButton#cashBtn:pressed,
+QPushButton#categoryBtn:pressed,
+QPushButton#checkoutBtn:pressed,
+QPushButton#clearBtn:pressed,
+QPushButton#closePosBtn:pressed,
+QPushButton#customerBtn:pressed,
+QPushButton#deleteArticleBtn:pressed,
+QPushButton#discountBtn:pressed,
+QPushButton#errorBadge:pressed,
+QPushButton#errorBtn:pressed,
+QPushButton#generalBtn:pressed,
+QPushButton#InvBtn:pressed,
+QPushButton#navBtn:pressed,
+QPushButton#newArticleBtn:pressed,
+QPushButton#numKey:pressed,
+QPushButton#numKeyDel:pressed,
+QPushButton#okBtn:pressed,
+QPushButton#payAltBtn:pressed,
+QPushButton#pickerBtn:pressed,
+QPushButton#productBtn:pressed,
+QPushButton#salesBtn:pressed,
+QPushButton#secFunc:pressed,
+QPushButton#subtotalBtn:pressed,
+QPushButton#ticketTab:pressed,
+QPushButton#XRBtn:pressed,
+QPushButton#ZRBtn:pressed {
+    background-color: #f4e84a;
+    border: 1px solid #d8cc2f;
+    color: #2a2410;
 }

@@ -1386,3 +1386,20 @@ def test_adding_past_visible_rows_scrolls_last_row_fully_into_view(screen, qtbot
     assert table.verticalScrollBar().value() > 0
     assert rect.top() >= 0
     assert rect.bottom() <= table.viewport().height()
+
+
+def test_send_invoice_ignored_while_previous_send_in_progress(screen, monkeypatch):
+    shown = []
+    monkeypatch.setattr(screen, "_show_overlay", lambda *a, **kw: shown.append(a))
+    screen._invoice_send_in_progress = True
+
+    screen.btn_send_invoice.click()
+
+    assert screen.btn_send_invoice.isEnabled()
+    assert shown == []  # returned before even checking for a ticket
+
+
+def test_send_invoice_result_clears_in_progress(screen):
+    screen._invoice_send_in_progress = True
+    screen._on_invoice_send_failed("boom")
+    assert screen._invoice_send_in_progress is False

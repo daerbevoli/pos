@@ -30,11 +30,11 @@ def test_snapshot_lists_active_products_by_barcode_with_total(db_session):
     assert snapshot.total == 4.25
 
 
-def test_snapshot_open_price_product_counts_zero(db_session):
+def test_snapshot_leaves_out_open_price_products(db_session):
     _make_product(db_session, name="Fixed", barcode="1", price=4.0)
     _make_product(db_session, name="Open", barcode="2", price=7.0, is_open_price=True)
     snapshot = InventoryReportService.take_snapshot(db_session)
-    assert [l.price for l in snapshot.lines] == [4.0, 0.0]
+    assert [l.name for l in snapshot.lines] == ["Fixed"]
     assert snapshot.total == 4.0
 
 

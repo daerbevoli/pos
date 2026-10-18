@@ -474,3 +474,28 @@ def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path
         names = {c.name for c in ClientService.get_all(session)}
     assert "Good Row" in names
     assert "Bad Row" not in names
+
+
+# ── Buttons stay pressable; handlers check the conditions ───────────────
+
+def test_action_buttons_stay_enabled_without_selection_or_while_editing(screen):
+    panel = screen.detail_panel
+    buttons = [panel.btn_new, panel.btn_modify, panel.btn_deactivate, panel.btn_reactivate]
+    assert all(b.isEnabled() for b in buttons)
+    panel._start_new()
+    assert all(b.isEnabled() for b in buttons)
+
+
+def test_deactivate_pressed_while_editing_does_nothing(screen, monkeypatch):
+    cid = _add_client(name="Busy")
+    screen.refresh()
+    screen.table.selectRow(0)
+    screen.detail_panel._start_edit()
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: asked.append(a)))
+
+    screen.detail_panel.btn_deactivate.click()
+
+    assert asked == []
+    with get_session() as session:
+        assert ClientService.get_by_id(session, cid).is_active is True
