@@ -31,11 +31,11 @@ class ProductService:
         return q.order_by(Product.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, product_id: int) -> Product | None:
+    def get_by_id(session: Session, product_id: int) -> type[Product] | None:
         return session.query(Product).filter_by(id=product_id).first()
 
     @staticmethod
-    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> Product | None:
+    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> type[Product] | None:
         """include_inactive: also match deactivated products — `barcode` is
         unique across all of them, so a duplicate check must see those too."""
         query = session.query(Product).filter_by(barcode=barcode)
@@ -44,16 +44,16 @@ class ProductService:
         return query.first()
 
     @staticmethod
-    def search(session: Session, query: str) -> list[Product]:
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Product]]:
         """Search by name or barcode."""
         term = f"%{query}%"
+        q = session.query(Product).filter(
+            (Product.barcode.startswith(term)) | (Product.name.startswith(term))
+        )
+        if not include_inactive:
+            q = q.filter(Product.is_active == True)
         return (
-            session.query(Product)
-            .filter(
-                Product.is_active == True,
-                (Product.barcode.startswith(term)) | (Product.name.startswith(term))
-            )
-            .order_by(Product.barcode)
+            q.order_by(Product.barcode)
             .limit(50)
             .all()
         )
@@ -98,6 +98,18 @@ class ProductService:
         product.is_active = False
         session.commit()
         logger.info("Product deactivated: %s %r", product.id, product.name)
+        return True
+
+    @staticmethod
+    def reactivate(session: Session, product_id: int) -> bool:
+        """Undoes deactivate(). Returns False if the product doesn't exist."""
+        product = session.query(Product).filter_by(id=product_id).first()
+        if not product:
+            logger.warning("Product reactivate: product %s not found", product_id)
+            return False
+        product.is_active = True
+        session.commit()
+        logger.info("Product reactivated: %s %r", product.id, product.name)
         return True
 
     INTERNAL_BARCODE_PREFIX = "2060"

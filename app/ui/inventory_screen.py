@@ -2,7 +2,7 @@
 Inventory Screen
 Table list of products on top; selecting a row shows an "Artikel
 selecteren"-style detail panel below, with a field list on the left and a
-function-key grid on the right (New/Modify/Delete article, Price label,
+function-key grid on the right (New/Modify/Deactivate/Reactivate article, Price label,
 Shelf label, Pre-pack, Print shelf, Search by barcode/key, OK/Cancel).
 New/Modify article edit the fields inline in the panel itself; while a
 Tax/Unit/Category field is focused, the product table is swapped out for a
@@ -14,11 +14,11 @@ import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QComboBox, QFrame,
+    QHeaderView, QMessageBox, QComboBox, QFrame, QCheckBox,
     QDoubleSpinBox, QAbstractSpinBox, QStackedWidget, QFileDialog
 )
 from PyQt6.QtCore import Qt, QEvent, QLocale, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QColor, QDesktopServices
 
 from app.core.database import get_session
 from app.core.label_service import LabelPrinterService
@@ -33,6 +33,8 @@ from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.constants import (
+    COLOR_ROW_INACTIVE_BG,
+    COLOR_ROW_INACTIVE_TEXT,
     FORM_FIELD_HEIGHT,
     LIST_ACTION_BUTTON_HEIGHT,
     LIST_FILTER_HEIGHT,
@@ -211,7 +213,8 @@ class ArticleDetailPanel(QFrame):
 
         self.btn_new = FunctionButton("New\narticle", "newArticleBtn")
         self.btn_modify = FunctionButton("Modify\narticle", "secFunc")
-        self.btn_delete = FunctionButton("Delete\narticle", "deleteArticleBtn")
+        self.btn_deactivate = FunctionButton("Deactivate\narticle", "deleteArticleBtn")
+        self.btn_reactivate = FunctionButton("Reactivate\narticle", "secFunc")
         self.btn_error = FunctionButton("Error", "errorBtn")
 
         self.btn_print_label = FunctionButton("Print\nlabel", "secFunc")
@@ -232,7 +235,7 @@ class ArticleDetailPanel(QFrame):
 
         layout_map = [
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
-            (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
+            (self.btn_deactivate, 0, 2), (self.btn_reactivate, 0, 3),
 
             (self.btn_up, 1, 0), (self.btn_export, 1, 1),
             (self.btn_import, 1, 2), (self.btn_cancel, 1, 3),
@@ -241,6 +244,7 @@ class ArticleDetailPanel(QFrame):
             (self.btn_search_key, 2, 2), (self.btn_ok, 2, 3),
 
             (self.barcode_generate_btn, 3, 0), (self.btn_print_barcodes, 3, 1), (self.btn_inventory, 3, 2),
+            (self.btn_error, 3, 3),
         ]
         for widget, r, c in layout_map:
             widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
@@ -256,7 +260,8 @@ class ArticleDetailPanel(QFrame):
         # Wire actions
         self.btn_new.clicked.connect(self._start_new)
         self.btn_modify.clicked.connect(self._start_edit)
-        self.btn_delete.clicked.connect(self._on_delete)
+        self.btn_deactivate.clicked.connect(self._on_deactivate)
+        self.btn_reactivate.clicked.connect(self._on_reactivate)
         self.btn_error.clicked.connect(self._on_cancel)
         self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_ok.clicked.connect(self._on_ok)
@@ -394,7 +399,8 @@ class ArticleDetailPanel(QFrame):
                 widget.setEnabled(enabled)
         self.btn_new.setEnabled(not enabled)
         self.btn_modify.setEnabled(not enabled and self.current_product_id is not None)
-        self.btn_delete.setEnabled(not enabled and self.current_product_id is not None)
+        self.btn_deactivate.setEnabled(not enabled and self.current_product_id is not None)
+        self.btn_reactivate.setEnabled(not enabled and self.current_product_id is not None)
         self.parent_screen.table.setEnabled(not enabled)
         if not enabled:
             if self._active_row:
@@ -599,10 +605,15 @@ class ArticleDetailPanel(QFrame):
             self._clear()
         self.parent_screen.search_input.setFocus()
 
-    def _on_delete(self):
+    def _on_deactivate(self):
         if self.current_product_id is None:
             return
-        self.parent_screen._delete_product(self.current_product_id)
+        self.parent_screen._deactivate_product(self.current_product_id)
+
+    def _on_reactivate(self):
+        if self.current_product_id is None:
+            return
+        self.parent_screen._reactivate_product(self.current_product_id)
 
     def _on_print_label(self):
         if self.current_product_id is None:
@@ -879,6 +890,11 @@ class InventoryScreen(QWidget):
         self.low_stock_btn.toggled.connect(self.refresh)
         toolbar.addWidget(self.low_stock_btn)
 
+        self.show_inactive_check = QCheckBox("Show inactive")
+        self.show_inactive_check.setFixedHeight(LIST_FILTER_HEIGHT)
+        self.show_inactive_check.toggled.connect(self.refresh)
+        toolbar.addWidget(self.show_inactive_check)
+
         layout.addLayout(toolbar)
 
         # ── Table / picker-grid swap ────────────────────────────────────────────
@@ -909,6 +925,7 @@ class InventoryScreen(QWidget):
                 self.search_input.setVisible(False)
                 self.category_filter.setVisible(False)
                 self.low_stock_btn.setVisible(False)
+                self.show_inactive_check.setVisible(False)
 
     def refresh(self):
         with get_session() as session:
@@ -928,10 +945,11 @@ class InventoryScreen(QWidget):
 
             # Get products
             query = self.search_input.text().strip()
+            include_inactive = self.show_inactive_check.isChecked()
             if query:
-                products = ProductService.search(session, query)
+                products = ProductService.search(session, query, include_inactive=include_inactive)
             else:
-                products = ProductService.get_all(session)
+                products = ProductService.get_all(session, active_only=not include_inactive)
 
             cat_id = self.category_filter.currentData()
             if cat_id:
@@ -969,6 +987,12 @@ class InventoryScreen(QWidget):
             self.table.setItem(row, 5, stock_item)
             self.table.setItem(row, 6, QTableWidgetItem(p.unit))
 
+            if not p.is_active:
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    item.setForeground(QColor(*COLOR_ROW_INACTIVE_TEXT))
+                    item.setBackground(QColor(*COLOR_ROW_INACTIVE_BG))
+
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
     def _on_row_selected(self):
@@ -1002,7 +1026,11 @@ class InventoryScreen(QWidget):
                 ProductService.adjust_stock(session, product_id, **data)
         self.refresh()
 
-    def _delete_product(self, product_id: int):
+    def _deactivate_product(self, product_id: int):
+        with get_session() as session:
+            product = ProductService.get_by_id(session, product_id)
+            if not product or not product.is_active:
+                return
         reply = QMessageBox.question(
             self, "Deactivate Product",
             "This will hide the product from the POS. Sales history is preserved.\nContinue?"
@@ -1011,6 +1039,16 @@ class InventoryScreen(QWidget):
             with get_session() as session:
                 ProductService.deactivate(session, product_id)
             self.refresh()
+            self._select_product_row(product_id)
+
+    def _reactivate_product(self, product_id: int):
+        with get_session() as session:
+            product = ProductService.get_by_id(session, product_id)
+            if not product or product.is_active:
+                return
+            ProductService.reactivate(session, product_id)
+        self.refresh()
+        self._select_product_row(product_id)
 
     def _clear(self):
         self.navigate.emit(0)
@@ -1031,7 +1069,8 @@ class InventoryScreen(QWidget):
         if not barcode:
             return
         with get_session() as session:
-            product = ProductService.get_by_barcode(session, barcode)
+            product = ProductService.get_by_barcode(
+                session, barcode, include_inactive=self.show_inactive_check.isChecked())
 
         self.search_input.blockSignals(True)
         self.search_input.clear()

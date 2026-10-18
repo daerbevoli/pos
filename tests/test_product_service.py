@@ -94,6 +94,24 @@ def test_deactivate_nonexistent_returns_false(db_session):
     assert ProductService.deactivate(db_session, 99999) is False
 
 
+def test_reactivate_restores_product(db_session):
+    p = _make_product(db_session)
+    ProductService.deactivate(db_session, p.id)
+    assert ProductService.reactivate(db_session, p.id) is True
+    assert ProductService.get_by_id(db_session, p.id).is_active is True
+
+
+def test_reactivate_nonexistent_returns_false(db_session):
+    assert ProductService.reactivate(db_session, 99999) is False
+
+
+def test_search_include_inactive(db_session):
+    p = _make_product(db_session)
+    ProductService.deactivate(db_session, p.id)
+    assert ProductService.search(db_session, p.name) == []
+    assert [x.id for x in ProductService.search(db_session, p.name, include_inactive=True)] == [p.id]
+
+
 # ── Barcode generation ───────────────────────────────────────────────────
 
 def _is_valid_ean13(code):

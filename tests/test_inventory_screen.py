@@ -274,30 +274,89 @@ def test_edit_product_keeps_negative_stock(screen):
     assert product.stock_quantity == -3
 
 
-# ── Delete flow ──────────────────────────────────────────────────────────
+# ── Deactivate / reactivate flow ─────────────────────────────────────────
 
-def test_delete_product_confirmed_deactivates(screen, monkeypatch):
+def test_deactivate_product_confirmed_deactivates(screen, monkeypatch):
     pid = _add_product(name="ToDelete")
     screen.refresh()
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.Yes))
-    screen._delete_product(pid)
+    screen._deactivate_product(pid)
 
     with get_session() as session:
         product = ProductService.get_by_id(session, pid)
     assert product.is_active is False
 
 
-def test_delete_product_cancelled_keeps_active(screen, monkeypatch):
+def test_deactivate_product_cancelled_keeps_active(screen, monkeypatch):
     pid = _add_product(name="KeepMe")
     screen.refresh()
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.No))
-    screen._delete_product(pid)
+    screen._deactivate_product(pid)
 
     with get_session() as session:
         product = ProductService.get_by_id(session, pid)
     assert product.is_active is True
+
+
+def test_deactivate_already_inactive_does_not_prompt(screen, monkeypatch):
+    pid = _add_product(name="Gone")
+    with get_session() as session:
+        ProductService.deactivate(session, pid)
+
+    def fail(*a, **kw):
+        raise AssertionError("should not prompt")
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(fail))
+    screen._deactivate_product(pid)
+
+
+def test_reactivate_inactive_product(screen):
+    pid = _add_product(name="Back")
+    with get_session() as session:
+        ProductService.deactivate(session, pid)
+    screen.show_inactive_check.setChecked(True)
+
+    screen._reactivate_product(pid)
+
+    with get_session() as session:
+        assert ProductService.get_by_id(session, pid).is_active is True
+    assert screen.detail_panel.current_product_id == pid
+    assert screen.detail_panel._active_status_label.text() == "Active"
+
+
+def test_reactivate_active_product_is_noop(screen):
+    pid = _add_product(name="Live")
+    screen._reactivate_product(pid)
+    with get_session() as session:
+        assert ProductService.get_by_id(session, pid).is_active is True
+
+
+def test_show_inactive_lists_inactive_greyed(screen):
+    _add_product(name="Live")
+    pid = _add_product(name="Retired")
+    with get_session() as session:
+        ProductService.deactivate(session, pid)
+    screen.refresh()
+    assert screen.table.rowCount() == 1
+
+    screen.show_inactive_check.setChecked(True)
+    assert screen.table.rowCount() == 2
+    names = {screen.table.item(r, 1).text(): r for r in range(2)}
+    live_color = screen.table.item(names["Live"], 1).foreground().color()
+    retired_color = screen.table.item(names["Retired"], 1).foreground().color()
+    assert retired_color != live_color
+
+
+def test_show_inactive_applies_to_search(screen):
+    pid = _add_product(name="Retired")
+    with get_session() as session:
+        ProductService.deactivate(session, pid)
+    screen.search_input.setText("Ret")
+    assert screen.table.rowCount() == 0
+
+    screen.show_inactive_check.setChecked(True)
+    assert screen.table.rowCount() == 1
 
 
 # ── Stock adjustment ─────────────────────────────────────────────────────

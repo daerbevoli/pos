@@ -22,6 +22,10 @@ COLOR_LOG_DEBUG = (130, 130, 130)           # Logs tab: DEBUG lines (INFO uses t
 COLOR_LOG_WARNING = (204, 120, 0)           # Logs tab: WARNING lines
 COLOR_LOG_ERROR = (200, 40, 40)             # Logs tab: ERROR and CRITICAL lines
 
+# ── Inventory / client screens ───────────────────────────────────────────
+COLOR_ROW_INACTIVE_TEXT = (140, 140, 140)   # deactivated products/clients, listed when "Show inactive" is on
+COLOR_ROW_INACTIVE_BG = (232, 232, 232)     # background of those same rows
+
 __all__ = [
     "COLOR_ROW_PENDING",
     "COLOR_ROW_SUMMARY",
@@ -34,4 +38,6 @@ __all__ = [
     "COLOR_LOG_DEBUG",
     "COLOR_LOG_WARNING",
     "COLOR_LOG_ERROR",
+    "COLOR_ROW_INACTIVE_TEXT",
+    "COLOR_ROW_INACTIVE_BG",
 ]

@@ -2,7 +2,7 @@
 Client Screen
 Table list of clients on top; selecting a row shows a "Client
 selecteren"-style detail panel below, with a field list on the left and a
-function-key grid on the right (New/Modify/Delete client, Import, Search by
+function-key grid on the right (New/Modify/Deactivate/Reactivate client, Import, Search by
 vat, OK/Cancel). New/Modify client edit the fields inline in the panel
 itself, mirroring the inventory screen's article editing.
 """
@@ -11,10 +11,11 @@ import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
-    QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog
+    QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog,
+    QCheckBox,
 )
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QUrl
-from PyQt6.QtGui import QKeySequence, QDesktopServices
+from PyQt6.QtGui import QColor, QKeySequence, QDesktopServices
 
 from app.core.client_service import ClientService
 from app.core.client_listing_service import ClientListingService
@@ -22,11 +23,13 @@ from app.models.models import Client
 from app.core.database import get_session
 from app.ui.widgets.form_fields import FieldRow
 from app.ui.dialogs.file_dialog import FileDialog
-# from app.ui.dialogs.client_listing_dialog import ClientListingDialog
+from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton
 from app.utils.validators import is_valid_vat
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.constants import (
+    COLOR_ROW_INACTIVE_BG,
+    COLOR_ROW_INACTIVE_TEXT,
     FORM_FIELD_HEIGHT,
     LIST_ACTION_BUTTON_HEIGHT,
     LIST_FILTER_HEIGHT,
@@ -140,7 +143,8 @@ class ClientDetailPanel(QFrame):
 
         self.btn_new = FunctionButton("New\nClient", "newArticleBtn")
         self.btn_modify = FunctionButton("Modify\nClient", "secFunc")
-        self.btn_delete = FunctionButton("Delete\nClient", "deleteArticleBtn")
+        self.btn_deactivate = FunctionButton("Deactivate\nClient", "deleteArticleBtn")
+        self.btn_reactivate = FunctionButton("Reactivate\nClient", "secFunc")
         self.btn_error = FunctionButton("Error", "errorBtn")
 
         self.btn_up = FunctionButton("↑", "secFunc")
@@ -155,7 +159,7 @@ class ClientDetailPanel(QFrame):
 
         layout_map = [
             (self.btn_new, 0, 0), (self.btn_modify, 0, 1),
-            (self.btn_delete, 0, 2), (self.btn_error, 0, 3),
+            (self.btn_deactivate, 0, 2), (self.btn_reactivate, 0, 3),
 
             (self.btn_up, 1, 0), (self.btn_import, 1, 1),
             (self.btn_export, 1, 2), (self.btn_cancel, 1, 3),
@@ -163,6 +167,8 @@ class ClientDetailPanel(QFrame):
             (self.btn_down, 2, 0), (self.btn_listing, 2, 1),
             (self.btn_search_key, 2, 2),
             (self.btn_ok, 2, 3),
+
+            (self.btn_error, 3, 3),
         ]
         for widget, r, c in layout_map:
             widget.setMinimumHeight(LIST_ACTION_BUTTON_HEIGHT)
@@ -178,7 +184,8 @@ class ClientDetailPanel(QFrame):
         # Wire actions
         self.btn_new.clicked.connect(self._start_new)
         self.btn_modify.clicked.connect(self._start_edit)
-        self.btn_delete.clicked.connect(self._on_delete)
+        self.btn_deactivate.clicked.connect(self._on_deactivate)
+        self.btn_reactivate.clicked.connect(self._on_reactivate)
         self.btn_error.clicked.connect(self._on_cancel)
         self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_ok.clicked.connect(self._on_ok)
@@ -266,7 +273,8 @@ class ClientDetailPanel(QFrame):
             widget.setEnabled(enabled)
         self.btn_new.setEnabled(not enabled)
         self.btn_modify.setEnabled(not enabled and self.current_client_id is not None)
-        self.btn_delete.setEnabled(not enabled and self.current_client_id is not None)
+        self.btn_deactivate.setEnabled(not enabled and self.current_client_id is not None)
+        self.btn_reactivate.setEnabled(not enabled and self.current_client_id is not None)
         self.parent_screen.table.setEnabled(not enabled)
         if not enabled:
             if self._active_row:
@@ -456,10 +464,15 @@ class ClientDetailPanel(QFrame):
             self._clear()
         self.parent_screen.search_input.setFocus()
 
-    def _on_delete(self):
+    def _on_deactivate(self):
         if self.current_client_id is None:
             return
-        self.parent_screen._delete_client(self.current_client_id)
+        self.parent_screen._deactivate_client(self.current_client_id)
+
+    def _on_reactivate(self):
+        if self.current_client_id is None:
+            return
+        self.parent_screen._reactivate_client(self.current_client_id)
 
     def _on_export(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export Clients", "clients.csv", "CSV Files (*.csv)")
@@ -487,33 +500,32 @@ class ClientDetailPanel(QFrame):
         self._show_overlay(f"Exported {len(clients)} client(s).")
 
     def _on_client_listing(self):
-        # dialog = ClientListingDialog(parent=self)
-        # if not dialog.exec():
-        #     return
-        # start, end, fmt = dialog.start_date, dialog.end_date, dialog.file_format
-        # default_name = f"client_listing_{start:%d%m%y}_{end:%d%m%y}.{fmt}"
-        # file_filter = "PDF Files (*.pdf)" if fmt == "pdf" else "CSV Files (*.csv)"
-        # path, _ = QFileDialog.getSaveFileName(self, "Save Client Listing", default_name, file_filter)
-        # if not path:
-        #     return
-        # if not path.lower().endswith(f".{fmt}"):
-        #     path += f".{fmt}"
-        #
-        # try:
-        #     with get_session() as session:
-        #         rows = ClientListingService.build(session, start, end)
-        #     if fmt == "pdf":
-        #         ClientListingService.write_pdf(rows, path, start, end)
-        #     else:
-        #         ClientListingService.write_csv(rows, path)
-        # except OSError as e:
-        #     logger.error("Client listing: couldn't write %s: %s", path, e)
-        #     self._show_overlay(f"Couldn't save client listing: {e}", kind="error")
-        #     return
-        #
-        # # Open in the default PDF viewer so it can be printed straight away.
-        # QDesktopServices.openUrl(QUrl.fromLocalFile(path))
-        pass
+        dialog = ClientListingDialog(parent=self)
+        if not dialog.exec():
+            return
+        start, end, fmt = dialog.start_date, dialog.end_date, dialog.file_format
+        default_name = f"client_listing_{start:%d%m%y}_{end:%d%m%y}.{fmt}"
+        file_filter = "PDF Files (*.pdf)" if fmt == "pdf" else "CSV Files (*.csv)"
+        path, _ = QFileDialog.getSaveFileName(self, "Save Client Listing", default_name, file_filter)
+        if not path:
+            return
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
+
+        try:
+            with get_session() as session:
+                rows = ClientListingService.build(session, start, end)
+            if fmt == "pdf":
+                ClientListingService.write_pdf(rows, path, start, end)
+            else:
+                ClientListingService.write_csv(rows, path)
+        except OSError as e:
+            logger.error("Client listing: couldn't write %s: %s", path, e)
+            self._show_overlay(f"Couldn't save client listing: {e}", kind="error")
+            return
+
+        # Open in the default PDF viewer so it can be printed straight away.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_import(self):
         path = ""
@@ -644,6 +656,11 @@ class ClientScreen(QWidget):
         self.search_input.textChanged.connect(self.refresh)
         toolbar.addWidget(self.search_input, stretch=1)
 
+        self.show_inactive_check = QCheckBox("Show inactive")
+        self.show_inactive_check.setFixedHeight(LIST_FILTER_HEIGHT)
+        self.show_inactive_check.toggled.connect(self.refresh)
+        toolbar.addWidget(self.show_inactive_check)
+
         layout.addLayout(toolbar)
 
         layout.addWidget(self.table, stretch=1)
@@ -657,10 +674,11 @@ class ClientScreen(QWidget):
     def refresh(self):
         with get_session() as session:
             query = self.search_input.text().strip()
+            include_inactive = self.show_inactive_check.isChecked()
             if query:
-                clients = ClientService.search(session, query)
+                clients = ClientService.search(session, query, include_inactive=include_inactive)
             else:
-                clients = ClientService.get_all(session)
+                clients = ClientService.get_all(session, active_only=not include_inactive)
 
             self._populate_table(clients, session)
             self.summary_label.setText(f"{len(clients)} client(s) shown")
@@ -680,6 +698,12 @@ class ClientScreen(QWidget):
             self.table.setItem(row, 3, QTableWidgetItem(c.vatNumber or ""))
             self.table.setItem(row, 4, QTableWidgetItem(c.phone or ""))
             self.table.setItem(row, 5, QTableWidgetItem(c.email or ""))
+
+            if not c.is_active:
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    item.setForeground(QColor(*COLOR_ROW_INACTIVE_TEXT))
+                    item.setBackground(QColor(*COLOR_ROW_INACTIVE_BG))
 
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
@@ -703,7 +727,11 @@ class ClientScreen(QWidget):
         self.detail_panel.current_client_id = client_id
         self.detail_panel._start_edit()
 
-    def _delete_client(self, client_id: int):
+    def _deactivate_client(self, client_id: int):
+        with get_session() as session:
+            client = ClientService.get_by_id(session, client_id)
+            if not client or not client.is_active:
+                return
         reply = QMessageBox.question(
             self, "Deactivate client",
             "This will hide the client from the POS. Sales history is preserved.\nContinue?"
@@ -712,6 +740,21 @@ class ClientScreen(QWidget):
             with get_session() as session:
                 ClientService.deactivate(session, client_id)
             self.refresh()
+            self._select_client_row(client_id)
+
+    def _reactivate_client(self, client_id: int):
+        with get_session() as session:
+            client = ClientService.get_by_id(session, client_id)
+            if not client or client.is_active:
+                return
+            reactivated = ClientService.reactivate(session, client_id)
+        if not reactivated:
+            self.detail_panel._show_overlay(
+                "Can't reactivate: an active client already uses the same name, "
+                "address, phone, email, VAT number or website.", kind="error")
+            return
+        self.refresh()
+        self._select_client_row(client_id)
 
     def _clear(self):
         self.navigate.emit(0)

@@ -106,6 +106,33 @@ def test_deactivate_nonexistent_returns_false(db_session):
     assert ClientService.deactivate(db_session, 99999) is False
 
 
+def test_reactivate_restores_client(db_session):
+    client = _make_client(db_session)
+    ClientService.deactivate(db_session, client.id)
+    assert ClientService.reactivate(db_session, client.id) is True
+    assert ClientService.get_by_id(db_session, client.id).is_active is True
+
+
+def test_reactivate_nonexistent_returns_false(db_session):
+    assert ClientService.reactivate(db_session, 99999) is False
+
+
+def test_reactivate_clashing_with_active_client_returns_false(db_session):
+    old = _make_client(db_session, name="Dup", vatNumber="BE1")
+    ClientService.deactivate(db_session, old.id)
+    _make_client(db_session, name="Dup", vatNumber="BE2", street="2 Other St")
+
+    assert ClientService.reactivate(db_session, old.id) is False
+    assert ClientService.get_by_id(db_session, old.id).is_active is False
+
+
+def test_search_include_inactive(db_session):
+    client = _make_client(db_session, name="Retired")
+    ClientService.deactivate(db_session, client.id)
+    assert ClientService.search(db_session, "Ret") == []
+    assert [c.id for c in ClientService.search(db_session, "Ret", include_inactive=True)] == [client.id]
+
+
 def test_deactivate_preserves_row_not_deletes(db_session):
     client = _make_client(db_session)
     ClientService.deactivate(db_session, client.id)

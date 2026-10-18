@@ -478,9 +478,6 @@ QTableWidget#inventoryTable {
     color: #1c2430;
 }
 
-QTableWidget#inventoryTable::item {
-    color: #1c2430;
-}
 
 /* ── Article detail panel ("Artikel selecteren" style) ───── */
 QFrame#articleDetailPanel {

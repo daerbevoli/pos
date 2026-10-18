@@ -1,6 +1,6 @@
 """
 Tests for app.ui.client_screen: ClientScreen (table/search/summary) and
-ClientDetailPanel (new/edit/delete/import flows).
+ClientDetailPanel (new/edit/deactivate/reactivate/import flows).
 
 Uses the patched_db fixture so all get_session() calls inside the screen
 hit an isolated in-memory database.
@@ -279,14 +279,14 @@ def test_changing_country_while_editing_clears_vat_to_bare_prefix(screen):
     assert panel.vatNumber.text() == "FR"
 
 
-# ── Delete flow ──────────────────────────────────────────────────────────
+# ── Deactivate / reactivate flow ─────────────────────────────────────────
 
-def test_delete_client_confirmed_deactivates(screen, monkeypatch):
+def test_deactivate_client_confirmed_deactivates(screen, monkeypatch):
     cid = _add_client(name="ToDelete")
     screen.refresh()
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.Yes))
-    screen._delete_client(cid)
+    screen._deactivate_client(cid)
 
     with get_session() as session:
         client = ClientService.get_by_id(session, cid)
@@ -294,16 +294,88 @@ def test_delete_client_confirmed_deactivates(screen, monkeypatch):
     assert screen.table.rowCount() == 0
 
 
-def test_delete_client_cancelled_keeps_active(screen, monkeypatch):
+def test_deactivate_client_cancelled_keeps_active(screen, monkeypatch):
     cid = _add_client(name="KeepMe")
     screen.refresh()
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **kw: QMessageBox.StandardButton.No))
-    screen._delete_client(cid)
+    screen._deactivate_client(cid)
 
     with get_session() as session:
         client = ClientService.get_by_id(session, cid)
     assert client.is_active is True
+
+
+def test_deactivate_already_inactive_does_not_prompt(screen, monkeypatch):
+    cid = _add_client(name="Gone")
+    with get_session() as session:
+        ClientService.deactivate(session, cid)
+
+    def fail(*a, **kw):
+        raise AssertionError("should not prompt")
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(fail))
+    screen._deactivate_client(cid)
+
+
+def test_reactivate_inactive_client(screen):
+    cid = _add_client(name="Back")
+    with get_session() as session:
+        ClientService.deactivate(session, cid)
+    screen.show_inactive_check.setChecked(True)
+
+    screen._reactivate_client(cid)
+
+    with get_session() as session:
+        assert ClientService.get_by_id(session, cid).is_active is True
+    assert screen.detail_panel.current_client_id == cid
+    assert screen.detail_panel._active_status_label.text() == "Active"
+
+
+def test_reactivate_active_client_is_noop(screen):
+    cid = _add_client(name="Live")
+    screen._reactivate_client(cid)
+    with get_session() as session:
+        assert ClientService.get_by_id(session, cid).is_active is True
+
+
+def test_reactivate_clashing_client_shows_error(screen):
+    old = _add_client(name="Dup", vatNumber="BE1")
+    with get_session() as session:
+        ClientService.deactivate(session, old)
+    _add_client(name="Dup", vatNumber="BE2", street="2 Other St")
+
+    screen._reactivate_client(old)
+
+    with get_session() as session:
+        assert ClientService.get_by_id(session, old).is_active is False
+    assert "Can't reactivate" in screen.detail_panel.overlay.message_label.text()
+
+
+def test_show_inactive_lists_inactive_greyed(screen):
+    _add_client(name="Live", vatNumber="V1")
+    cid = _add_client(name="Retired", vatNumber="V2")
+    with get_session() as session:
+        ClientService.deactivate(session, cid)
+    screen.refresh()
+    assert screen.table.rowCount() == 1
+
+    screen.show_inactive_check.setChecked(True)
+    assert screen.table.rowCount() == 2
+    rows = {screen.table.item(r, 0).text(): r for r in range(2)}
+    live_color = screen.table.item(rows["Live"], 0).foreground().color()
+    retired_color = screen.table.item(rows["Retired"], 0).foreground().color()
+    assert retired_color != live_color
+
+
+def test_show_inactive_applies_to_search(screen):
+    cid = _add_client(name="Retired")
+    with get_session() as session:
+        ClientService.deactivate(session, cid)
+    screen.search_input.setText("Ret")
+    assert screen.table.rowCount() == 0
+
+    screen.show_inactive_check.setChecked(True)
+    assert screen.table.rowCount() == 1
 
 
 # ── CSV import ───────────────────────────────────────────────────────────
