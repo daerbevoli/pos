@@ -241,12 +241,14 @@ class SettingsScreen(QWidget):
         self.btn_admin   = FunctionButton("Admin", "secFunc")
         self.btn_rf_cn   = FunctionButton("Refund / \nCreditnote", "secFunc")
         self.btn_reports = FunctionButton("Reports", "secFunc")
+        self.btn_backup = FunctionButton("Backup", "secFunc")
         self.btn_close_pos = FunctionButton("Close POS", "closePosBtn")
         self.btn_admin.clicked.connect(self._admin)
         self.btn_rf_cn.clicked.connect(self._rf_cn)
         self.btn_reports.clicked.connect(self._open_reports)
+        self.btn_backup.clicked.connect(self._backup)
         self.btn_close_pos.clicked.connect(self._close_pos)
-        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_close_pos):
+        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_backup, self.btn_close_pos):
             btn.setFixedHeight(SETTINGS_FUNCTION_BUTTON_HEIGHT)
             buttons_layout.addWidget(btn, 1)
         layout.addWidget(buttons_group)
@@ -585,6 +587,9 @@ class SettingsScreen(QWidget):
             return
         self.tabs.setCurrentIndex(0)
         self.navigate.emit(4)
+
+    def _backup(self):
+        pass
 
     def _close_pos(self):
         """The app runs full screen without a title bar, so this is the
