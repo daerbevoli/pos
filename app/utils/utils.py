@@ -1,7 +1,10 @@
 import logging
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget
+from PyQt6.QtWidgets import (
+    QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget,
+    QStyle, QStyledItemDelegate,
+)
 from sqlalchemy.orm import Session
 
 from app.constants import (
@@ -17,7 +20,28 @@ from app.core.settings_service import SettingsService
 logger = logging.getLogger(__name__)
 
 
-class TicketTable(QTableWidget):
+class _NoFocusRectDelegate(QStyledItemDelegate):
+    """Paints cells without the focus rectangle around the current cell."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.state &= ~QStyle.StateFlag.State_HasFocus
+
+
+class SelectionKeepingTable(QTableWidget):
+    """A table whose selected row stays selected until another row is
+    picked or the selection is cleared in code."""
+
+    def mousePressEvent(self, event):
+        # Clicking empty space below the rows would otherwise clear the
+        # current selection; ignore that so the last selected row stays
+        # highlighted.
+        if self.itemAt(event.position().toPoint()) is None:
+            return
+        super().mousePressEvent(event)
+
+
+class TicketTable(SelectionKeepingTable):
     """The scanner should be programmed to wrap every scan in SCAN_MARKER
     (e.g. 'A12345678A'), a character no one would type manually. That lets
     us tell a scan apart from typed digits with certainty instead of
@@ -34,6 +58,7 @@ class TicketTable(QTableWidget):
         super().__init__(*args, **kwargs)
         self._scanning = False
         self._scan_buffer = ""
+        self.setItemDelegate(_NoFocusRectDelegate(self))
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -63,14 +88,6 @@ class TicketTable(QTableWidget):
             self.text_entered.emit(text)
         else:
             super().keyPressEvent(event)
-
-    def mousePressEvent(self, event):
-        # Clicking empty space below the rows would otherwise clear the
-        # current selection; ignore that so the last selected row stays
-        # highlighted.
-        if self.itemAt(event.position().toPoint()) is None:
-            return
-        super().mousePressEvent(event)
 
 class TicketTab(QPushButton):
     """One of the V1 / V2 / V3 sale-slot tabs along the top."""

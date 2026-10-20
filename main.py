@@ -34,7 +34,7 @@ def main():
 
     # Enable high DPI scaling (important for touch screens)
     app = QApplication(sys.argv)
-    app.setApplicationName("POS SKBC")
+    app.setApplicationName("POS")
     app.setOrganizationName("SKBC bv")
 
     # From here on, unhandled exceptions get logged and shown to the user

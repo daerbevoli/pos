@@ -33,7 +33,7 @@ from app.ui.widgets.shortcut_grid import ShortcutGrid
 # from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
-from app.utils.utils import TapToDismissOverlay, FunctionButton
+from app.utils.utils import TapToDismissOverlay, FunctionButton, SelectionKeepingTable
 from app.constants import (
     COLOR_ROW_INACTIVE_BG,
     COLOR_ROW_INACTIVE_TEXT,
@@ -147,13 +147,13 @@ class ArticleDetailPanel(QFrame):
         self.stock.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
-        self.min_stock = QDoubleSpinBox()
-        self.min_stock.setLocale(QLocale.c())
-        self.min_stock.setMaximum(999999)
-        self.min_stock.setDecimals(2)
-        self.min_stock.setValue(5)
-        self.min_stock.setMinimumHeight(FORM_FIELD_HEIGHT)
-        self.min_stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        # self.min_stock = QDoubleSpinBox()
+        # self.min_stock.setLocale(QLocale.c())
+        # self.min_stock.setMaximum(999999)
+        # self.min_stock.setDecimals(2)
+        # self.min_stock.setValue(5)
+        # self.min_stock.setMinimumHeight(FORM_FIELD_HEIGHT)
+        # self.min_stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
         self.unit_display = PickerDisplay(self._unit_val)
         self.category_display = PickerDisplay(self._category_name)
@@ -165,7 +165,7 @@ class ArticleDetailPanel(QFrame):
             ("Selling Price *",  self.price,            None),
             ("Tax *",              self.tax_display,    "tax"),
             ("Stock Quantity",   self.stock,            None),
-            ("Min Stock Level",  self.min_stock,        None),
+            # ("Min Stock Level",  self.min_stock,        None),
             ("Unit *",             self.unit_display,   "unit"),
             ("Category",         self.category_display, "category"),
             ("Promo",            self.promo_display,    None),
@@ -217,7 +217,7 @@ class ArticleDetailPanel(QFrame):
         self.btn_error = FunctionButton("Error", "errorBtn")
 
         self.btn_print_label = FunctionButton("Print\nlabel", "secFunc")
-        self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
+        self.btn_clear = FunctionButton("Clear", "clearBtn")
 
         self.btn_up = FunctionButton("↑", "navBtn")
         self.btn_export = FunctionButton("Export\narticles", "secFunc")
@@ -237,7 +237,7 @@ class ArticleDetailPanel(QFrame):
             (self.btn_deactivate, 0, 2), (self.btn_error, 0, 3),
 
             (self.btn_up, 1, 0), (self.btn_print_label, 1, 1),
-            (self.btn_reactivate, 1, 2), (self.btn_cancel, 1, 3),
+            (self.btn_reactivate, 1, 2), (self.btn_clear, 1, 3),
 
             (self.btn_down, 2, 0), (self.btn_import, 2, 1),
             (self.btn_export, 2, 2), (self.btn_ok, 2, 3),
@@ -262,7 +262,7 @@ class ArticleDetailPanel(QFrame):
         self.btn_deactivate.clicked.connect(self._on_deactivate)
         self.btn_reactivate.clicked.connect(self._on_reactivate)
         self.btn_error.clicked.connect(self._on_cancel)
-        self.btn_cancel.clicked.connect(self._on_cancel)
+        self.btn_clear.clicked.connect(self._on_clear)
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_print_label.clicked.connect(self._on_print_label)
         self.btn_search_sc.clicked.connect(self._on_search_sc)
@@ -319,6 +319,9 @@ class ArticleDetailPanel(QFrame):
         return super().eventFilter(obj, event)
 
     def _navigate(self, direction: int):
+        if self._mode == "display":
+            self.parent_screen._move_selection(direction)
+            return
         focused = self.focusWidget()
         if focused not in self._fields:
             return
@@ -401,7 +404,7 @@ class ArticleDetailPanel(QFrame):
         self.price.setValue(self.price.minimum())
         self.stock.setSpecialValueText(" ")
         self.stock.setValue(self.stock.minimum())
-        self.min_stock.setValue(5)
+        # self.min_stock.setValue(5)
         self._tax_val = "0"
         self.tax_display.setText("0 %")
         self._unit_val = "pcs"
@@ -426,7 +429,7 @@ class ArticleDetailPanel(QFrame):
         self.name.setText(product.name)
         self.price.setValue(product.price)
         self.stock.setValue(product.stock_quantity)
-        self.min_stock.setValue(product.min_stock_level)
+        # self.min_stock.setValue(product.min_stock_level)
 
         self._tax_val = str(product.tax)
         self.tax_display.setText(f"{product.tax} %")
@@ -518,7 +521,7 @@ class ArticleDetailPanel(QFrame):
             "is_open_price": self.price.value() == 0,
             "tax": int(self._tax_val),
             "stock_quantity": self.stock.value(),
-            "min_stock_level": self.min_stock.value(),
+            # "min_stock_level": self.min_stock.value(),
             "unit": self._unit_val,
             "category_id": self._category_id,
         }
@@ -537,9 +540,7 @@ class ArticleDetailPanel(QFrame):
             self._mode = "display"
             self._set_edit_mode(False)
             saved_id = self.current_product_id
-            # refresh() rebuilds the table (clearing selection along the way),
-            # which resets current_product_id via _on_row_selected -> _clear();
-            # saved_id keeps track of what to re-select afterward.
+            # refresh() re-selects the saved product's row when it's listed.
             self.parent_screen.refresh()
             if not self.parent_screen._select_product_row(saved_id):
                 # Saved but filtered out of the current view (e.g. category/search
@@ -552,7 +553,15 @@ class ArticleDetailPanel(QFrame):
                     self._clear()
         else:
             if self.current_product_id:
+                with get_session() as session:
+                    product = ProductService.get_by_id(session, self.current_product_id)
+                    is_active = product is not None and product.is_active
+                if not is_active:
+                    self._show_overlay("Product inactive.", kind="info")
+                    return
                 self.parent_screen.selected_product.emit(self.current_product_id)
+            self.parent_screen.table.clearSelection()
+            self._clear()
             self.parent_screen.refresh()
             self.parent_screen.navigate.emit(0)
 
@@ -560,12 +569,11 @@ class ArticleDetailPanel(QFrame):
         if self._mode == "new":
             self._clear()
         elif self._mode == "edit":
-            product_id = self.current_product_id
             self._mode = "display"
             product = None
-            if product_id:
+            if self.current_product_id:
                 with get_session() as session:
-                    product = ProductService.get_by_id(session, product_id)
+                    product = ProductService.get_by_id(session, self.current_product_id)
             if product:
                 self.show_product(product)
             else:
@@ -575,6 +583,12 @@ class ArticleDetailPanel(QFrame):
             self._clear()
             self.parent_screen._set_shortcut_mode(False)
         self.parent_screen.search_input.setFocus()
+
+    def _on_clear(self):
+        was_display = self._mode == "display"
+        self._on_cancel()
+        if was_display:
+            self.parent_screen.navigate.emit(0)
 
     def _on_deactivate(self):
         if self.current_product_id is None or self._mode != "display":
@@ -827,7 +841,7 @@ class InventoryScreen(QWidget):
         layout.setSpacing(SPACING_MD)
 
         # ── Product table (constructed early: ArticleDetailPanel references it) ─
-        self.table = QTableWidget(0, 7)
+        self.table = SelectionKeepingTable(0, 7)
         self.table.setObjectName("inventoryTable")
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Name", "Category", "Price", "Tax", "Stock", "Unit"
@@ -836,8 +850,13 @@ class InventoryScreen(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Tapping a row must not pull focus out of the search box (a scan
+        # right after would be lost); rows are navigated via the ↑/↓ buttons
+        # or arrow keys in the search box instead.
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
 
         # ── Article detail panel (always visible) ─────────────────────────────
@@ -852,6 +871,7 @@ class InventoryScreen(QWidget):
         self.search_input.setFixedHeight(LIST_FILTER_HEIGHT)
         self.search_input.returnPressed.connect(self._on_barcode_scan)
         self.search_input.textChanged.connect(self.refresh)
+        self.search_input.installEventFilter(self)
         toolbar.addWidget(self.search_input, stretch=1)
 
         self.category_filter = QComboBox()
@@ -961,7 +981,22 @@ class InventoryScreen(QWidget):
             # if self.low_stock_btn.isChecked():
             #     products = [p for p in products if p.is_low_stock]
 
+            # Rebuilding the table drops its selection; keep the selected
+            # product (re-selecting its row when it's still listed) instead of
+            # letting _on_row_selected clear the detail panel.
+            keep_id = self.detail_panel.current_product_id
+            self.table.blockSignals(True)
             self._populate_table(products, session)
+            self.table.blockSignals(False)
+            if (keep_id is not None and not self._select_product_row(keep_id)
+                    and self.detail_panel._mode == "display"):
+                # Filtered out of the list: keep showing it, with fresh data
+                # (it may just have been deactivated, say).
+                product = ProductService.get_by_id(session, keep_id)
+                if product:
+                    self.detail_panel.show_product(product)
+                else:
+                    self.detail_panel._clear()
             if self._shortcut_mode:
                 self.shortcut_grid.reload()  # slot labels show prices, which may just have changed
             self.summary_label.setText(
@@ -1000,7 +1035,8 @@ class InventoryScreen(QWidget):
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
     def _on_row_selected(self):
-        row = self.table.currentRow()
+        selected = self.table.selectionModel().selectedRows()
+        row = selected[0].row() if selected else -1
         if row < 0 or row not in self._product_cache:
             self.detail_panel._clear()
             return
@@ -1066,6 +1102,29 @@ class InventoryScreen(QWidget):
                 self.table.selectRow(row)
                 return True
         return False
+
+    def _move_selection(self, direction: int):
+        """Selects the row above/below the current one (the first row when
+        nothing is selected yet). Does nothing while the shortcut grid is
+        showing instead of the table."""
+        if self.detail_panel._mode != "display" or self.table_stack.currentWidget() is not self.table:
+            return
+        count = self.table.rowCount()
+        if count == 0:
+            return
+        selected = self.table.selectionModel().selectedRows()
+        row = 0 if not selected else max(0, min(count - 1, selected[0].row() + direction))
+        self.table.selectRow(row)
+        self.table.scrollToItem(self.table.item(row, 0))
+
+    def eventFilter(self, obj, event):
+        # Up/Down in the search box move the table selection, so the cursor
+        # can stay in the search box for typing and scanning.
+        if obj is self.search_input and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                self._move_selection(-1 if event.key() == Qt.Key.Key_Up else 1)
+                return True
+        return super().eventFilter(obj, event)
 
     def _on_barcode_scan(self):
         if self.detail_panel._mode != "display":

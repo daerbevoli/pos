@@ -5,7 +5,7 @@ each comment lists the exact rows/buttons/fields it is applied to. Values are pi
 """
 
 # ── Main window ──────────────────────────────────────────────────────────
-MAIN_WINDOW_WIDTH = 1366               # fixed window width
+MAIN_WINDOW_WIDTH = 1024               # fixed window width
 MAIN_WINDOW_HEIGHT = 768               # fixed window height
 HEADER_MIN_HEIGHT = 50                 # top header bar (cashier, clock, RF/CN badge) — min height
 HEADER_MAX_HEIGHT = 70                 # top header bar — max height

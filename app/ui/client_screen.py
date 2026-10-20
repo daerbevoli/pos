@@ -24,7 +24,7 @@ from app.core.database import get_session
 from app.ui.widgets.form_fields import FieldRow
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.client_listing_dialog import ClientListingDialog
-from app.utils.utils import TapToDismissOverlay, FunctionButton
+from app.utils.utils import TapToDismissOverlay, FunctionButton, SelectionKeepingTable
 from app.utils.validators import is_valid_vat
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.constants import (
@@ -150,7 +150,7 @@ class ClientDetailPanel(QFrame):
         self.btn_up = FunctionButton("↑", "navBtn")
         self.btn_import = FunctionButton("Import", "secFunc")
         self.btn_export = FunctionButton("Export", "secFunc")
-        self.btn_cancel = FunctionButton("Cancel", "cancelBtn")
+        self.btn_clear = FunctionButton("Clear", "clearBtn")
 
         self.btn_down = FunctionButton("↓", "navBtn")
         self.btn_listing = FunctionButton("Client\nListing", "secFunc")
@@ -161,7 +161,7 @@ class ClientDetailPanel(QFrame):
             (self.btn_deactivate, 0, 2), (self.btn_error, 0, 3),
 
             (self.btn_up, 1, 0), (self.btn_listing, 1, 1),
-            (self.btn_reactivate, 1, 2), (self.btn_cancel, 1, 3),
+            (self.btn_reactivate, 1, 2), (self.btn_clear, 1, 3),
 
             (self.btn_down, 2, 0), (self.btn_import, 2, 1),
             (self.btn_export, 2, 2), (self.btn_ok, 2, 3),
@@ -184,7 +184,7 @@ class ClientDetailPanel(QFrame):
         self.btn_deactivate.clicked.connect(self._on_deactivate)
         self.btn_reactivate.clicked.connect(self._on_reactivate)
         self.btn_error.clicked.connect(self._on_cancel)
-        self.btn_cancel.clicked.connect(self._on_cancel)
+        self.btn_clear.clicked.connect(self._on_clear)
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_import.clicked.connect(self._on_import)
         self.btn_export.clicked.connect(self._on_export)
@@ -256,6 +256,9 @@ class ClientDetailPanel(QFrame):
         return False
 
     def _navigate(self, direction: int):
+        if self._mode == "display":
+            self.parent_screen._move_selection(direction)
+            return
         focused = self.focusWidget()
         if focused not in self._fields:
             return
@@ -421,9 +424,7 @@ class ClientDetailPanel(QFrame):
             self._mode = "display"
             self._set_edit_mode(False)
             saved_id = self.current_client_id
-            # refresh() rebuilds the table (clearing selection along the way),
-            # which resets current_client_id via _on_row_selected -> _clear();
-            # saved_id keeps track of what to re-select afterward.
+            # refresh() re-selects the saved client's row when it's listed.
             self.parent_screen.refresh()
             if not self.parent_screen._select_client_row(saved_id):
                 with get_session() as session:
@@ -434,7 +435,15 @@ class ClientDetailPanel(QFrame):
                     self._clear()
         else:
             if self.current_client_id:
+                with get_session() as session:
+                    client = ClientService.get_by_id(session, self.current_client_id)
+                    is_active = client is not None and client.is_active
+                if not is_active:
+                    self._show_overlay("Client inactive.", kind="error")
+                    return
                 self.parent_screen.selected_client.emit(self.current_client_id, self.name.text())
+            self.parent_screen.table.clearSelection()
+            self._clear()
             self.parent_screen.navigate.emit(0)
 
     def _on_cancel(self):
@@ -455,6 +464,13 @@ class ClientDetailPanel(QFrame):
             self.parent_screen.table.clearSelection()
             self._clear()
         self.parent_screen.search_input.setFocus()
+
+    def _on_clear(self):
+        """Like Cancel, but from display mode also goes back to the POS."""
+        was_display = self._mode == "display"
+        self._on_cancel()
+        if was_display:
+            self.parent_screen.navigate.emit(0)
 
     def _on_deactivate(self):
         if self.current_client_id is None or self._mode != "display":
@@ -613,7 +629,7 @@ class ClientScreen(QWidget):
         layout.setSpacing(SPACING_MD)
 
         # ── Client table (constructed early: ClientDetailPanel references it) ─
-        self.table = QTableWidget(0, 6)
+        self.table = SelectionKeepingTable(0, 6)
         self.table.setObjectName("inventoryTable")
         self.table.setHorizontalHeaderLabels([
             "Name", "Address", "Country", "VAT", "Phone", "Email"
@@ -628,8 +644,12 @@ class ClientScreen(QWidget):
         # "Address" column below shows the combined street/zip/city — see
         # Client.full_address; the underlying fields stay structured for ERP export.
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Tapping a row must not pull focus out of the search box; rows are
+        # navigated via the ↑/↓ buttons or arrow keys in the search box instead.
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
 
         # ── Client detail panel (always visible) ───────────────────────────
@@ -643,6 +663,7 @@ class ClientScreen(QWidget):
         self.search_input.setPlaceholderText("Search by name or VAT…")
         self.search_input.setFixedHeight(LIST_FILTER_HEIGHT)
         self.search_input.textChanged.connect(self.refresh)
+        self.search_input.installEventFilter(self)
         toolbar.addWidget(self.search_input, stretch=1)
 
         self.show_inactive_check = QCheckBox("Show inactive")
@@ -669,7 +690,22 @@ class ClientScreen(QWidget):
             else:
                 clients = ClientService.get_all(session, active_only=not include_inactive)
 
+            # Rebuilding the table drops its selection; keep the selected
+            # client (re-selecting its row when it's still listed) instead of
+            # letting _on_row_selected clear the detail panel.
+            keep_id = self.detail_panel.current_client_id
+            self.table.blockSignals(True)
             self._populate_table(clients, session)
+            self.table.blockSignals(False)
+            if (keep_id is not None and not self._select_client_row(keep_id)
+                    and self.detail_panel._mode == "display"):
+                # Filtered out of the list: keep showing it, with fresh data
+                # (it may just have been deactivated, say).
+                client = ClientService.get_by_id(session, keep_id)
+                if client:
+                    self.detail_panel.show_client(client)
+                else:
+                    self.detail_panel._clear()
             self.summary_label.setText(f"{len(clients)} client(s) shown")
         self.search_input.setFocus()
 
@@ -697,7 +733,8 @@ class ClientScreen(QWidget):
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
     def _on_row_selected(self):
-        row = self.table.currentRow()
+        selected = self.table.selectionModel().selectedRows()
+        row = selected[0].row() if selected else -1
         if row < 0 or row not in self._client_cache:
             self.detail_panel._clear()
             return
@@ -756,3 +793,25 @@ class ClientScreen(QWidget):
                 self.table.selectRow(row)
                 return True
         return False
+
+    def _move_selection(self, direction: int):
+        """Selects the row above/below the current one (the first row when
+        nothing is selected yet)."""
+        if self.detail_panel._mode != "display":
+            return
+        count = self.table.rowCount()
+        if count == 0:
+            return
+        selected = self.table.selectionModel().selectedRows()
+        row = 0 if not selected else max(0, min(count - 1, selected[0].row() + direction))
+        self.table.selectRow(row)
+        self.table.scrollToItem(self.table.item(row, 0))
+
+    def eventFilter(self, obj, event):
+        # Up/Down in the search box move the table selection, so the cursor
+        # can stay in the search box for typing and scanning.
+        if obj is self.search_input and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                self._move_selection(-1 if event.key() == Qt.Key.Key_Up else 1)
+                return True
+        return super().eventFilter(obj, event)

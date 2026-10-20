@@ -69,10 +69,10 @@ QLineEdit#cartInput {
     border: none;
     border-top: 2px solid #4a90d9;
     border-radius: 0;
-    padding: 8px 10px;
-    font-size: 17px;
-    font-weight: 600;
-    color: #1c2430;
+    padding: 2px 6px;
+    font-size: 22px;
+    font-weight: 700;
+    color: #052F6C;
     selection-background-color: #4a90d9;
 }
 
@@ -86,11 +86,10 @@ QLabel#ticketTotalLbl {
     border: none;
     border-top: 2px solid #4a90d9;
     border-radius: 0;
-    padding: 8px 10px;
-    font-size: 17px;
-    font-weight: 600;
-    color: #1c2430;
-    selection-background-color: #4a90d9;
+    padding: 2px 6px;
+    font-size: 22px;
+    font-weight: 700;
+    color: #052F6C;
 }
 
 QLabel#ticketTotalLbl[frozen="true"] {
@@ -667,13 +666,6 @@ QLabel#footerChangeLabel {
     font-size: 22px;
     font-weight: 700;
     color: #052F6C;
-}
-
-QLabel#ticketTotalLbl {
-    font-size: 22px;
-    font-weight: 700;
-    color: #052F6C;
-    padding: 2px 6px;
 }
 
 QWidget#tapDismissCard[kind="info"] {
