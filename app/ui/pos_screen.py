@@ -85,6 +85,7 @@ class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
     tab_updated        = pyqtSignal(int, str)  # (vtab_idx, amount_str) for tab button
     rf_cn_mode_changed = pyqtSignal(bool)  # active tab entered/left refund / credit-note mode, for header
+    display_changed    = pyqtSignal(dict)  # active ticket panel state for the CustomerDisplay, see emit_display()
 
     isAdmin = False
 
@@ -182,9 +183,10 @@ class POSScreen(QWidget):
         # No time ticking at finished (frozen) sale
         if self.sale_finished and not override:
             return
-        self.ticket_date.setText(
-            datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
-        )
+        text = datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
+        if text != self.ticket_date.text():
+            self.ticket_date.setText(text)
+            self.emit_display()
     # ── Left: ticket header + cart table ────────────────────────────────
 
     def _build_ticket_panel(self):
@@ -1148,7 +1150,45 @@ class POSScreen(QWidget):
             label = "Remaining" if self.cart.paid_total > 0 else "Total"
             self.ticket_total_lbl.setText(f"{label}  {remaining:.2f}")
 
+        self.emit_display()
         self._autosave_open_ticket()
+
+    def emit_display(self):
+        """Push the active ticket panel to the customer display, as it now stands on screen.
+        Uses isHidden() rather than isVisible(): the latter is False whenever
+        another screen (Inventory, Settings, …) is in front of POS."""
+        self.display_changed.emit({
+            "title": self.ticket_title.text(),
+            "date": self.ticket_date.text(),
+            "client": "" if self.client_label.isHidden() else self.client_label.text(),
+            "frozen": self._cart_frozen(),
+            "paid": self.sale_finished,
+            "total": self.ticket_total_lbl.text(),
+            "footer_total": self.footer_total_lbl.text(),
+            "footer_change": self.footer_change_lbl.text(),
+            "rows": self._display_rows(),
+        })
+
+    def _display_rows(self) -> list[dict]:
+        """cart_table's rows as plain data, so the customer display mirrors exactly
+        what _refresh_cart() drew: {"texts": [4 str], "background": (r, g, b) | None,
+        "bold": bool, "divider": bool}."""
+        rows = []
+        for r in range(self.cart_table.rowCount()):
+            first = self.cart_table.item(r, 0)
+            brush = first.background() if first is not None else QBrush()
+            color = brush.color()
+            rows.append({
+                "texts": [
+                    (item.text() if (item := self.cart_table.item(r, c)) is not None else "")
+                    for c in range(4)
+                ],
+                "background": (color.red(), color.green(), color.blue())
+                    if brush.style() != Qt.BrushStyle.NoBrush else None,
+                "bold": bool(first is not None and first.font().bold()),
+                "divider": self.cart_table.rowHeight(r) < CART_ROW_HEIGHT,
+            })
+        return rows
 
     def _move_selection(self, delta: int):
         if self.sale_finished:

@@ -5,10 +5,7 @@ each comment lists the exact rows/buttons/fields it is applied to. Values are pi
 """
 
 # ── Main window ──────────────────────────────────────────────────────────
-MAIN_WINDOW_WIDTH = 1024               # fixed window width
-MAIN_WINDOW_HEIGHT = 768               # fixed window height
-HEADER_MIN_HEIGHT = 50                 # top header bar (cashier, clock, RF/CN badge) — min height
-HEADER_MAX_HEIGHT = 70                 # top header bar — max height
+MAIN_WINDOW_SIZE = (1024, 768)         # fixed window size
 TAB_BAR_MIN_HEIGHT = 44                # V-tab button bar — min height
 TAB_BAR_MAX_HEIGHT = 56                # V-tab button bar — max height
 VTAB_BUTTON_HEIGHT = 40                # each V-tab button (TicketTab) — min height
@@ -16,6 +13,9 @@ VTAB_BUTTON_HEIGHT = 40                # each V-tab button (TicketTab) — min h
 # ── POS screen: cart / ticket ────────────────────────────────────────────
 CART_ROW_HEIGHT = 21                   # every cart row: items, discount, subtotal, paid, payment & change rows
 CART_INFO_BAR_HEIGHT = 21              # client label, running total label, scan/amount input and paid-ticket footer under the cart — min height
+
+# ── Customer display (app/ui/customer_display.py) ────────────────────────
+CUSTOMER_DISPLAY_WINDOW_SIZE = (800, 600)  # initial (width, height) when shown as a normal window (no second monitor)
 
 # ── Shared buttons (app/utils/utils.py) ──────────────────────────────────
 FUNCTION_BUTTON_HEIGHT = 36            # every FunctionButton (POS, Inventory, Clients, Reports, Settings, dialogs), every
@@ -57,15 +57,13 @@ OVERLAY_CARD_MIN_WIDTH = 360           # message card shown over a screen (e.g. 
 OVERLAY_CARD_MAX_WIDTH = 520           # same card — max width
 
 __all__ = [
-    "MAIN_WINDOW_WIDTH",
-    "MAIN_WINDOW_HEIGHT",
-    "HEADER_MIN_HEIGHT",
-    "HEADER_MAX_HEIGHT",
+    "MAIN_WINDOW_SIZE",
     "TAB_BAR_MIN_HEIGHT",
     "TAB_BAR_MAX_HEIGHT",
     "VTAB_BUTTON_HEIGHT",
     "CART_ROW_HEIGHT",
     "CART_INFO_BAR_HEIGHT",
+    "CUSTOMER_DISPLAY_WINDOW_SIZE",
     "FUNCTION_BUTTON_HEIGHT",
     "LIST_ACTION_BUTTON_HEIGHT",
     "LIST_FILTER_HEIGHT",

@@ -37,28 +37,45 @@ QPushButton#ticketTab:hover {
     background-color: #b9c8e8;
 }
 
+/* Clock / salesperson box at the right end of the V-tab bar */
 QFrame#clockFrame {
-    background-color: #f4e84a;
-    border: 1px solid #d8cc2f;
+    background-color: #dcefe0;
+    border: 1px solid #a9cdb2;
     border-radius: 4px;
+    min-height: 40px;
+}
+
+/* Transparent so the box colour shows through the global QWidget background */
+QLabel#clockLabel,
+QLabel#statusLabel {
+    background-color: transparent;
 }
 
 QLabel#clockLabel {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 700;
     color: #2a2410;
-    padding: 4px 10px 0 10px;
+    padding: 2px 10px 0 10px;
+}
+
+QLabel#statusLabel {
+    font-size: 13px;
+    font-weight: 600;
+    color: #052F6C;
+    padding: 0 10px 2px 10px;
 }
 
 
 /* ── Ticket panel (left) ─────────────────────────────────── */
 QLabel#ticketTitle {
+    background-color: #fbf3ee;
     font-size: 22px;
     font-weight: 700;
     color: #052F6C;
 }
 
 QLabel#ticketDate {
+    background-color: #fbf3ee;
     font-size: 22px;
     font-weight: 700;
     color: #052F6C;
@@ -726,4 +743,11 @@ QPushButton#ZRBtn:pressed {
     background-color: #f4e84a;
     border: 1px solid #d8cc2f;
     color: #2a2410;
+}
+
+/* ── Customer display (second monitor) ─────────────────────────────── */
+/* Its widgets reuse the ticket panel's object names (header, cartTable, …),
+   so only the window background needs its own rule. */
+QWidget#customerDisplay {
+    background-color: #fbf3ee;
 }

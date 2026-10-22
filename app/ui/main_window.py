@@ -1,9 +1,8 @@
 """
 Main Window
-Persistent header with store logo, clock, and salesperson.
-Persistent V-tab bar — each tab independently tracks its own screen.
+Persistent V-tab bar — each tab independently tracks its own screen —
+with the error badge and a clock / salesperson box at its right end.
 """
-from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QStackedWidget, QFrame, QButtonGroup
@@ -11,22 +10,19 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
 
+from app.constants.sizes import MAIN_WINDOW_SIZE
 from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
+from app.ui.customer_display import CustomerDisplay
 from app.ui.pos_screen import POSScreen, TABS
 from app.ui.inventory_screen import InventoryScreen
 from app.ui.reports_screen import ReportsScreen
 from app.ui.settings_screen import SettingsScreen
 from app.core.database import get_session
-from app.core.product_service import ProductService
 from app.utils.error_handling import pause_logging
 from app.utils.utils import TicketTab
 from app.ui.widgets.error_badge import ErrorBadge
 from app.constants import (
-    HEADER_MAX_HEIGHT,
-    HEADER_MIN_HEIGHT,
-    MAIN_WINDOW_HEIGHT,
-    MAIN_WINDOW_WIDTH,
     SPACING_XS,
     TAB_BAR_MAX_HEIGHT,
     TAB_BAR_MIN_HEIGHT,
@@ -39,7 +35,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SKBC")
-        self.setFixedSize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
+        self.setFixedSize(*MAIN_WINDOW_SIZE)
 
         self._active_vtab = 1
         # Per V-tab: which QStackedWidget index (screen) was last active
@@ -57,40 +53,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Header: logo + clock / salesperson ───────────────────────────────
-        header = QWidget()
-        header.setObjectName("header")
-        header.setMinimumHeight(HEADER_MIN_HEIGHT)
-        header.setMaximumHeight(HEADER_MAX_HEIGHT)
-        hl = QHBoxLayout(header)
-        hl.setContentsMargins(20, 0, 20, 0)
-        hl.setSpacing(12)
-
-        self.store_label = QLabel()
-        self.store_label.setObjectName("storeName")
-        self._set_store_label(self.store_label)
-        hl.addWidget(self.store_label)
-        hl.addStretch()
-
-        self.error_badge = ErrorBadge()
-        self.error_badge.clicked.connect(self._open_logs)
-        hl.addWidget(self.error_badge)
-
-        info_col = QVBoxLayout()
-        info_col.setSpacing(0)
-        self.clock_label = QLabel()
-        self.clock_label.setObjectName("clockLabel")
-        self.clock_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.salesperson_label = QLabel()
-        self.salesperson_label.setObjectName("statusLabel")
-        self.salesperson_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        info_col.addWidget(self.clock_label)
-        info_col.addWidget(self.salesperson_label)
-        hl.addLayout(info_col)
-
-        root.addWidget(header)
-
-        # ── Persistent V-tab bar ─────────────────────────────────────────────
+        # ── Persistent V-tab bar (+ error badge, clock / salesperson box) ────
         tab_bar = QWidget()
         tab_bar.setObjectName("vtabBar")
         tab_bar.setMinimumHeight(TAB_BAR_MIN_HEIGHT)
@@ -110,6 +73,26 @@ class MainWindow(QMainWindow):
             tbl.addWidget(btn, stretch=1)
 
         self._vtab_buttons[1].setChecked(True)
+
+        self.error_badge = ErrorBadge()
+        self.error_badge.clicked.connect(self._open_logs)
+        tbl.addWidget(self.error_badge)
+
+        clock_frame = QFrame()
+        clock_frame.setObjectName("clockFrame")
+        info_col = QVBoxLayout(clock_frame)
+        info_col.setContentsMargins(0, 0, 0, 0)
+        info_col.setSpacing(0)
+        self.clock_label = QLabel()
+        self.clock_label.setObjectName("clockLabel")
+        self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.salesperson_label = QLabel()
+        self.salesperson_label.setObjectName("cashierLabel")
+        self.salesperson_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info_col.addWidget(self.clock_label)
+        info_col.addWidget(self.salesperson_label)
+        tbl.addWidget(clock_frame)
+
         root.addWidget(tab_bar)
 
         # Thin separator line between tab bar and content
@@ -132,9 +115,6 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.settings_screen)
         self.stack.addWidget(self.reports_screen)
 
-        self.settings_screen.settings_saved.connect(
-            lambda: self._set_store_label(self.store_label)
-        )
         self.settings_screen.settings_saved.connect(self._refresh_salesperson)
         self.settings_screen.settings_saved.connect(self.pos_screen.reload_shortcuts)
         self.pos_screen.navigate.connect(self._navigate)
@@ -154,29 +134,30 @@ class MainWindow(QMainWindow):
         self.inventory_screen.selected_product.connect(self.pos_screen.add_product_by_id)
         self.reports_screen.sale_selected.connect(self.pos_screen.show_sale)
 
+        # ── Customer display: mirrors the active POS ticket in its own window ──
+        self.customer_display = CustomerDisplay(self)
+        self.pos_screen.display_changed.connect(self.customer_display.update_ticket)
+        self.pos_screen.emit_display()
+        self.settings_screen.customer_display_requested.connect(
+            lambda: self.customer_display.toggle(self)
+        )
+
         root.addWidget(self.stack, stretch=1)
 
         # Initialize to POS screen, tab 1
         self.stack.setCurrentIndex(0)
         self._refresh_salesperson()
 
-    # ── Store label ───────────────────────────────────────────────────────────
+    def showEvent(self, event):
+        """Open the customer display on a second monitor, if one is connected —
+        only now is it known which screen the main window landed on."""
+        super().showEvent(event)
+        if not self.customer_display.isVisible():
+            screen = CustomerDisplay.secondary_screen(self)
+            if screen is not None:
+                self.customer_display.show_on(screen)
 
-    def _set_store_label(self, label: QLabel):
-        with get_session() as session:
-            path = SettingsService.get(session, "logo_path", "")
-            if path:
-                pixmap = QPixmap(path)
-                label.setPixmap(
-                    pixmap.scaled(
-                        180, 60,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
-            else:
-                store_name = SettingsService.get(session, "store_name", "")
-                label.setText(store_name)
+    # ── Salesperson ───────────────────────────────────────────────────────────
 
     def _refresh_salesperson(self):
         with get_session() as session:
@@ -262,6 +243,6 @@ class MainWindow(QMainWindow):
         timer.start(1000)
 
     def _update_clock(self):
-        now = datetime.now().strftime("%A, %d %B %Y  %H:%M")
+        now = datetime.now().strftime("%a %d-%m-%Y  %H:%M")
         self.clock_label.setText(now)
 

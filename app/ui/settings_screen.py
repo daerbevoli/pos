@@ -38,6 +38,7 @@ class SettingsScreen(QWidget):
     salesperson_changed = pyqtSignal(str)  # cashier name update for header
     admin_changed = pyqtSignal(bool)       # admin mode toggled, for POS's admin-only actions
     rf_cn_requested = pyqtSignal()         # admin pressed RF / CN: toggle it on the active POS ticket
+    customer_display_requested = pyqtSignal()  # show/hide the customer display window
 
     is_admin = False
 
@@ -242,13 +243,16 @@ class SettingsScreen(QWidget):
         self.btn_rf_cn   = FunctionButton("Refund / \nCreditnote", "secFunc")
         self.btn_reports = FunctionButton("Reports", "secFunc")
         self.btn_backup = FunctionButton("Backup", "secFunc")
+        self.btn_customer_display = FunctionButton("Customer\nDisplay", "secFunc")
         self.btn_close_pos = FunctionButton("Close POS", "closePosBtn")
         self.btn_admin.clicked.connect(self._admin)
         self.btn_rf_cn.clicked.connect(self._rf_cn)
         self.btn_reports.clicked.connect(self._open_reports)
         self.btn_backup.clicked.connect(self._backup)
+        self.btn_customer_display.clicked.connect(self.customer_display_requested.emit)
         self.btn_close_pos.clicked.connect(self._close_pos)
-        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_backup, self.btn_close_pos):
+        for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_backup,
+                    self.btn_customer_display, self.btn_close_pos):
             btn.setFixedHeight(SETTINGS_FUNCTION_BUTTON_HEIGHT)
             buttons_layout.addWidget(btn, 1)
         layout.addWidget(buttons_group)

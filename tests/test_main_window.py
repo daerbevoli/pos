@@ -24,8 +24,11 @@ def test_construction_wires_all_screens(window):
     assert window.stack.currentIndex() == 0  # POS screen first
 
 
-def test_store_label_shows_default_store_name(window):
-    assert window.store_label.text() == "My Supermarket"
+def test_clock_box_sits_in_the_vtab_bar_after_the_tabs(window):
+    tab_bar = window._vtab_buttons[1].parentWidget()
+    assert window.clock_label.parentWidget().parentWidget() is tab_bar
+    assert window.salesperson_label.parentWidget() is window.clock_label.parentWidget()
+    assert window.error_badge.parentWidget() is tab_bar
 
 
 def test_vtab_buttons_created_and_tab_one_checked(window):
@@ -107,15 +110,13 @@ def test_selected_product_signal_adds_to_pos_cart(window):
     assert window.pos_screen.cart.entries[0].product_id == product_id
 
 
-def test_settings_saved_signal_refreshes_store_label_and_salesperson(window):
+def test_settings_saved_signal_refreshes_salesperson(window):
     with get_session() as session:
         from app.core.settings_service import SettingsService
-        SettingsService.set(session, "store_name", "Renamed Shop")
         SettingsService.set(session, "cashier_name", "Alice")
 
     window.settings_screen.settings_saved.emit()
 
-    assert window.store_label.text() == "Renamed Shop"
     assert window.salesperson_label.text() == "Alice"
 
 
