@@ -310,8 +310,8 @@ class ErpService:
     def send_invoice(
             self,
             invoice_id: int,
-            use_peppol: bool = True,
-            use_email: bool = True,
+            use_peppol: bool,
+            use_email: bool,
     ) -> tuple[bool, str]:
         """
         Send an invoice via Peppol and/or email through the Odoo "Send & Print" wizard.
@@ -348,23 +348,23 @@ class ErpService:
         notes: list[str] = []
 
         # # 2. Peppol eligibility
-        # if use_peppol:
-        #     if partner_state == "not_verified":
-        #         # Trigger the verification, it can't be used for this run
-        #         self.button(
-        #             "res.partner",
-        #             "button_account_peppol_check_partner_endpoint",
-        #             [partner_id],
-        #         )
-        #         notes.append("Peppol partner verification triggered")
-        #     elif partner_state != "valid":
-        #         notes.append("Partner is not on Peppol")
-        #     elif move_state in ("done", "processing"):
-        #         notes.append("Invoice already sent via Peppol")
-        #     elif move_state == "error":
-        #         notes.append("Previous Peppol send failed")
-        #     else:
-        #         methods.append("peppol")
+        if use_peppol:
+            if partner_state == "not_verified":
+                # Trigger the verification, it can't be used for this run
+                self.button(
+                    "res.partner",
+                    "button_account_peppol_check_partner_endpoint",
+                    [partner_id],
+                )
+                notes.append("Peppol partner verification triggered")
+            elif partner_state != "valid":
+                notes.append("Partner is not on Peppol")
+            elif move_state in ("done", "processing"):
+                notes.append("Invoice already sent via Peppol")
+            elif move_state == "error":
+                notes.append("Previous Peppol send failed")
+            else:
+                methods.append("peppol")
 
         # 3. Email eligibility
         if use_email:
@@ -392,23 +392,23 @@ class ErpService:
         )
 
         # # 5. Send (drop the context kwarg if your button() helper doesn't take one)
-        # self.button(
-        #     "account.move.send.wizard",
-        #     "action_send_and_print",
-        #     [wizard_id],
-        #     context=context
-        # )
+        self.button(
+            "account.move.send.wizard",
+            "action_send_and_print",
+            [wizard_id],
+            context=context
+        )
 
         # 6. Read back the Peppol state to confirm it was queued
-        # if "peppol" in methods:
-        #     new_state = self.read(
-        #         model="account.move",
-        #         ids=[invoice_id],
-        #         fields=["peppol_move_state"],
-        #     )[0]["peppol_move_state"]
-        #     if new_state == "error":
-        #         notes.append("Peppol send failed")
-        #         return False, "; ".join(notes)
+        if "peppol" in methods:
+            new_state = self.read(
+                model="account.move",
+                ids=[invoice_id],
+                fields=["peppol_move_state"],
+            )[0]["peppol_move_state"]
+            if new_state == "error":
+                notes.append("Peppol send failed")
+                return False, "; ".join(notes)
 
         message = "Invoice sent via " + " and ".join(methods)
         if notes:

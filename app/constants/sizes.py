@@ -9,6 +9,7 @@ MAIN_WINDOW_SIZE = (1024, 768)         # fixed window size
 TAB_BAR_MIN_HEIGHT = 44                # V-tab button bar — min height
 TAB_BAR_MAX_HEIGHT = 56                # V-tab button bar — max height
 VTAB_BUTTON_HEIGHT = 40                # each V-tab button (TicketTab) — min height
+ERROR_BADGE_WIDTH = 140                # error badge in the V-tab bar — fixed, so the V-tabs don't resize when it fills/empties
 
 # ── POS screen: cart / ticket ────────────────────────────────────────────
 CART_ROW_HEIGHT = 21                   # every cart row: items, discount, subtotal, paid, payment & change rows
@@ -61,6 +62,7 @@ __all__ = [
     "TAB_BAR_MIN_HEIGHT",
     "TAB_BAR_MAX_HEIGHT",
     "VTAB_BUTTON_HEIGHT",
+    "ERROR_BADGE_WIDTH",
     "CART_ROW_HEIGHT",
     "CART_INFO_BAR_HEIGHT",
     "CUSTOMER_DISPLAY_WINDOW_SIZE",

@@ -194,4 +194,4 @@ def test_error_badge_opens_logs_and_acknowledges(window):
     window.error_badge.click()
     assert window.stack.currentWidget() is window.settings_screen
     assert window.settings_screen.tabs.currentWidget() is window.settings_screen.log_panel
-    assert window.error_badge.isHidden() and window.error_badge.count == 0
+    assert not window.error_badge.active and window.error_badge.count == 0

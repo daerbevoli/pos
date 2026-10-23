@@ -47,7 +47,7 @@ QFrame#clockFrame {
 
 /* Transparent so the box colour shows through the global QWidget background */
 QLabel#clockLabel,
-QLabel#statusLabel {
+QLabel#cashierLabel {
     background-color: transparent;
 }
 
@@ -58,7 +58,7 @@ QLabel#clockLabel {
     padding: 2px 10px 0 10px;
 }
 
-QLabel#statusLabel {
+QLabel#cashierLabel {
     font-size: 13px;
     font-weight: 600;
     color: #052F6C;
@@ -641,14 +641,23 @@ QWidget#header {
 
 }
 
+/* Fixed-width slot in the V-tab bar: blank grey box when there are no errors,
+   red with the count once one is logged (see app/ui/widgets/error_badge.py) */
 QPushButton#errorBadge {
-    background-color: #F54444;
-    color: white;
+    background-color: #e4e7ec;
+    color: #1c2430;
     font-size: 16px;
     font-weight: 700;
-    border: none;
-    border-radius: 6px;
-    padding: 6px 14px;
+    border: 1px solid #c3c9d3;
+    border-radius: 4px;
+    min-height: 40px;
+    padding: 2px;
+}
+
+QPushButton#errorBadge[active="true"] {
+    background-color: #F54444;
+    border: 1px solid #d63030;
+    color: white;
 }
 
 QWidget#header[frozen="true"] {

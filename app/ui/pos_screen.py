@@ -1496,7 +1496,7 @@ class POSScreen(QWidget):
         if self._invoice_send_in_progress:
             return
         if self._current_sale_id is None:
-            self._show_overlay("No ticket to send", kind="error")
+            self._show_overlay("No ticket to send", kind="info")
             return
 
 
@@ -1534,7 +1534,8 @@ class POSScreen(QWidget):
         # No overlays from here on: the send runs in the background and the
         # cashier keeps working — InvoiceSendWorker logs the outcome.
         self._invoice_send_in_progress = True
-        self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data, False, True)
+        self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data,
+                                                 use_peppol=False, use_email=True)
         # Bind the sale now: the cashier may switch tab/ticket before the
         # worker finishes, and it's this sale that must be locked.
         self._invoice_worker.succeeded.connect(
@@ -1554,6 +1555,7 @@ class POSScreen(QWidget):
 
     def _on_invoice_send_failed(self, message: str):
         self._invoice_send_in_progress = False
+        logger.error("Invoice failed to send with error: %s", message)
 
     def _open_drawer(self):
         with get_session() as session:
