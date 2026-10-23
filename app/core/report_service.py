@@ -16,8 +16,8 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.sales_service import Cart, calc_tax, SalesService, OpenTicketData, load_open_tickets
-from app.models.models import Invoice, Product, Sale, ZReport
+from app.core.sales_service import Cart, calc_tax, SalesService
+from app.models.models import Invoice, OpenTicket, Product, Sale, ZReport
 
 logger = logging.getLogger(__name__)
 
@@ -252,11 +252,11 @@ class XZReportService:
         return [number for (number,) in rows]
 
     @staticmethod
-    def open_tickets(session: Session) -> bool:
-        if load_open_tickets(session):
-            return True
-        return False
-
+    def open_ticket_slots(session: Session) -> list[int]:
+        """V-tab slots holding a ticket still in progress (autosaved, not yet
+        paid or cleared) — the Z report must wait until they're settled."""
+        rows = session.query(OpenTicket.vtab_slot).order_by(OpenTicket.vtab_slot).all()
+        return [slot for (slot,) in rows]
 
     @staticmethod
     def close_z_report(session: Session) -> ZReport:
@@ -269,11 +269,16 @@ class XZReportService:
         is still unsent: purging its sale unlinks the invoice from it, and
         the POS can then no longer reach it to send it."""
         unsent = XZReportService.unsent_invoice_numbers(session)
-        open_tickets = XZReportService.open_tickets(session)
-        if unsent or open_tickets:
-            logger.warning("Z report refused: unsent invoices [%s], open tickets: %s",
-                           ", ".join(unsent), open_tickets)
-            raise ValueError(f"Unsent invoices: {', '.join(unsent)}")
+        open_slots = XZReportService.open_ticket_slots(session)
+        if unsent or open_slots:
+            logger.warning("Z report refused: unsent invoices [%s], open tickets on V-tabs [%s]",
+                           ", ".join(unsent), ", ".join(map(str, open_slots)))
+            problems = []
+            if open_slots:
+                problems.append(f"Open tickets on V {', V '.join(map(str, open_slots))}")
+            if unsent:
+                problems.append(f"Unsent invoices: {', '.join(unsent)}")
+            raise ValueError("; ".join(problems))
 
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
         # Totals over the till sales only; the purge below still takes every

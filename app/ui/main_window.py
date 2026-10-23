@@ -186,11 +186,11 @@ class MainWindow(QMainWindow):
         self._vtab_screen[self._active_vtab] = self.stack.currentIndex()
 
         self._active_vtab = idx
-        screen_idx = self._vtab_screen[idx]
-        self.stack.setCurrentIndex(screen_idx)
-        # If the restored screen is POS, tell POSScreen which tab is now active
-        if screen_idx == 0:
-            self.pos_screen.set_active_tab(idx)
+        self.stack.setCurrentIndex(self._vtab_screen[idx])
+        # Always, not only when the restored screen is POS: the Clients,
+        # Inventory and Reports screens act on the POS ticket (set_client,
+        # add_product_by_id, show_sale) and must hit this tab's, not the last one's.
+        self.pos_screen.set_active_tab(idx)
 
         self._vtab_buttons[idx].setChecked(True)
 

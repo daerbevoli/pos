@@ -746,9 +746,13 @@ class POSScreen(QWidget):
         self._barcode_entry_quantity = None
 
     def _clear_cart(self, override: bool = False):
-        if not override and not self.cart_active:
+        # An empty but unfinished tab (e.g. a digit typed on a frozen ticket,
+        # then erased) still holds an open-ticket row that blocks the Z report,
+        # so Clear must work on it too — without asking, as nothing is lost.
+        if not override and not self.cart_active and self.sale_finished:
             return
-        if override or QMessageBox.question(self, "Clear cart", "Clear cart?") == QMessageBox.StandardButton.Yes:
+        if (override or not self.cart_active
+                or QMessageBox.question(self, "Clear cart", "Clear cart?") == QMessageBox.StandardButton.Yes):
             self._frozen_breakdown = []
             self._frozen_change    = 0.0
             self._frozen_total     = 0.0
@@ -884,15 +888,18 @@ class POSScreen(QWidget):
         Returns the amount the next discount applies to:
         - last CartItem's line_total  → item discount
         - last section's net total    → section discount (entry above is SubtotalMarker)
-        Existing DiscountEntry rows are skipped when looking back.
+        minus the DiscountEntry rows (promo or manual) already applied to that
+        target, so stacked discounts can never take it below zero.
         """
+        already_discounted = 0.0
         for entry in reversed(self.cart.entries):
             if isinstance(entry, DiscountEntry):
+                already_discounted += entry.amount
                 continue
             if isinstance(entry, CartItem):
-                return entry.line_total
+                return round(entry.line_total - already_discounted, 2)
             if isinstance(entry, SubtotalMarker):
-                return self._last_section_total()
+                return round(self._last_section_total() - already_discounted, 2)
             break
         return None
 
@@ -1384,7 +1391,7 @@ class POSScreen(QWidget):
 
             if sale.invoice is not None and sale.invoice.sent_at is not None:
                 self._show_overlay(
-                    "This invoice had alreasy been sent", kind="error",
+                    "This invoice had already been sent", kind="error",
                 )
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
@@ -1658,7 +1665,7 @@ class POSScreen(QWidget):
             if product.unit in WEIGHT_UNITS:
                 return amount
             return -1 if amount < 0 else 1
-        return int(round(amount))
+        return amount if product.unit in WEIGHT_UNITS else int(round(amount))
 
     def set_admin(self, active: bool):
         """Admin mode is switched on from the Settings screen's Buttons tab;
@@ -1752,4 +1759,10 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def show_sale(self, sale_id: int):
+        """Jumps to a sale picked on the Reports screen — but never over a
+        ticket still being built, which would otherwise be silently lost."""
+        if self.cart_active and not self.sale_finished:
+            self._show_overlay(f"V {self._active_tab} is occupied — finish or clear its ticket first",
+                               kind="error")
+            return
         self._show_sale_at(sale_id)

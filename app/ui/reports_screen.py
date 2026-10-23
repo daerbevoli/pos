@@ -403,8 +403,9 @@ class ReportsScreen(QWidget):
         # Checked before the confirmation, so the cashier learns why up front.
         with get_session() as session:
             unsent = XZReportService.unsent_invoice_numbers(session)
-        if unsent:
-            self._warn_unsent_invoices(unsent)
+            open_slots = XZReportService.open_ticket_slots(session)
+        if unsent or open_slots:
+            self._warn_z_blocked(unsent, open_slots)
             return
 
         reply = QMessageBox.question(
@@ -415,12 +416,13 @@ class ReportsScreen(QWidget):
             return
 
         with get_session() as session:
-            # Re-checked inside close_z_report(): an invoice may have been
-            # created on another V-tab while the dialog was open.
+            # Re-checked inside close_z_report(): an invoice or ticket may
+            # have been started on another V-tab while the dialog was open.
             try:
                 z_report = XZReportService.close_z_report(session)
             except ValueError:
-                self._warn_unsent_invoices(XZReportService.unsent_invoice_numbers(session))
+                self._warn_z_blocked(XZReportService.unsent_invoice_numbers(session),
+                                     XZReportService.open_ticket_slots(session))
                 return
             try:
                 ReceiptService.print_z_report(session, z_report)
@@ -463,15 +465,15 @@ class ReportsScreen(QWidget):
             SalesService.mark_invoice_id_sent(session, invoice_id)
         self._load_report()
 
-    def _warn_unsent_invoices(self, invoice_numbers: list[str]):
-        QMessageBox.warning(
-            self, "Z Report Blocked",
-            "There are still open tickets on the pos. Clear them first "
-            + "\nand/or"
-            + "\nThese invoices haven't been sent to the ERP yet:\n\n"
-            + "\n".join(invoice_numbers)
-            + "\n\nSend them first."
-        )
+    def _warn_z_blocked(self, invoice_numbers: list[str], open_slots: list[int]):
+        parts = []
+        if open_slots:
+            tabs = ", ".join(f"V {slot}" for slot in open_slots)
+            parts.append(f"These V-tabs still have an open ticket:\n\n{tabs}\n\nPay or clear them first.")
+        if invoice_numbers:
+            parts.append("These invoices haven't been sent to the ERP yet:\n\n"
+                         + "\n".join(invoice_numbers) + "\n\nSend them first.")
+        QMessageBox.warning(self, "Z Report Blocked", "\n\n".join(parts))
 
     def _confirm(self):
         if self.sales_table.currentRow() != -1 and not self._display_sale():
