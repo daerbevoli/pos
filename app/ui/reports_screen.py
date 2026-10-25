@@ -5,17 +5,16 @@ Reports Screen
 - X report and Z report.
 """
 import json
-import logging
+from datetime import date, timedelta
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup, QMessageBox, QApplication
+    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup, QMessageBox, QComboBox,
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 
-from app.core.backup_service import KIND_PRE_Z, BackupError, BackupService
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.receipt_service import ReceiptService, PrinterError
@@ -23,10 +22,30 @@ from app.core.report_service import (
     XZReportService, invoice_category_breakdown, invoice_payment_breakdown, invoice_vat_breakdown, till_sales,
 )
 from app.models.models import Invoice, Sale
+from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
+from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_MD, SPACING_LG
 
-logger = logging.getLogger(__name__)
+
+# Range dropdown entries, in order (the index is the combo box index).
+RANGE_TODAY, RANGE_THIS_WEEK, RANGE_THIS_MONTH, RANGE_LAST_MONTH, RANGE_MANUAL = range(5)
+RANGE_LABELS = ("Today", "This week", "This month", "Last month", "Manual")
+
+
+def preset_range(preset: int, today: date) -> tuple[date, date]:
+    """(from, to) dates of a range dropdown preset, both inclusive. Weeks
+    start on Monday, as in Belgium."""
+    if preset == RANGE_TODAY:
+        return today, today
+    if preset == RANGE_THIS_WEEK:
+        return today - timedelta(days=today.weekday()), today
+    if preset == RANGE_THIS_MONTH:
+        return today.replace(day=1), today
+    if preset == RANGE_LAST_MONTH:
+        last_day = today.replace(day=1) - timedelta(days=1)
+        return last_day.replace(day=1), last_day
+    raise ValueError(f"No preset range for {preset!r}")
 
 
 def _make_card(title: str, value: str, bold: bool = False) -> tuple[QGroupBox, QLabel]:
@@ -53,7 +72,7 @@ class ReportsScreen(QWidget):
 
     def __init__(self):
         super().__init__()
-        # Invoices filter: once on, every reload (range buttons, Load Report, Z report, Mark sent) stays on until toggled off.
+        # Invoices filter: once on, every reload (range dropdown, Load Report, Z report, Mark sent) stays on until toggled off.
         self.overlay = TapToDismissOverlay(self)
         self.invoices_only = False
         self._build_ui()
@@ -79,32 +98,16 @@ class ReportsScreen(QWidget):
         self.date_to.setFixedHeight(REPORTS_BUTTON_HEIGHT)
         dates.addWidget(self.date_to)
 
-        self._range_group = QButtonGroup(self)
-        self._range_group.setExclusive(True)
+        # Presets fill in the dates and load at once; "Manual" unlocks the
+        # date pickers, then Load Report loads the chosen range.
+        self.range_combo = QComboBox()
+        self.range_combo.addItems(RANGE_LABELS)
+        self.range_combo.setFixedHeight(REPORTS_BUTTON_HEIGHT)
+        self.range_combo.currentIndexChanged.connect(self._set_range)
 
-        self.today_btn = QPushButton("Today")
-        self.today_btn.setObjectName("salesBtn")
-        self.today_btn.setCheckable(True)
-        self.today_btn.setChecked(True)
-        self.today_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
-        self.today_btn.clicked.connect(lambda: self._set_range(0))
-        self._range_group.addButton(self.today_btn)
-
-        last_7_days_btn = QPushButton("Last 7 days")
-        last_7_days_btn.setObjectName("salesBtn")
-        last_7_days_btn.setCheckable(True)
-        last_7_days_btn.setChecked(False)
-        last_7_days_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
-        last_7_days_btn.clicked.connect(lambda: self._set_range(7))
-        self._range_group.addButton(last_7_days_btn)
-
-        last_30_days_btn = QPushButton("Last 30 days")
-        last_30_days_btn.setObjectName("salesBtn")
-        last_30_days_btn.setCheckable(True)
-        last_30_days_btn.setChecked(False)
-        last_30_days_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
-        last_30_days_btn.clicked.connect(lambda: self._set_range(30))
-        self._range_group.addButton(last_30_days_btn)
+        z_reports_btn = FunctionButton("previous\n Z Reports", "primaryBtn")  # not ZRBtn red: it only views/reprints
+        z_reports_btn.setFixedHeight(REPORTS_BUTTON_HEIGHT)
+        z_reports_btn.clicked.connect(self._open_z_reports)
 
         load_btn = QPushButton("Load Report")
         load_btn.setObjectName("primaryBtn")
@@ -152,7 +155,7 @@ class ReportsScreen(QWidget):
 
         # Size every button to the widest one so the columns line up.
         buttons = [
-            self.today_btn, last_7_days_btn, last_30_days_btn, load_btn,
+            load_btn, z_reports_btn,
             self.sales_btn, vat_btn, cats_btn, self.invoices_btn,
             mark_sent_btn, x_report_btn, z_report_btn, self.btn_ok,
         ]
@@ -165,14 +168,13 @@ class ReportsScreen(QWidget):
         controls = QGridLayout()
         controls.setHorizontalSpacing(20)
         controls.addLayout(dates, 0, 0)
-        for col, (top, bottom) in enumerate([
-            (self.today_btn, self.sales_btn),
-            (last_7_days_btn, vat_btn),
-            (last_30_days_btn, cats_btn),
-            (load_btn, self.invoices_btn),
-        ], start=1):
-            controls.addWidget(top, 0, col)
-            controls.addWidget(bottom, 1, col)
+        # The dropdown spans the two columns the old range buttons used.
+        self.range_combo.setFixedWidth(2 * button_width + controls.horizontalSpacing())
+        controls.addWidget(self.range_combo, 0, 1, 1, 2)
+        controls.addWidget(z_reports_btn, 0, 3)
+        controls.addWidget(load_btn, 0, 4)
+        for col, btn in enumerate((self.sales_btn, vat_btn, cats_btn, self.invoices_btn), start=1):
+            controls.addWidget(btn, 1, col)
         controls.setColumnMinimumWidth(5, SPACING_LG)
         controls.addWidget(x_report_btn, 0, 6)
         controls.addWidget(z_report_btn, 0, 7)
@@ -258,17 +260,32 @@ class ReportsScreen(QWidget):
         vat_btn.clicked.connect(lambda: self._show_table("vat"))
         cats_btn.clicked.connect(lambda: self._show_table("categories"))
 
-    def _set_range(self, days: int):
-        today = QDate.currentDate()
-        self.date_to.setDate(today)
-        self.date_from.setDate(today.addDays(-days))
+    def _set_range(self, preset: int):
+        """A preset fills in its dates and loads; Manual just unlocks the
+        date pickers (keeping the dates shown) for Load Report."""
+        manual = preset == RANGE_MANUAL
+        self.date_from.setEnabled(manual)
+        self.date_to.setEnabled(manual)
+        if manual:
+            return
+        start, end = preset_range(preset, date.today())
+        self.date_from.setDate(start)
+        self.date_to.setDate(end)
         self._load_report()
+
+    def _open_z_reports(self):
+        ZReportsDialog(parent=self).exec()
 
     def showEvent(self, event):
         super().showEvent(event)
         self._load_today()
 
     def _load_today(self):
+        self.range_combo.blockSignals(True)  # loaded once, below
+        self.range_combo.setCurrentIndex(RANGE_TODAY)
+        self.range_combo.blockSignals(False)
+        self.date_from.setEnabled(False)
+        self.date_to.setEnabled(False)
         self.date_from.setDate(QDate.currentDate().toPyDate())
         self.date_to.setDate(QDate.currentDate().toPyDate())
         self._show_table("sales")
@@ -276,7 +293,6 @@ class ReportsScreen(QWidget):
         self.invoices_btn.setChecked(False)
         self._load_report()
         self.sales_btn.setChecked(True)
-        self.today_btn.setChecked(True)
 
 
     def _load_report(self):
@@ -418,26 +434,8 @@ class ReportsScreen(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        if not self._backup_before_z():
-            return
-
-        with get_session() as session:
-            # Re-checked inside close_z_report(): an invoice or ticket may
-            # have been started on another V-tab while the dialog was open.
-            try:
-                z_report = XZReportService.close_z_report(session)
-            except ValueError:
-                self._warn_z_blocked(XZReportService.unsent_invoice_numbers(session),
-                                     XZReportService.open_ticket_slots(session))
-                return
-            try:
-                ReceiptService.print_z_report(session, z_report)
-            except PrinterError as e:
-                QMessageBox.critical(
-                    self, "Printer Error",
-                    f"Z report {z_report.report_number} was saved successfully, "
-                    f"but printing failed:\n{e}"
-                )
+        dialog = ZReportProgressDialog(self)
+        dialog.exec()
         self._load_report()
 
     def _mark_invoice_sent(self):
@@ -470,33 +468,6 @@ class ReportsScreen(QWidget):
         with get_session() as session:
             SalesService.mark_invoice_id_sent(session, invoice_id)
         self._load_report()
-
-    def _backup_before_z(self) -> bool:
-        """A Z report purges every sale, so snapshot the DB first — the
-        pre-Z backup is the only copy of the sale lines left afterwards.
-        Runs on the UI thread on purpose: no sale may be rung up between the
-        snapshot and the purge. If it fails, the cashier decides whether to
-        go ahead anyway. Returns whether to continue with the Z report."""
-        with get_session() as session:
-            destinations = BackupService.destinations(session)
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            BackupService.create_backup(KIND_PRE_Z, destinations)
-        except BackupError as e:
-            error = str(e)
-        else:
-            return True  # folders that failed (USB unplugged) are logged as errors
-        finally:
-            QApplication.restoreOverrideCursor()
-        logger.error("Backup before Z report failed: %s", error)
-        reply = QMessageBox.question(
-            self, "Backup Failed",
-            f"Could not back up the sales before the Z report:\n{error}\n\n"
-            "Print the Z report anyway? The sales it clears can then not be recovered.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return reply == QMessageBox.StandardButton.Yes
 
     def _warn_z_blocked(self, invoice_numbers: list[str], open_slots: list[int]):
         parts = []

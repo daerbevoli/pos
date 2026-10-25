@@ -843,9 +843,11 @@ def test_search_by_shortcut_ignored_while_editing(screen):
     assert screen._shortcut_mode is False
 
 
-def test_cancel_in_display_mode_leaves_shortcut_grid(screen):
+def test_clear_in_display_mode_leaves_shortcut_grid_and_returns_to_pos(screen, qtbot):
     screen.detail_panel.btn_search_sc.click()
-    screen.detail_panel.btn_cancel.click()
+    with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
+        screen.detail_panel.btn_clear.click()
+    assert blocker.args == [0]
     assert screen.table_stack.currentWidget() is screen.table
 
 
@@ -863,14 +865,14 @@ def test_search_bar_hidden_while_editing_and_back_after_save(screen):
     assert not screen.category_filter.isHidden()
 
 
-def test_search_bar_back_after_cancelling_edit(screen):
+def test_search_bar_back_after_clearing_edit(screen):
     _add_product(name="Apple")
     screen.refresh()
     screen.table.selectRow(0)
     screen.detail_panel.btn_modify.click()
     screen._show_blank_page()
 
-    screen.detail_panel.btn_cancel.click()
+    screen.detail_panel.btn_clear.click()
     assert not screen.search_input.isHidden()
 
 

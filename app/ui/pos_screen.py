@@ -57,6 +57,11 @@ WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
 TABS = 5  # number of V-tabs, slots 1..TABS; MainWindow builds one tab button per slot
 
+# Marks the cells of a divider row, so _display_rows() can tell it apart
+# without guessing from its height: the table's minimum row height (from
+# font + QSS padding) is above the 3 px asked for, so Qt draws it taller.
+DIVIDER_ROLE = Qt.ItemDataRole.UserRole + 1
+
 
 def _cart_font(bold: bool) -> QFont:
     """The one font every cart row is drawn with, so all rows share a size."""
@@ -973,6 +978,7 @@ class POSScreen(QWidget):
         for c in range(4):
             cell = QTableWidgetItem("")
             cell.setBackground(QBrush(QColor(*(COLOR_ROW_DIVIDER_FROZEN if self._cart_frozen() else COLOR_ROW_DIVIDER))))
+            cell.setData(DIVIDER_ROLE, True)
             self.cart_table.setItem(r, c, cell)
         self.cart_table.setRowHeight(r, 3)
         self._row_to_entry.append(None)
@@ -1193,7 +1199,7 @@ class POSScreen(QWidget):
                 "background": (color.red(), color.green(), color.blue())
                     if brush.style() != Qt.BrushStyle.NoBrush else None,
                 "bold": bool(first is not None and first.font().bold()),
-                "divider": self.cart_table.rowHeight(r) < CART_ROW_HEIGHT,
+                "divider": bool(first is not None and first.data(DIVIDER_ROLE)),
             })
         return rows
 

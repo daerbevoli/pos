@@ -28,7 +28,7 @@ FORM_FIELD_HEIGHT = 24                 # article & client edit-form inputs and F
 FORM_LABEL_WIDTH = 100                 # label column of a FormField row (label left, input right)
 
 # ── Reports screen ───────────────────────────────────────────────────────
-REPORTS_BUTTON_HEIGHT = 40             # date pickers, quick-range buttons, report-type buttons, X/Z report & OK buttons
+REPORTS_BUTTON_HEIGHT = 40             # date pickers, range dropdown, report-type buttons, X/Z report & OK buttons
 REPORT_ROW_HEIGHT = 30                 # rows of the sales, VAT and categories tables
 
 # ── Settings screen ──────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height
 LOG_PANEL_MAX_LINES = 2000             # Logs tab: oldest lines are dropped beyond this (also the startup backlog size)
 
 # ── Dialogs ──────────────────────────────────────────────────────────────
-DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut, promo and backup dialogs;
+DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut, promo, backup and Z reports dialogs;
                                        # labels-per-page and Cancel buttons of the label sheet dialog
 NUMPAD_DIALOG_WIDTH = 300              # numpad dialog — min width
 NUMPAD_DIALOG_KEY_HEIGHT = 48          # numpad dialog keys and its display field — min height
@@ -53,6 +53,9 @@ PROMO_DIALOG_MIN_SIZE = (820, 520)     # promo dialog — min (width, height)
 LABEL_SHEET_DIALOG_WIDTH = 480         # label sheet (print barcodes) dialog — min width
 LABEL_SHEET_FIELD_HEIGHT = 24          # label sheet dialog name/manufacturer/lot/expiry/barcode inputs — min height
 BACKUP_DIALOG_MIN_SIZE = (760, 500)    # backup dialog — min (width, height)
+Z_REPORTS_DIALOG_MIN_SIZE = (700, 460) # Z reports (reprint) dialog — min (width, height)
+Z_PROGRESS_DIALOG_WIDTH = 480          # Z report progress popup (backup → close → backup → print) — min width
+Z_PROGRESS_BAR_HEIGHT = 32             # its progress bar
 
 # ── Tap-to-dismiss overlay (app/utils/utils.py) ──────────────────────────
 OVERLAY_CARD_MIN_WIDTH = 360           # message card shown over a screen (e.g. "Enter an amount first") — min width
@@ -92,6 +95,9 @@ __all__ = [
     "LABEL_SHEET_DIALOG_WIDTH",
     "LABEL_SHEET_FIELD_HEIGHT",
     "BACKUP_DIALOG_MIN_SIZE",
+    "Z_REPORTS_DIALOG_MIN_SIZE",
+    "Z_PROGRESS_DIALOG_WIDTH",
+    "Z_PROGRESS_BAR_HEIGHT",
     "OVERLAY_CARD_MIN_WIDTH",
     "OVERLAY_CARD_MAX_WIDTH",
 ]

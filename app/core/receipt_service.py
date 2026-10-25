@@ -10,6 +10,7 @@ import logging
 import os
 import platform
 import textwrap
+from datetime import datetime
 
 from PIL import Image
 from sqlalchemy.orm import Session
@@ -455,7 +456,9 @@ class ReceiptService:
             printer.close()
 
     @staticmethod
-    def print_z_report(session: Session, z_report: ZReport):
+    def print_z_report(session: Session, z_report: ZReport, reprint: bool = False):
+        """`reprint`: an earlier Z report printed again (Z reports dialog) —
+        titled as a copy, so it can't pass for a second closing."""
         settings = SettingsService.get_all(session)
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
@@ -471,7 +474,8 @@ class ReceiptService:
                 "mistakes": json.loads(z_report.mistakes) if z_report.mistakes else [],
             }
             printer.text("\n")
-            _print_report_header(printer, "Z-REPORT", z_report.report_number, z_report.period_start, z_report.period_end)
+            title = "Z-REPORT (COPY)" if reprint else "Z-REPORT"
+            _print_report_header(printer, title, z_report.report_number, z_report.period_start, z_report.period_end)
             _print_report_totals(printer, totals)
             _print_discounts(printer, totals)
             _print_mistakes(printer, totals)
@@ -479,9 +483,11 @@ class ReceiptService:
             printer.text("\n")
 
             printer.text(f"Printed on {z_report.period_end.strftime('%d/%m/%Y %H:%M')}")
+            if reprint:
+                printer.text(f"\nCopy printed on {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
             printer.cut(mode="PART")
-            logger.info("Z-report %s printed", z_report.report_number)
+            logger.info("Z-report %s %s", z_report.report_number, "reprinted" if reprint else "printed")
         except PrinterError:
             raise
         except Exception as e:

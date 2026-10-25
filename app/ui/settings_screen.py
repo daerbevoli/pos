@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
+from app.core.admin import ADMIN_CODE  # noqa: F401  (used by the commented-out code check in _admin)
 from app.core.database import get_session
 from app.core.erp_service import ErpService
 from app.core.label_service import LabelPrinterService
@@ -30,7 +31,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-ADMIN_CODE = "2060"
 
 
 class SettingsScreen(QWidget):

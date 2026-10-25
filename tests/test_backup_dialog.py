@@ -1,6 +1,7 @@
 """
-Tests for the backup UI: app.ui.dialogs.backup_dialog.BackupDialog and the
-pre-Z-report backup in ReportsScreen.
+Tests for the backup UI: app.ui.dialogs.backup_dialog.BackupDialog and
+BackupWorker. The Z report's backups are tested with its progress dialog
+(test_z_report_progress_dialog.py).
 
 patched_db points database.DB_PATH at a nonexistent file under tmp_path, so
 BackupService.default_backup_dir() is tmp_path/backups — nothing here
@@ -202,52 +203,22 @@ def test_backup_now_reports_failure(qtbot, patched_db, overlays):
     assert d.btn_backup.isEnabled()
 
 
-# ── Reports screen: backup before Z report ───────────────────────────────
+# ── Backup workers ───────────────────────────────────────────────────────
 
-@pytest.fixture
-def reports(qtbot, patched_db):
-    from app.ui.reports_screen import ReportsScreen
-    s = ReportsScreen()
-    qtbot.addWidget(s)
-    return s
-
-
-def test_z_report_is_backed_up_first(reports, monkeypatch):
-    kinds = []
-    monkeypatch.setattr(BackupService, "create_backup", lambda kind, dests: kinds.append(kind))
-    assert reports._backup_before_z() is True
-    assert kinds == ["pre-z"]
-
-
-def test_failed_pre_z_backup_lets_cashier_cancel(reports, monkeypatch):
-    def fail(kind, dests):
-        raise BackupError("disk full")
-    monkeypatch.setattr(BackupService, "create_backup", fail)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
-    assert reports._backup_before_z() is False
-
-
-def test_z_report_not_closed_when_backup_fails_and_cashier_declines(reports, monkeypatch):
-    answers = iter([QMessageBox.StandardButton.Yes,   # print the Z report?
-                    QMessageBox.StandardButton.No])   # backup failed — continue anyway?
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: next(answers))
+def test_wait_for_all_waits_for_every_running_backup(qtbot, patched_db, monkeypatch):
+    import threading
+    from app.core.backup_worker import BackupWorker
+    release = threading.Event()
     monkeypatch.setattr(BackupService, "create_backup",
-                        lambda kind, dests: (_ for _ in ()).throw(BackupError("disk full")))
-    closed = []
-    monkeypatch.setattr("app.ui.reports_screen.XZReportService.close_z_report",
-                        lambda session: closed.append(True))
+                        lambda *a, **k: release.wait(5))
+    workers = [BackupWorker("daily", []), BackupWorker("post-z", [])]
+    for w in workers:
+        w.start()
+    threading.Timer(0.2, release.set).start()
 
-    reports._print_z_report()
+    BackupWorker.wait_for_all()
 
-    assert closed == []
-
-
-def test_failed_pre_z_backup_can_be_overridden(reports, monkeypatch):
-    def fail(kind, dests):
-        raise BackupError("disk full")
-    monkeypatch.setattr(BackupService, "create_backup", fail)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    assert reports._backup_before_z() is True
+    assert not any(w.isRunning() for w in workers)
 
 
 def test_patched_db_keeps_backups_out_of_the_real_folder(patched_db, tmp_path):

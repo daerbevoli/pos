@@ -30,8 +30,9 @@ logger = logging.getLogger(__name__)
 
 _KIND_LABELS = {
     "manual": "Manual",
-    "daily": "Daily (automatic)",
+    "daily": "Daily (noon)",
     "pre-z": "Before Z report",
+    "post-z": "After Z report",
     "pre-restore": "Before restore",
 }
 

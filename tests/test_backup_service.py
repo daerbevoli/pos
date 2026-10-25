@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 import app.core.database as database
 from app.core import backup_key
 from app.core.backup_service import (
-    DB_MEMBER, ENC_MEMBER, KIND_DAILY, KIND_MANUAL, KIND_PRE_RESTORE, KIND_PRE_Z,
+    DB_MEMBER, ENC_MEMBER, KIND_DAILY, KIND_MANUAL, KIND_POST_Z, KIND_PRE_RESTORE, KIND_PRE_Z,
     MANIFEST_MEMBER, RETENTION, BackupError, BackupPasswordError, BackupService, archive_name,
 )
 from app.models.models import Base, Category, ZReport
@@ -229,12 +229,33 @@ def test_prune_clears_only_stale_partial_files(tmp_path):
     assert BackupService.prune(tmp_path, now=fresh_now + timedelta(hours=2)) == [stale]
 
 
-def test_backup_is_due_after_a_day_of_any_kind(tmp_path):
-    now = datetime(2026, 10, 24, 12)
-    assert BackupService.is_backup_due(tmp_path, now)
-    _touch_backup(tmp_path, now - timedelta(hours=3), KIND_MANUAL)
-    assert not BackupService.is_backup_due(tmp_path, now)
-    assert BackupService.is_backup_due(tmp_path, now + timedelta(hours=22))
+def test_daily_backup_is_due_from_noon_until_taken(tmp_path):
+    day = datetime(2026, 10, 24)
+    assert not BackupService.daily_backup_due(tmp_path, day.replace(hour=11, minute=59))
+    assert BackupService.daily_backup_due(tmp_path, day.replace(hour=12))
+    assert BackupService.daily_backup_due(tmp_path, day.replace(hour=17))  # POS started late: catch up
+
+    _touch_backup(tmp_path, day.replace(hour=12, second=5), KIND_DAILY)
+    assert not BackupService.daily_backup_due(tmp_path, day.replace(hour=18))
+    # Next day: not before noon, then due again.
+    assert not BackupService.daily_backup_due(tmp_path, day.replace(day=25, hour=9))
+    assert BackupService.daily_backup_due(tmp_path, day.replace(day=25, hour=12))
+
+
+def test_other_kinds_or_a_morning_daily_do_not_count_as_the_noon_backup(tmp_path):
+    day = datetime(2026, 10, 24)
+    _touch_backup(tmp_path, day.replace(hour=13), KIND_MANUAL)
+    _touch_backup(tmp_path, day.replace(hour=13, minute=1), KIND_PRE_Z)
+    _touch_backup(tmp_path, day.replace(hour=13, minute=2), KIND_POST_Z)
+    _touch_backup(tmp_path, day.replace(hour=11), KIND_DAILY)
+    assert BackupService.daily_backup_due(tmp_path, day.replace(hour=14))
+
+
+def test_post_z_backups_are_pruned_to_their_retention(tmp_path):
+    keep = RETENTION[KIND_POST_Z]
+    start = datetime(2026, 1, 1, 20)
+    made = [_touch_backup(tmp_path, start + timedelta(days=i), KIND_POST_Z) for i in range(keep + 2)]
+    assert sorted(BackupService.prune(tmp_path)) == sorted(made[:2])
 
 
 # ── Restoring ────────────────────────────────────────────────────────────
@@ -436,3 +457,11 @@ def test_stored_password_is_not_kept_in_plain_text_on_windows(live_db):
     BackupService.set_password(PASSWORD)
     assert PASSWORD.encode() not in backup_key.key_path().read_bytes()
     assert backup_key.load() == PASSWORD
+
+
+def test_backup_progress_only_goes_up_and_ends_complete(live_db, tmp_path):
+    seen = []
+    BackupService.create_backup(KIND_MANUAL, [tmp_path / "a", tmp_path / "b"],
+                                db_path=live_db[0], password=PASSWORD, progress=seen.append)
+    assert seen == sorted(seen)
+    assert seen[-1] == 1.0 and 0 < seen[0] < 1

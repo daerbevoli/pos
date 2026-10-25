@@ -53,7 +53,7 @@ import zipfile
 import zlib
 from contextlib import closing
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
@@ -67,10 +67,11 @@ from app.core.settings_service import SettingsService
 logger = logging.getLogger(__name__)
 
 KIND_MANUAL = "manual"            # "Backup now" in the Backup dialog
-KIND_DAILY = "daily"              # automatic, once a day while the POS runs
+KIND_DAILY = "daily"              # automatic, once a day from DAILY_BACKUP_TIME
 KIND_PRE_Z = "pre-z"              # right before a Z report purges the sales
+KIND_POST_Z = "post-z"            # right after: the new Z report and its number
 KIND_PRE_RESTORE = "pre-restore"  # the data a restore is about to replace
-KINDS = (KIND_MANUAL, KIND_DAILY, KIND_PRE_Z, KIND_PRE_RESTORE)
+KINDS = (KIND_MANUAL, KIND_DAILY, KIND_PRE_Z, KIND_POST_Z, KIND_PRE_RESTORE)
 
 # How many of each kind to keep per backup folder; older ones are deleted
 # after each successful backup. None = never deleted automatically: manual
@@ -78,12 +79,14 @@ KINDS = (KIND_MANUAL, KIND_DAILY, KIND_PRE_Z, KIND_PRE_RESTORE)
 RETENTION = {
     KIND_DAILY: 14,
     KIND_PRE_Z: 90,   # the only remaining copy of each day's purged sale lines
+    KIND_POST_Z: 30,  # only the latest matters for a restore; a month for slack
     KIND_MANUAL: None,
     KIND_PRE_RESTORE: None,
 }
 
-# A newer backup of any kind than this counts as "today's" daily backup.
-DAILY_INTERVAL = timedelta(hours=24)
+# The daily backup is taken at this time — or, if the POS wasn't running
+# then, as soon as it is that day.
+DAILY_BACKUP_TIME = time(12, 0)
 
 BACKUP_SETTING_EXTRA_DIR = "backup_extra_dir"  # optional second folder (USB / network share)
 
@@ -113,6 +116,13 @@ _NAME_RE = re.compile(
 )
 _STAMP_FORMAT = "%Y%m%d-%H%M%S"
 _CHUNK = 1024 * 1024
+# The snapshot copies this many pages per step, reporting progress between
+# steps. SQLite keeps the result consistent: if another connection writes
+# meanwhile, the copy restarts.
+_SNAPSHOT_STEP_PAGES = 256
+# Share of create_backup()'s progress (0..1) spent on each phase; the rest
+# is split evenly over the destinations.
+_PROGRESS_SNAPSHOT, _PROGRESS_PREPARED = 0.4, 0.5
 
 # One backup/restore at a time, whichever thread asked: the daily worker, a
 # manual backup and a pre-Z backup must not race on the same folder. An RLock
@@ -216,14 +226,17 @@ class BackupService:
 
     @staticmethod
     def create_backup(kind: str, destinations: list[Path], db_path=None,
-                      password=STORED_PASSWORD) -> BackupResult:
+                      password=STORED_PASSWORD, progress=None) -> BackupResult:
         """Snapshot the DB and write a verified archive into each destination,
         encrypted if a password is set (or given; None = unencrypted).
+        `progress`, if given, is called with 0..1 as the work advances (from
+        the calling thread — a worker emits it as a signal).
 
         A destination that fails (USB stick missing, disk full...) is logged
         and reported in the result's `failures`; the others still get their
         copy. Raises BackupError if the snapshot itself fails, the stored
         password can't be read, or no destination could be written."""
+        report = progress or (lambda fraction: None)
         if kind not in KINDS:
             raise ValueError(f"Unknown backup kind {kind!r}")
         db_path = Path(db_path or database.DB_PATH)
@@ -243,7 +256,8 @@ class BackupService:
             with tempfile.TemporaryDirectory(prefix="superpos-backup-") as tmp:
                 snapshot = Path(tmp) / DB_MEMBER
                 try:
-                    _snapshot(db_path, snapshot)
+                    _snapshot(db_path, snapshot, lambda f: report(f * _PROGRESS_SNAPSHOT))
+                    report(_PROGRESS_SNAPSHOT)
                     if password is None:
                         manifest = _plain_manifest(snapshot, kind, created_at)
                         payload, member = snapshot, DB_MEMBER
@@ -255,9 +269,10 @@ class BackupService:
                     logger.exception("Backup (%s): snapshot of %s failed", kind, db_path)
                     raise BackupError(f"Could not read the database: {e}") from e
 
+                report(_PROGRESS_PREPARED)
                 result = BackupResult(manifest=manifest)
                 name = archive_name(created_at, kind)
-                for dest in destinations:
+                for i, dest in enumerate(destinations, start=1):
                     dest = Path(dest)
                     try:
                         path = _write_archive(payload, member, manifest, dest, name, password)
@@ -265,6 +280,8 @@ class BackupService:
                         logger.error("Backup (%s) to %s failed: %s", kind, dest, e)
                         result.failures[str(dest)] = str(e)
                         continue
+                    finally:
+                        report(_PROGRESS_PREPARED + (1 - _PROGRESS_PREPARED) * i / len(destinations))
                     result.archives.append(path)
                     logger.info("Backup (%s, %s) written: %s (%d bytes)", kind,
                                 "encrypted" if password else "NOT encrypted",
@@ -311,12 +328,16 @@ class BackupService:
         return backups[0] if backups else None
 
     @staticmethod
-    def is_backup_due(directory, now: datetime = None) -> bool:
-        """True if `directory` holds no backup taken within DAILY_INTERVAL.
-        Any kind counts: a manual or pre-Z backup an hour ago is just as good."""
-        latest = BackupService.latest_backup(directory)
+    def daily_backup_due(directory, now: datetime = None) -> bool:
+        """True from DAILY_BACKUP_TIME on, until today's daily backup is in
+        `directory`. Before that time, never — so it runs once a day, at
+        noon, or at the first chance after it if the POS was off then."""
         now = now or datetime.now()
-        return latest is None or now - latest.created_at >= DAILY_INTERVAL
+        due_from = datetime.combine(now.date(), DAILY_BACKUP_TIME)
+        if now < due_from:
+            return False
+        return not any(b.kind == KIND_DAILY and b.created_at >= due_from
+                       for b in BackupService.list_backups(directory))
 
     @staticmethod
     def prune(directory, now: datetime = None) -> list[Path]:
@@ -464,12 +485,17 @@ def archive_name(created_at: datetime, kind: str) -> str:
 
 # ── Internals ────────────────────────────────────────────────────────────
 
-def _snapshot(src_path: Path, dst_path: Path):
+def _snapshot(src_path: Path, dst_path: Path, progress=None):
     """Consistent copy of the live DB (WAL contents included) via SQLite's
-    online backup API, made standalone (no -wal file) and integrity-checked."""
+    online backup API, made standalone (no -wal file) and integrity-checked.
+    `progress` gets 0..1 between copy steps."""
+    def on_step(status, remaining, total):
+        if progress and total:
+            progress(1 - remaining / total)
+
     with closing(sqlite3.connect(src_path, timeout=30)) as src, \
             closing(sqlite3.connect(dst_path)) as dst:
-        src.backup(dst)
+        src.backup(dst, pages=_SNAPSHOT_STEP_PAGES, progress=on_step)
         dst.execute("PRAGMA journal_mode=DELETE")
         _check_integrity(dst)
         missing = REQUIRED_TABLES - set(_row_counts(dst))

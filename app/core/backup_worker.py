@@ -21,10 +21,34 @@ class BackupWorker(QThread):
     succeeded = pyqtSignal(object)  # BackupResult
     failed = pyqtSignal(str)
 
+    # Every worker that was started, whichever screen started it (daily,
+    # manual, after-Z), so quitting can wait for all of them.
+    _started: "set[BackupWorker]" = set()
+
     def __init__(self, kind, destinations, parent=None):
         super().__init__(parent)
         self.kind = kind
         self.destinations = destinations
+        self.finished.connect(lambda: BackupWorker._started.discard(self))
+
+    def start(self, *args, **kwargs):
+        BackupWorker._started.add(self)
+        super().start(*args, **kwargs)
+
+    @staticmethod
+    def wait_for_all():
+        """Block until every running backup is done. Called on quit: a
+        destroyed running QThread aborts the process, and an interrupted
+        backup would only leave a .partial file behind anyway."""
+        for worker in list(BackupWorker._started):
+            try:
+                running = worker.isRunning()
+            except RuntimeError:  # its parent widget (and so the QThread) is already gone
+                BackupWorker._started.discard(worker)
+                continue
+            if running:
+                logger.info("Waiting for the running %s backup to finish", worker.kind)
+                worker.wait()
 
     def run(self):
         try:

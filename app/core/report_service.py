@@ -259,6 +259,11 @@ class XZReportService:
         return [slot for (slot,) in rows]
 
     @staticmethod
+    def all_z_reports(session: Session) -> list[ZReport]:
+        """Every closed Z report, newest first."""
+        return session.query(ZReport).order_by(ZReport.id.desc()).all()
+
+    @staticmethod
     def close_z_report(session: Session) -> ZReport:
         """Snapshot current sales into a new ZReport row, then purge them.
         Runs as one transaction: the snapshot and the purge succeed or fail

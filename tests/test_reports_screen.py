@@ -259,10 +259,45 @@ def test_invoices_only_toggle_back(screen):
     assert screen.sales_table.rowCount() == 1
 
 
-def test_set_range_updates_dates(screen):
-    screen._set_range(7)
-    assert screen.date_from.date() == QDate.currentDate().addDays(-7)
-    assert screen.date_to.date() == QDate.currentDate()
+def test_preset_ranges():
+    from datetime import date
+    from app.ui.reports_screen import (
+        RANGE_LAST_MONTH, RANGE_THIS_MONTH, RANGE_THIS_WEEK, RANGE_TODAY, preset_range,
+    )
+    saturday = date(2026, 10, 24)
+    assert preset_range(RANGE_TODAY, saturday) == (saturday, saturday)
+    assert preset_range(RANGE_THIS_WEEK, saturday) == (date(2026, 10, 19), saturday)  # from Monday
+    assert preset_range(RANGE_THIS_MONTH, saturday) == (date(2026, 10, 1), saturday)
+    assert preset_range(RANGE_LAST_MONTH, saturday) == (date(2026, 9, 1), date(2026, 9, 30))
+    # Across a year boundary, and a month of 31 days.
+    assert preset_range(RANGE_LAST_MONTH, date(2027, 1, 15)) == (date(2026, 12, 1), date(2026, 12, 31))
+
+
+def test_choosing_a_preset_fills_in_the_dates_and_locks_them(screen):
+    from app.ui.reports_screen import RANGE_THIS_MONTH
+    screen.range_combo.setCurrentIndex(RANGE_THIS_MONTH)
+    today = QDate.currentDate()
+    assert screen.date_from.date() == QDate(today.year(), today.month(), 1)
+    assert screen.date_to.date() == today
+    assert not screen.date_from.isEnabled() and not screen.date_to.isEnabled()
+
+
+def test_manual_unlocks_the_dates_and_keeps_them(screen):
+    from app.ui.reports_screen import RANGE_MANUAL, RANGE_THIS_WEEK
+    screen.range_combo.setCurrentIndex(RANGE_THIS_WEEK)
+    shown_from = screen.date_from.date()
+    screen.range_combo.setCurrentIndex(RANGE_MANUAL)
+    assert screen.date_from.isEnabled() and screen.date_to.isEnabled()
+    assert screen.date_from.date() == shown_from
+
+
+def test_showing_the_screen_resets_to_today(screen):
+    from app.ui.reports_screen import RANGE_MANUAL, RANGE_TODAY
+    screen.range_combo.setCurrentIndex(RANGE_MANUAL)
+    screen._load_today()
+    assert screen.range_combo.currentIndex() == RANGE_TODAY
+    assert screen.date_from.date() == QDate.currentDate()
+    assert not screen.date_from.isEnabled()
 
 
 def test_confirm_emits_navigate_signal(screen, qtbot):
@@ -639,7 +674,7 @@ def test_mark_sent_works_on_invoice_without_sale(screen, monkeypatch):
         assert session.get(Invoice, invoice.id).sent_at is not None
 
 
-def test_invoices_filter_survives_range_buttons_and_load(screen):
+def test_invoices_filter_survives_range_dropdown_and_load(screen):
     with get_session() as session:
         product = _make_product(session)
     _finalize_sale(product)
@@ -649,7 +684,8 @@ def test_invoices_filter_survives_range_buttons_and_load(screen):
     assert screen.invoices_btn.isChecked()
     assert screen.sales_table.rowCount() == 1
 
-    screen._set_range(7)
+    from app.ui.reports_screen import RANGE_THIS_WEEK
+    screen.range_combo.setCurrentIndex(RANGE_THIS_WEEK)
     assert screen.sales_table.rowCount() == 1
     screen._load_report()
     assert screen.sales_table.rowCount() == 1

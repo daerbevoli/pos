@@ -33,11 +33,11 @@ from app.constants import (
 
 MAX_VTABS = TABS  # one source of truth: POSScreen keeps a state slot per V-tab
 
-# The daily backup is checked shortly after startup (not during it, so the
-# window comes up first), then every hour: a till left running for days
-# still gets one backup a day.
-BACKUP_FIRST_CHECK_MS = 60_000
-BACKUP_CHECK_INTERVAL_MS = 60 * 60_000
+# Checked every minute whether the daily (noon) backup is due — see
+# BackupService.daily_backup_due(). Polling rather than one timer aimed at
+# noon keeps it right across sleep/hibernate and clock changes, and catches
+# up when the POS is started after noon. The check only lists one folder.
+BACKUP_CHECK_INTERVAL_MS = 60_000
 
 logger = logging.getLogger(__name__)
 
@@ -263,28 +263,20 @@ class MainWindow(QMainWindow):
     # ── Automatic backup ──────────────────────────────────────────────────────
 
     def _start_backup_schedule(self):
-        QTimer.singleShot(BACKUP_FIRST_CHECK_MS, self._maybe_daily_backup)
         self._backup_timer = QTimer(self)
         self._backup_timer.timeout.connect(self._maybe_daily_backup)
         self._backup_timer.start(BACKUP_CHECK_INTERVAL_MS)
-        QApplication.instance().aboutToQuit.connect(self._finish_backup)
-
-    def _finish_backup(self):
-        """Let a running backup finish rather than kill its thread on quit —
-        it only ever leaves a .partial file behind, but a destroyed running
-        QThread aborts the process."""
-        if self._backup_worker is not None and self._backup_worker.isRunning():
-            logger.info("Waiting for the running backup to finish before quitting")
-            self._backup_worker.wait()
+        QApplication.instance().aboutToQuit.connect(BackupWorker.wait_for_all)
 
     def _maybe_daily_backup(self):
-        """Back up in the background if the local folder has nothing from
-        the last 24h. A failure shows up in the error badge via the log."""
+        """Take today's noon backup in the background, if it's due (see
+        BackupService.daily_backup_due()). A failure shows up in the error
+        badge via the log, and it's tried again on the next check."""
         if self._backup_worker is not None and self._backup_worker.isRunning():
             return
         with get_session() as session:
             destinations = BackupService.destinations(session)
-        if not BackupService.is_backup_due(destinations[0]):
+        if not BackupService.daily_backup_due(destinations[0]):
             return
         self._backup_worker = BackupWorker(KIND_DAILY, destinations, parent=self)
         self._backup_worker.failed.connect(

@@ -18,12 +18,15 @@ class NumpadDialog(QDialog):
 
     enter_pressed = pyqtSignal(bool)
 
-    def __init__(self, title="Enter value", initial="", parent=None):
+    def __init__(self, title="Enter value", initial="", parent=None, masked: bool = False):
+        """`masked`: show dots instead of the digits, for codes."""
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(NUMPAD_DIALOG_WIDTH)
         self.value = None
         self._build_ui(initial)
+        if masked:
+            self.display.setEchoMode(QLineEdit.EchoMode.Password)
         self.enter_pressed.connect(self._confirm)
 
     def keyPressEvent(self, event):
