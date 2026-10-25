@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.constants.countries import BELGIUM
 from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket, NumberSequence
 from app.core.product_service import ProductService
 
@@ -433,6 +434,10 @@ def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
     for row in session.query(OpenTicket).all():
         cart = Cart.from_snapshot(row.cart_snapshot)
         cart.is_refund = bool(row.is_refund)
+        # The snapshot holds only the lines; lines added after recovery must
+        # still get the attached client's VAT treatment (see set_client()).
+        client = session.get(Client, row.client_id) if row.client_id else None
+        cart.is_domestic = client is None or client.country == BELGIUM
         drafts[row.vtab_slot] = OpenTicketData(
             cart=cart,
             is_invoice=row.is_invoice,
@@ -485,7 +490,7 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
         lines.append(InvoiceLine(
             product_name=entry.product_name,
             quantity=entry.quantity,
-            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 2),
+            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 3),
             unit=entry.unit,
             tax_rate=entry.tax_rate,
             line_total_excl_tax=round(net_total - tax, 2),
@@ -531,8 +536,10 @@ def generate_invoice_data(invoice: Invoice) -> dict:
     # ── Reports / Queries ─────────────────────────────────────────────────────
 
 # Highest number in a series before it wraps back to 1; also sets the
-# zero-padded width ("S-ddmmyy-0042", "I-ddmmyy-042").
-SALE_NUMBER_MAX = 9999     # S- / RF-
+# zero-padded width ("S-ddmmyy-042", "I-ddmmyy-042"). The date keeps a
+# number unique across days, so this caps S- (and RF-) tickets per day:
+# once all 999 of today's are in use, _next_number() refuses the next one.
+SALE_NUMBER_MAX = 999      # S- / RF-
 INVOICE_NUMBER_MAX = 999   # I- / CN-
 
 
@@ -601,7 +608,7 @@ class SalesService:
 
     @staticmethod
     def _generate_sale_number(session: Session, prefix: str = "S") -> str:
-        """Sales (S-) and refunds (RF-) each run their own 0001..9999 sequence,
+        """Sales (S-) and refunds (RF-) each run their own 001..999 sequence,
         restarted by every Z report (see reset_sale_sequences())."""
         return SalesService._next_number(session, prefix, Sale.sale_number, SALE_NUMBER_MAX)
 
@@ -616,7 +623,7 @@ class SalesService:
 
     @staticmethod
     def reset_sale_sequences(session: Session) -> None:
-        """Called by the Z report: the next sale/refund starts again at 0001.
+        """Called by the Z report: the next sale/refund starts again at 001.
         Not committed here — it's part of the Z report's transaction."""
         for series in ("S", "RF"):
             row = session.get(NumberSequence, series)
@@ -726,6 +733,7 @@ class SalesService:
             line_items_snapshot=cart.to_snapshot(),
             payment_method=sale.payment_method,
             payment_breakdown=sale.payment_breakdown,
+            change_given=sale.change_given,
         )
 
     @staticmethod
@@ -758,6 +766,12 @@ class SalesService:
             logger.warning("Sale update refused: %s's invoice %s was already sent",
                            sale.sale_number, sale.invoice.invoice_number)
             raise ValueError("This invoice has already been sent and can no longer be edited.")
+        # Checked before anything below changes stock or items, so a refusal
+        # leaves the session exactly as it found it.
+        client = session.query(Client).filter_by(id=client_id).first() if client_id else None
+        if client_id and not client:
+            logger.warning("Sale update refused: %s, client %s not found", sale.sale_number, client_id)
+            raise ValueError("An invoice requires a valid client.")
         old_total = sale.final_amount
 
         # Restore stock from the old line items before replacing them.
@@ -792,10 +806,6 @@ class SalesService:
         # Not-yet-sent invoice: keep its frozen snapshot in step with the
         # edit instead of letting it go stale (see the comment on
         # Invoice.issued_at) — a sent one was already rejected above.
-        client = session.query(Client).filter_by(id=client_id).first() if client_id else None
-        if client_id and not client:
-            logger.warning("Sale update refused: %s, client %s not found", sale.sale_number, client_id)
-            raise ValueError("An invoice requires a valid client.")
         new_invoice = None
         if sale.invoice is None and client is not None:
             # Reopened receipt/refund turned into an invoice/credit note.
@@ -818,6 +828,7 @@ class SalesService:
             sale.invoice.line_items_snapshot = cart.to_snapshot()
             sale.invoice.payment_method = sale.payment_method
             sale.invoice.payment_breakdown = sale.payment_breakdown
+            sale.invoice.change_given = sale.change_given
 
         session.commit()
         session.refresh(sale)

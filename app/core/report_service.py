@@ -44,13 +44,28 @@ def _payment_breakdown(sale) -> list[dict]:
     return [{"method": sale.payment_method, "amount": sale.final_amount}]
 
 
+def _change_to_deduct(source) -> float:
+    """The change handed back on a sale/invoice, which its stored breakdown
+    still includes (it records what was tendered). Zero when there's no
+    breakdown: the fallback leg is final_amount, already net of change."""
+    if not source.payment_breakdown:
+        return 0.0
+    change = getattr(source, "change_given", None) or 0.0
+    return change if change > 0 else 0.0
+
+
 def _sum_payment_breakdowns(sources) -> list[dict]:
-    """Per-method totals over sales (or invoices — same payment fields)."""
+    """Per-method totals over sales (or invoices — same payment fields) of
+    what was actually taken in: the change goes back out of the method the
+    sale was settled with (the POS allows only one method per sale)."""
     payment_totals: dict[str, float] = {}
     for source in sources:
         for leg in _payment_breakdown(source):
             method = leg.get("method", "unknown")
             payment_totals[method] = payment_totals.get(method, 0.0) + leg.get("amount", 0.0)
+        change = _change_to_deduct(source)
+        if change:
+            payment_totals[source.payment_method] = payment_totals.get(source.payment_method, 0.0) - change
     return [
         {"method": method, "amount": round(amount, 2)}
         for method, amount in payment_totals.items()
@@ -58,7 +73,10 @@ def _sum_payment_breakdowns(sources) -> list[dict]:
 
 
 def _amount_for_method(sale, method: str) -> float:
-    return sum(leg.get("amount", 0.0) for leg in _payment_breakdown(sale) if leg.get("method") == method)
+    amount = sum(leg.get("amount", 0.0) for leg in _payment_breakdown(sale) if leg.get("method") == method)
+    if method == sale.payment_method:
+        amount -= _change_to_deduct(sale)
+    return amount
 
 
 def _vat_breakdown(lines) -> dict:

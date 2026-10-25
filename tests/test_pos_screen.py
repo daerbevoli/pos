@@ -1403,3 +1403,64 @@ def test_send_invoice_result_clears_in_progress(screen):
     screen._invoice_send_in_progress = True
     screen._on_invoice_send_failed("boom")
     assert screen._invoice_send_in_progress is False
+
+
+# ── Client VAT treatment survives browsing / reopening / recovery ────────
+
+def _make_client(name, country, vat):
+    with get_session() as session:
+        return ClientService.create(
+            session, name=name, vatNumber=vat, street=f"1 {name} St", zip_code="1000", city="City", country=country,
+        ).id
+
+
+def test_reopening_a_browsed_foreign_invoice_keeps_new_lines_zero_rated(screen):
+    """Regression: browsing back to an EU invoice and reopening it reset the
+    cart to domestic, so a line added then got Belgian VAT and price."""
+    client_id = _make_client("Foreign Co", "FR", "FR1")
+    _, barcode, _ = _add_product(barcode="dom1", price=10.0, tax=21)
+    _scan(screen, barcode)
+    screen.set_client(client_id, "Foreign Co")
+    screen._open_payment("card")
+    invoice_sale_id = screen._current_sale_id
+
+    screen._clear_cart(override=True)
+    _scan(screen, barcode)
+    screen._open_payment("card")  # a later receipt, so there's something to browse back from
+    screen._previous_sale()
+    assert screen._current_sale_id == invoice_sale_id
+
+    screen._reopen_ticket()
+    _scan(screen, barcode)
+
+    added = screen.cart.entries[-1]
+    assert (added.tax_rate, added.unit_price) == (0, 8.26)
+    assert (screen.is_invoice, screen.client_id) == (True, client_id)
+
+
+def test_reopening_a_browsed_receipt_after_an_invoice_stays_a_domestic_receipt(screen):
+    """Regression: the frozen invoice's client stayed attached while browsing
+    back to an earlier receipt, so reopening and repaying it turned the
+    receipt into an invoice for that client, with zero-rated new lines."""
+    client_id = _make_client("Foreign Co", "FR", "FR1")
+    _, barcode, _ = _add_product(barcode="dom2", price=10.0, tax=21)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    receipt_id = screen._current_sale_id
+
+    screen._clear_cart(override=True)
+    _scan(screen, barcode)
+    screen.set_client(client_id, "Foreign Co")
+    screen._open_payment("card")
+
+    screen._previous_sale()
+    assert screen._current_sale_id == receipt_id
+    screen._reopen_ticket()
+    _scan(screen, barcode)
+    added = screen.cart.entries[-1]
+    assert (added.tax_rate, added.unit_price) == (21, 10.0)
+    assert (screen.is_invoice, screen.client_id) == (False, None)
+
+    screen._open_payment("cash")
+    with get_session() as session:
+        assert session.get(Sale, receipt_id).invoice is None

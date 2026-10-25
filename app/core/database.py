@@ -86,6 +86,14 @@ _COLUMN_MIGRATIONS: list[_ColumnMigration] = [
         why="Per-method split of the invoice's payment (JSON), snapshotted "
             "alongside payment_method for the same reason.",
     ),
+    _ColumnMigration(
+        "invoices", "change_given", "FLOAT",
+        why="payment_breakdown records what was tendered, so the reports take "
+            "the change back off the invoice's cash/card totals — and after a Z "
+            "report purges the sale, this snapshot is the only place it's kept. "
+            "Backfilled from the sale where it still exists "
+            "(_backfill_invoice_change).",
+    ),
 ]
 
 
@@ -98,6 +106,21 @@ def _run_migrations():
     with ENGINE.connect() as conn:
         for migration in _COLUMN_MIGRATIONS:
             _add_column_if_missing(conn, migration.table, migration.column, migration.sql_type)
+        _backfill_invoice_change(conn)
+
+
+def _backfill_invoice_change(conn):
+    """Copies change_given onto invoices issued before the column existed
+    whose sale hasn't been purged yet. Only fills NULLs, so it's a no-op once
+    done; an invoice whose sale is gone stays NULL (counted as no change)."""
+    if "change_given" not in _table_columns(conn, "invoices"):
+        return
+    conn.exec_driver_sql(
+        "UPDATE invoices SET change_given = "
+        "(SELECT sales.change_given FROM sales WHERE sales.id = invoices.sale_id) "
+        "WHERE change_given IS NULL AND sale_id IS NOT NULL"
+    )
+    conn.commit()
 
 
 def _table_columns(conn, table: str) -> set[str]:

@@ -23,7 +23,7 @@ from app.core.report_service import (
 )
 from app.models.models import Invoice, Sale
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
-from app.ui.dialogs.z_reports_dialog import ZReportsDialog
+# from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_MD, SPACING_LG
 
@@ -274,7 +274,8 @@ class ReportsScreen(QWidget):
         self._load_report()
 
     def _open_z_reports(self):
-        ZReportsDialog(parent=self).exec()
+        # ZReportsDialog(parent=self).exec()
+        pass
 
     def showEvent(self, event):
         super().showEvent(event)

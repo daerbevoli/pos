@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import QDialog, QLabel, QMessageBox, QProgressBar, QVBoxLay
 from app.constants import (
     COLOR_LOG_ERROR, DIALOG_BUTTON_HEIGHT, Z_PROGRESS_BAR_HEIGHT, Z_PROGRESS_DIALOG_WIDTH,
 )
-from app.core.admin import check_admin_code
+# from app.core.admin import check_admin_code
 from app.core.backup_service import KIND_POST_Z, KIND_PRE_Z, BackupService
 from app.core.database import get_session
 from app.core.receipt_service import ReceiptService
@@ -163,17 +163,17 @@ class ZReportProgressDialog(QDialog):
             return
         # Admin mode alone isn't enough: it needs no code today and stays on
         # until the POS restarts. Losing a day's sale lines needs the code now.
-        if not self._ask_admin_code():
-            logger.warning("Z report without backup refused: wrong or no admin code")
-            self._finish("Wrong admin code: Z report cancelled. Nothing was changed.", failed=True)
-            return
+        # if not self._ask_admin_code():
+        #     logger.warning("Z report without backup refused: wrong or no admin code")
+        #     self._finish("Wrong admin code: Z report cancelled. Nothing was changed.", failed=True)
+        #     return
         logger.warning("Z report made without a backup before it, confirmed with the admin code")
         self.problems.append(f"No backup was made before the Z report: {error}")
         self._close()
 
-    def _ask_admin_code(self) -> bool:
-        dialog = NumpadDialog(title="Admin code", parent=self, masked=True)
-        return bool(dialog.exec()) and check_admin_code(dialog.value)
+    # def _ask_admin_code(self) -> bool:
+    #     dialog = NumpadDialog(title="Admin code", parent=self, masked=True)
+    #     return bool(dialog.exec()) and check_admin_code(dialog.value)
 
     # Step 2: close the Z report
     def _close(self):

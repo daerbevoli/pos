@@ -152,6 +152,35 @@ def test_migrations_add_invoice_payment_columns_to_older_database(monkeypatch):
     assert {"payment_method", "payment_breakdown"} <= cols
 
 
+def test_migrations_add_and_backfill_invoice_change(monkeypatch):
+    """An older invoices table gets change_given, filled in from the sale
+    where it still exists; an invoice whose sale was purged stays NULL."""
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql("ALTER TABLE invoices DROP COLUMN change_given")
+        conn.exec_driver_sql(
+            "INSERT INTO clients (id, name, street, zip_code, city, country, vatNumber, is_active) "
+            "VALUES (1, 'C', 's', '1000', 'Brussels', 'BE', 'V1', 1)")
+        conn.exec_driver_sql(
+            "INSERT INTO sales (id, sale_number, total_amount, final_amount, change_given) "
+            "VALUES (1, 'S-1', 1.25, 1.25, 0.75)")
+        for invoice_id, sale_id in ((1, 1), (2, None)):
+            conn.exec_driver_sql(
+                "INSERT INTO invoices (id, sale_id, client_id, invoice_number, client_name, "
+                "client_vat_number, client_street, client_zip, client_city, client_country) "
+                f"VALUES ({invoice_id}, {sale_id or 'NULL'}, 1, 'I-{invoice_id}', 'C', 'V1', 's', '1000', 'Brussels', 'BE')")
+        conn.commit()
+    monkeypatch.setattr(database, "ENGINE", engine)
+
+    database._run_migrations()
+    database._run_migrations()  # idempotent
+
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql("SELECT id, change_given FROM invoices ORDER BY id").fetchall()
+    assert rows == [(1, 0.75), (2, None)]
+
+
 def test_column_migration_skips_missing_table(monkeypatch):
     """A table that doesn't exist yet is left to create_all(), not created here."""
     engine = _memory_engine()

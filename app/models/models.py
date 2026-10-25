@@ -132,7 +132,7 @@ class Sale(Base):
     __tablename__ = "sales"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    sale_number = Column(String(20), unique=True, nullable=False)  # e.g. "S-010127-0042"
+    sale_number = Column(String(20), unique=True, nullable=False)  # e.g. "S-010127-042"
     total_amount = Column(Float, nullable=False)
     tax_amount = Column(Float, default=0.0)
     final_amount = Column(Float, nullable=False)
@@ -252,7 +252,7 @@ class Client(Base):
 class NumberSequence(Base):
     """Last number handed out in each document series — see
     SalesService._next_number(). Stored rather than derived from existing
-    rows because numbers wrap back to 1 (after 9999 for sales, 999 for invoices), after which "highest
+    rows because numbers wrap back to 1 (after 999, for sales and invoices alike), after which "highest
     used + 1" no longer works. S-/RF- (sales/refunds) restart at each Z
     report; I-/CN- (invoices/credit notes) run on across Z reports."""
     __tablename__ = "number_sequences"
@@ -324,6 +324,7 @@ class Invoice(Base):
     line_items_snapshot = Column(Text, nullable=True)  # JSON; same shape as Sale.cart_snapsho
     payment_method = Column(String(20), nullable=True)
     payment_breakdown = Column(Text, nullable=True)  # JSON: [{"method": "cash", "amount": 20.0}, ...]
+    change_given = Column(Float, nullable=True)  # snapshot of Sale.change_given — payment_breakdown is what was tendered
 
     sale   = relationship("Sale", backref=backref("invoice", uselist=False))
     client = relationship("Client", backref=backref("invoices", uselist=True))

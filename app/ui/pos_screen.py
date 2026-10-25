@@ -1401,6 +1401,7 @@ class POSScreen(QWidget):
                 )
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
+            self._attach_sale_client(sale)
             # Lines already on the saved sale keep their quantity; only
             # items added after reopening can be increased/decreased.
             for entry in self.cart.entries:
@@ -1417,6 +1418,24 @@ class POSScreen(QWidget):
         self._refresh_cart()
         self.ticket_total_lbl.setVisible(True)
         self.cart_table.setFocus()
+
+    def _attach_sale_client(self, sale: Sale):
+        """Puts the ticket's client state back to the loaded sale's own: its
+        invoice's client (VAT treatment from the country frozen on the
+        invoice), or none for a plain receipt. The cart snapshot only holds
+        the lines, so without this the previous ticket's client — and whether
+        it was domestic — carried over, pricing lines added after a reopen
+        wrongly and repaying a receipt as an invoice for that client. The
+        saved lines aren't retaxed: they keep what was charged."""
+        invoice = sale.invoice
+        if invoice is not None:
+            self.client_label.setText("INVOICE - " + invoice.client_name)
+            self.client_label.show()
+        else:
+            self.client_label.hide()
+        self.is_invoice = invoice is not None
+        self.client_id = invoice.client_id if invoice is not None else None
+        self.cart.is_domestic = invoice is None or invoice.client_country == BELGIUM
 
     def _browse_index(self) -> int:
         """This tab's position within today's sale_ids (oldest-first), for
@@ -1466,12 +1485,8 @@ class POSScreen(QWidget):
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
-            if sale.invoice:
-                self.client_label.setText("INVOICE - " + sale.invoice.client_name)
-                self.client_label.show()
-            else:
-                self.client_label.hide()
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
+            self._attach_sale_client(sale)
 
         self.sale_finished     = True
         if sale.payment_breakdown:
