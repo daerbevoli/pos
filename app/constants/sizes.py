@@ -38,7 +38,7 @@ LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height
 LOG_PANEL_MAX_LINES = 2000             # Logs tab: oldest lines are dropped beyond this (also the startup backlog size)
 
 # ── Dialogs ──────────────────────────────────────────────────────────────
-DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut and promo dialogs;
+DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut, promo and backup dialogs;
                                        # labels-per-page and Cancel buttons of the label sheet dialog
 NUMPAD_DIALOG_WIDTH = 300              # numpad dialog — min width
 NUMPAD_DIALOG_KEY_HEIGHT = 48          # numpad dialog keys and its display field — min height
@@ -52,6 +52,7 @@ SHORTCUT_DIALOG_MIN_SIZE = (680, 460)  # shortcut dialog — min (width, height)
 PROMO_DIALOG_MIN_SIZE = (820, 520)     # promo dialog — min (width, height)
 LABEL_SHEET_DIALOG_WIDTH = 480         # label sheet (print barcodes) dialog — min width
 LABEL_SHEET_FIELD_HEIGHT = 24          # label sheet dialog name/manufacturer/lot/expiry/barcode inputs — min height
+BACKUP_DIALOG_MIN_SIZE = (760, 500)    # backup dialog — min (width, height)
 
 # ── Tap-to-dismiss overlay (app/utils/utils.py) ──────────────────────────
 OVERLAY_CARD_MIN_WIDTH = 360           # message card shown over a screen (e.g. "Enter an amount first") — min width
@@ -90,6 +91,7 @@ __all__ = [
     "PROMO_DIALOG_MIN_SIZE",
     "LABEL_SHEET_DIALOG_WIDTH",
     "LABEL_SHEET_FIELD_HEIGHT",
+    "BACKUP_DIALOG_MIN_SIZE",
     "OVERLAY_CARD_MIN_WIDTH",
     "OVERLAY_CARD_MAX_WIDTH",
 ]

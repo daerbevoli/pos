@@ -179,6 +179,34 @@ class ProductService:
     #     return movement
 
     @staticmethod
+    def change_stock(
+        session: Session,
+        product_id: int,
+        quantity_change: float,
+        reference: str = None,
+    ) -> Optional[tuple[float, float]]:
+        """Change a product's stock (held within STOCK_MIN..STOCK_MAX) so it
+        commits or rolls back with the caller's transaction. Used for every
+        till sale line: a sale takes its quantity off, a mistake (reversal
+        line, negative quantity) puts it back.
+        Returns (before, after), or None if the product doesn't exist."""
+        product = session.query(Product).filter_by(id=product_id).first()
+        if not product:
+            logger.warning("Stock change skipped: product %s not found (%s)", product_id, reference)
+            return None
+
+        qty_before = product.stock_quantity
+        product.stock_quantity = clamp_stock(qty_before + quantity_change)
+        if product.stock_quantity != qty_before + quantity_change:
+            logger.info("Stock for product %s %r held at %g (change %+g)",
+                        product.id, product.name, product.stock_quantity, quantity_change)
+        session.flush()
+        logger.debug("Stock change: product %s %+g (%s): %g -> %g",
+                     product_id, product.stock_quantity - qty_before, reference,
+                     qty_before, product.stock_quantity)
+        return qty_before, product.stock_quantity
+
+    @staticmethod
     def move_stock(
         session: Session,
         product_id: int,
@@ -187,37 +215,26 @@ class ProductService:
         reference: str = None,
         notes: str = None
     ) -> Optional[StockMovement]:
-        """Change a product's stock and record a StockMovement, without
-        committing: the stock change and its movement row are only flushed,
-        so they commit or roll back together with the caller's transaction (a sale and its invoice — see
-        SalesService.finalize_sale/finalize_invoice/update_sale)."""
-        product = session.query(Product).filter_by(id=product_id).first()
-        if not product:
-            logger.warning("Stock move skipped: product %s not found (%s, %s)",
-                           product_id, movement_type, reference)
+        """change_stock() plus a StockMovement row, for the rare manual
+        changes worth a history (purchase, waste, adjustment) — not for till
+        sales. Also only flushed, never committed."""
+        changed = ProductService.change_stock(session, product_id, quantity_change, reference)
+        if changed is None:
             return None
-
-        qty_before = product.stock_quantity
-        product.stock_quantity = clamp_stock(qty_before + quantity_change)
-        if product.stock_quantity != qty_before + quantity_change:
-            logger.info("Stock for product %s %r held at %g (change %+g)",
-                        product.id, product.name, product.stock_quantity, quantity_change)
-        quantity_change = product.stock_quantity - qty_before
+        qty_before, qty_after = changed
+        quantity_change = qty_after - qty_before
 
         movement = StockMovement(
             product_id=product_id,
             movement_type=movement_type,
             quantity=quantity_change,
             quantity_before=qty_before,
-            quantity_after=product.stock_quantity,
+            quantity_after=qty_after,
             reference=reference,
             notes=notes
         )
         session.add(movement)
         session.flush()
-        logger.debug("Stock move: product %s %+g (%s, %s): %g -> %g",
-                     product_id, quantity_change, movement_type, reference,
-                     qty_before, product.stock_quantity)
         return movement
 
     # Commented out for now: unused (the inventory Low Stock filter uses Product.is_low_stock).

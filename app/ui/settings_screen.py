@@ -19,6 +19,7 @@ from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.settings_service import SettingsService
 from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_FUNCTION_BUTTON_HEIGHT, SETTINGS_OK_BUTTON_HEIGHT, SPACING_XS
+from app.ui.dialogs.backup_dialog import BackupDialog
 from app.ui.dialogs.category_dialog import CategoryDialog
 from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
@@ -593,7 +594,9 @@ class SettingsScreen(QWidget):
         self.navigate.emit(4)
 
     def _backup(self):
-        pass
+        """Anyone may take a backup; restoring and changing the backup
+        folder are admin-only, checked inside the dialog."""
+        BackupDialog(parent=self, is_admin=self.is_admin).exec()
 
     def _close_pos(self):
         """The app runs full screen without a title bar, so this is the

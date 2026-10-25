@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # matches common margin-less sheets (e.g. 24 = 70 x 37 mm, 40 = 52.5 x 29.7 mm).
 LABEL_LAYOUTS = {
     8:  (2, 4),
+    12: (2, 6),
     16: (2, 8),
     24: (3, 8),
     40: (4, 10),

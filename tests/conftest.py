@@ -60,10 +60,12 @@ def seeded_session():
 
 
 @pytest.fixture
-def patched_db(monkeypatch):
+def patched_db(monkeypatch, tmp_path):
     """Redirect app.core.database.get_session()/SessionFactory/ENGINE to an
     isolated, seeded in-memory DB. Use this for any UI code under test that
-    calls get_session() internally, so it never touches the real user DB."""
+    calls get_session() internally, so it never touches the real user DB.
+    DB_PATH points at a (nonexistent) file under tmp_path, so BackupService
+    neither reads the real DB nor writes into the real backups folder."""
     import app.core.database as database
 
     engine = _make_engine()
@@ -72,6 +74,7 @@ def patched_db(monkeypatch):
 
     monkeypatch.setattr(database, "SessionFactory", TestSessionFactory)
     monkeypatch.setattr(database, "ENGINE", engine)
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "superpos.db"))
     database._seed_defaults()
 
     yield TestSessionFactory

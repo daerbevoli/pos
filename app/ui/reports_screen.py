@@ -5,15 +5,17 @@ Reports Screen
 - X report and Z report.
 """
 import json
+import logging
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup, QMessageBox
+    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup, QMessageBox, QApplication
 )
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 
+from app.core.backup_service import KIND_PRE_Z, BackupError, BackupService
 from app.core.database import get_session
 from app.core.sales_service import SalesService
 from app.core.receipt_service import ReceiptService, PrinterError
@@ -23,6 +25,8 @@ from app.core.report_service import (
 from app.models.models import Invoice, Sale
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_MD, SPACING_LG
+
+logger = logging.getLogger(__name__)
 
 
 def _make_card(title: str, value: str, bold: bool = False) -> tuple[QGroupBox, QLabel]:
@@ -414,6 +418,8 @@ class ReportsScreen(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        if not self._backup_before_z():
+            return
 
         with get_session() as session:
             # Re-checked inside close_z_report(): an invoice or ticket may
@@ -464,6 +470,33 @@ class ReportsScreen(QWidget):
         with get_session() as session:
             SalesService.mark_invoice_id_sent(session, invoice_id)
         self._load_report()
+
+    def _backup_before_z(self) -> bool:
+        """A Z report purges every sale, so snapshot the DB first — the
+        pre-Z backup is the only copy of the sale lines left afterwards.
+        Runs on the UI thread on purpose: no sale may be rung up between the
+        snapshot and the purge. If it fails, the cashier decides whether to
+        go ahead anyway. Returns whether to continue with the Z report."""
+        with get_session() as session:
+            destinations = BackupService.destinations(session)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            BackupService.create_backup(KIND_PRE_Z, destinations)
+        except BackupError as e:
+            error = str(e)
+        else:
+            return True  # folders that failed (USB unplugged) are logged as errors
+        finally:
+            QApplication.restoreOverrideCursor()
+        logger.error("Backup before Z report failed: %s", error)
+        reply = QMessageBox.question(
+            self, "Backup Failed",
+            f"Could not back up the sales before the Z report:\n{error}\n\n"
+            "Print the Z report anyway? The sales it clears can then not be recovered.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _warn_z_blocked(self, invoice_numbers: list[str], open_slots: list[int]):
         parts = []

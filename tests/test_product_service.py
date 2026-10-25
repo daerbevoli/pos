@@ -185,6 +185,23 @@ def test_generate_barcode_unsupported_type(db_session):
 
 # ── Stock management ─────────────────────────────────────────────────────
 
+def test_change_stock_records_no_movement(db_session):
+    p = _make_product(db_session, stock_quantity=5)
+    assert ProductService.change_stock(db_session, p.id, -2, reference="S-1") == (5, 3)
+    db_session.refresh(p)
+    assert p.stock_quantity == 3
+    assert db_session.query(StockMovement).count() == 0
+
+
+def test_change_stock_is_held_at_stock_min(db_session):
+    p = _make_product(db_session, stock_quantity=STOCK_MIN + 3)
+    assert ProductService.change_stock(db_session, p.id, -10) == (STOCK_MIN + 3, STOCK_MIN)
+
+
+def test_change_stock_nonexistent_product_returns_none(db_session):
+    assert ProductService.change_stock(db_session, 99999, 1) is None
+
+
 def test_move_stock_increases_and_records_movement(db_session):
     p = _make_product(db_session, price=1.0)
     db_session.refresh(p)

@@ -63,6 +63,35 @@ def test_finalize_sale_deducts_stock(db_session):
     assert product.stock_quantity == 47
 
 
+def test_sale_and_its_mistakes_record_no_stock_movement_rows(db_session):
+    """Till lines only change product.stock_quantity: a movement row per
+    scanned item would grow the DB without limit (Z reports never purge them)."""
+    from app.models.models import StockMovement
+    product = _make_product(db_session, stock_quantity=50)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=3)))
+    SalesService.update_sale(db_session, sale.id, _cart_with(_item_for(product, quantity=1)))
+
+    assert db_session.query(StockMovement).count() == 0
+    db_session.refresh(product)
+    assert product.stock_quantity == 49
+
+
+def test_mistake_on_reopened_sale_puts_stock_back(db_session):
+    product = _make_product(db_session, stock_quantity=50)
+    original = _item_for(product, quantity=3)
+    sale = SalesService.finalize_sale(db_session, _cart_with(original))
+    db_session.refresh(product)
+    assert product.stock_quantity == 47
+
+    reversal = _item_for(product, quantity=-3)
+    reversal.is_reversal, reversal.reversal_of = True, original
+    original.has_reversal = True
+    SalesService.update_sale(db_session, sale.id, _cart_with(original, reversal))
+
+    db_session.refresh(product)
+    assert product.stock_quantity == 50
+
+
 def test_finalize_sale_sale_number_format_and_sequence(db_session):
     product = _make_product(db_session)
     today_str = date.today().strftime("%d%m%y")

@@ -672,7 +672,7 @@ class SalesService:
 
     @staticmethod
     def _add_sale_items(session: Session, sale: Sale, cart: Cart) -> float:
-        """Adds a SaleItem per cart line and moves its stock; returns the
+        """Adds a SaleItem per cart line and changes its stock; returns the
         sale's total VAT. Each line's VAT is on its amount after the
         discounts that apply to it (Cart.net_line_totals) — a discount the
         customer gets lowers the VAT due — so line_total is that net amount
@@ -693,11 +693,11 @@ class SalesService:
                 discount=round(entry.line_total - net_total, 2),
                 line_total=net_total,
             ))
-            ProductService.move_stock(
+            # A reversal line's quantity is negative, so a mistake puts its stock back.
+            ProductService.change_stock(
                 session,
                 product_id=entry.product_id,
                 quantity_change=-entry.quantity,
-                movement_type="sale",
                 reference=sale.sale_number,
             )
         return round(total_tax, 2)
@@ -762,13 +762,11 @@ class SalesService:
 
         # Restore stock from the old line items before replacing them.
         for old_item in sale.items:
-            ProductService.move_stock(
+            ProductService.change_stock(
                 session,
                 product_id=old_item.product_id,
                 quantity_change=old_item.quantity,
-                movement_type="return",
                 reference=sale.sale_number,
-                notes="Ticket reopened/edited",
             )
 
         sale.items = []  # cascade="all, delete-orphan" removes the old SaleItem rows
@@ -938,7 +936,7 @@ class SalesService:
         }
 
     @staticmethod
-    def get_invoices_range(session: Session, start: date, end: date) -> list[Invoice]:
+    def get_invoices_range(session: Session, start: date, end: date) -> list[type[Invoice]]:
         """Invoices/credit notes issued in [start, end], newest first. Read
         from the invoices table itself, not through sales: a Z report purges
         the sales but keeps the invoices (their sale_id becomes NULL)."""
@@ -953,7 +951,7 @@ class SalesService:
         )
 
     @staticmethod
-    def get_sales_range(session: Session, start: date, end: date) -> list[Sale]:
+    def get_sales_range(session: Session, start: date, end: date) -> list[type[Sale]]:
         return (
             session.query(Sale)
             .filter(

@@ -4,13 +4,16 @@ Persistent V-tab bar — each tab independently tracks its own screen —
 with the error badge and a clock / salesperson box at its right end.
 """
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QStackedWidget, QFrame, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
+import logging
 
 from app.constants.sizes import MAIN_WINDOW_SIZE
+from app.core.backup_service import KIND_DAILY, BackupService
+from app.core.backup_worker import BackupWorker
 from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
 from app.ui.customer_display import CustomerDisplay
@@ -30,6 +33,14 @@ from app.constants import (
 
 MAX_VTABS = TABS  # one source of truth: POSScreen keeps a state slot per V-tab
 
+# The daily backup is checked shortly after startup (not during it, so the
+# window comes up first), then every hour: a till left running for days
+# still gets one backup a day.
+BACKUP_FIRST_CHECK_MS = 60_000
+BACKUP_CHECK_INTERVAL_MS = 60 * 60_000
+
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -43,8 +54,11 @@ class MainWindow(QMainWindow):
         self._salesperson_name = ""  # "Cashier name" / "Admin", shown top right
         self._rf_cn_mode = False     # active POS ticket is in refund / credit-note mode
 
+        self._backup_worker = None
+
         self._build_ui()
         self._start_clock()
+        self._start_backup_schedule()
 
     def _build_ui(self):
         central = QWidget()
@@ -245,4 +259,35 @@ class MainWindow(QMainWindow):
     def _update_clock(self):
         now = datetime.now().strftime("%a %d-%m-%Y  %H:%M")
         self.clock_label.setText(now)
+
+    # ── Automatic backup ──────────────────────────────────────────────────────
+
+    def _start_backup_schedule(self):
+        QTimer.singleShot(BACKUP_FIRST_CHECK_MS, self._maybe_daily_backup)
+        self._backup_timer = QTimer(self)
+        self._backup_timer.timeout.connect(self._maybe_daily_backup)
+        self._backup_timer.start(BACKUP_CHECK_INTERVAL_MS)
+        QApplication.instance().aboutToQuit.connect(self._finish_backup)
+
+    def _finish_backup(self):
+        """Let a running backup finish rather than kill its thread on quit —
+        it only ever leaves a .partial file behind, but a destroyed running
+        QThread aborts the process."""
+        if self._backup_worker is not None and self._backup_worker.isRunning():
+            logger.info("Waiting for the running backup to finish before quitting")
+            self._backup_worker.wait()
+
+    def _maybe_daily_backup(self):
+        """Back up in the background if the local folder has nothing from
+        the last 24h. A failure shows up in the error badge via the log."""
+        if self._backup_worker is not None and self._backup_worker.isRunning():
+            return
+        with get_session() as session:
+            destinations = BackupService.destinations(session)
+        if not BackupService.is_backup_due(destinations[0]):
+            return
+        self._backup_worker = BackupWorker(KIND_DAILY, destinations, parent=self)
+        self._backup_worker.failed.connect(
+            lambda message: logger.error("Daily backup failed: %s", message))
+        self._backup_worker.start()
 
