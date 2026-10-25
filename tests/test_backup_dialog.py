@@ -67,10 +67,17 @@ def test_changing_extra_folder_is_admin_only(qtbot, patched_db, overlays):
     assert overlays == [("Only admin.", "info")]
 
 
+def _plain_archive(monkeypatch, encrypted=False):
+    """Make the dialog see "x.zip" as an archive of the given kind."""
+    monkeypatch.setattr(BackupService, "read_manifest",
+                        lambda p: {"format": 2 if encrypted else 1})
+
+
 def test_restore_of_unverifiable_backup_shows_error_and_asks_nothing(qtbot, patched_db, overlays, monkeypatch):
-    def bad(path):
+    def bad(path, password=None):
         raise BackupError("damaged")
     questions = []
+    _plain_archive(monkeypatch)
     monkeypatch.setattr(BackupService, "verify_archive", bad)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: questions.append(a))
     d = _dialog(qtbot, is_admin=True)
@@ -83,7 +90,9 @@ def test_restore_of_unverifiable_backup_shows_error_and_asks_nothing(qtbot, patc
 
 def test_declined_restore_does_not_restore(qtbot, patched_db, monkeypatch):
     restored = []
-    monkeypatch.setattr(BackupService, "verify_archive", lambda p: {"created_at": "2026-10-01T09:00:00"})
+    _plain_archive(monkeypatch)
+    monkeypatch.setattr(BackupService, "verify_archive",
+                        lambda p, password=None: {"created_at": "2026-10-01T09:00:00"})
     monkeypatch.setattr(BackupService, "restore_warnings", lambda m: [])
     monkeypatch.setattr(BackupService, "restore_backup", lambda *a, **k: restored.append(a))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
@@ -96,9 +105,12 @@ def test_declined_restore_does_not_restore(qtbot, patched_db, monkeypatch):
 
 def test_confirmed_restore_restores_then_restarts(qtbot, patched_db, monkeypatch):
     restored, restarted = [], []
-    monkeypatch.setattr(BackupService, "verify_archive", lambda p: {"created_at": "2026-10-01T09:00:00"})
+    _plain_archive(monkeypatch)
+    monkeypatch.setattr(BackupService, "verify_archive",
+                        lambda p, password=None: {"created_at": "2026-10-01T09:00:00"})
     monkeypatch.setattr(BackupService, "restore_warnings", lambda m: [])
-    monkeypatch.setattr(BackupService, "restore_backup", lambda path, dests: restored.append(path))
+    monkeypatch.setattr(BackupService, "restore_backup",
+                        lambda path, dests, password=None: restored.append(path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     monkeypatch.setattr("app.ui.dialogs.backup_dialog.restart_app", lambda: restarted.append(True))
@@ -107,6 +119,78 @@ def test_confirmed_restore_restores_then_restarts(qtbot, patched_db, monkeypatch
     d._restore("x.zip")
 
     assert restored == ["x.zip"] and restarted == [True]
+
+
+# ── Encryption ───────────────────────────────────────────────────────────
+
+def test_encrypted_restore_asks_password_retries_wrong_one_and_passes_it_on(qtbot, patched_db, monkeypatch):
+    from app.core.backup_service import BackupPasswordError
+    _plain_archive(monkeypatch, encrypted=True)
+    typed = iter(["wrong one", "right one"])
+    prompts = []
+    monkeypatch.setattr(BackupDialog, "_ask_archive_password",
+                        lambda self, wrong: prompts.append(wrong) or next(typed))
+
+    def verify(path, password=None):
+        if password != "right one":
+            raise BackupPasswordError("Wrong password")
+        return {"created_at": "2026-10-01T09:00:00"}
+    restored = []
+    monkeypatch.setattr(BackupService, "verify_archive", verify)
+    monkeypatch.setattr(BackupService, "restore_warnings", lambda m: [])
+    monkeypatch.setattr(BackupService, "restore_backup",
+                        lambda path, dests, password=None: restored.append(password))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr("app.ui.dialogs.backup_dialog.restart_app", lambda: None)
+
+    _dialog(qtbot, is_admin=True)._restore("x.zip")
+
+    assert prompts == [False, True]
+    assert restored == ["right one"]
+
+
+def test_cancelling_the_password_prompt_cancels_the_restore(qtbot, patched_db, monkeypatch):
+    _plain_archive(monkeypatch, encrypted=True)
+    monkeypatch.setattr(BackupDialog, "_ask_archive_password", lambda self, wrong: None)
+    verified = []
+    monkeypatch.setattr(BackupService, "verify_archive", lambda *a, **k: verified.append(a))
+
+    _dialog(qtbot, is_admin=True)._restore("x.zip")
+
+    assert verified == []
+
+
+def test_setting_the_password_is_admin_only(qtbot, patched_db, overlays):
+    _dialog(qtbot, is_admin=False)._set_password()
+    assert overlays == [("Only admin.", "info")]
+    assert not BackupService.has_password()
+
+
+def test_encryption_status_follows_the_password(qtbot, patched_db):
+    d = _dialog(qtbot)
+    assert "NOT encrypted" in d.encryption_label.text()
+    BackupService.set_password("a long enough password")
+    d._reload()
+    assert "are encrypted" in d.encryption_label.text()
+    assert d.btn_password.text() == "Change password…"
+
+
+def test_password_dialog_rejects_mismatch_and_saves_match(qtbot, patched_db):
+    from app.ui.dialogs.backup_dialog import BackupPasswordDialog
+    shown = []
+    d = BackupPasswordDialog(changing=False)
+    qtbot.addWidget(d)
+    d.overlay.show_message = lambda msg, kind="info": shown.append(msg)
+
+    d.new.setText("a long enough password")
+    d.confirm.setText("a different password")
+    d._on_ok()
+    assert shown == ["The new passwords don't match."] and not BackupService.has_password()
+
+    d.confirm.setText("a long enough password")
+    d._on_ok()
+    assert BackupService.check_password("a long enough password")
 
 
 def test_backup_now_reports_failure(qtbot, patched_db, overlays):

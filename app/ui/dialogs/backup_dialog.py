@@ -1,7 +1,8 @@
 """
 Backup Dialog
 Lists the backups in every backup folder, takes one on demand, sets the
-extra backup folder (USB stick / network share) and restores a backup.
+extra backup folder (USB stick / network share) and the backup password,
+and restores a backup.
 All file and DB work goes through BackupService; a manual backup runs on a
 BackupWorker so the dialog stays responsive while it's written.
 """
@@ -12,12 +13,13 @@ from PyQt6.QtCore import Qt, QProcess
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QAbstractItemView, QFormLayout,
+    QAbstractItemView, QFormLayout, QInputDialog,
 )
 
-from app.constants import BACKUP_DIALOG_MIN_SIZE, DIALOG_BUTTON_HEIGHT
+from app.constants import BACKUP_DIALOG_MIN_SIZE, COLOR_LOG_ERROR, DIALOG_BUTTON_HEIGHT
 from app.core.backup_service import (
-    BACKUP_SETTING_EXTRA_DIR, KIND_MANUAL, BackupError, BackupService,
+    BACKUP_SETTING_EXTRA_DIR, KIND_MANUAL, MIN_PASSWORD_LENGTH, BackupError,
+    BackupPasswordError, BackupService,
 )
 from app.core.backup_worker import BackupWorker
 from app.core.database import get_session
@@ -36,6 +38,60 @@ _KIND_LABELS = {
 
 def _format_size(size: int) -> str:
     return f"{size / 1024:.0f} KB" if size < 1024 * 1024 else f"{size / 1024 / 1024:.1f} MB"
+
+
+class BackupPasswordDialog(QDialog):
+    """Set or change the backup password: typed twice, plus the current one
+    when changing it. Saving goes through BackupService.set_password(),
+    which enforces the rules; this only collects the input."""
+
+    def __init__(self, parent=None, changing: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("Backup Password")
+        self.overlay = TapToDismissOverlay(self)
+        self.changing = changing
+
+        root = QVBoxLayout(self)
+        warning = QLabel(
+            "Write this password down and keep it somewhere safe, away from this PC.\n"
+            "Without it, the backups can't be restored on another PC — nobody can recover it.\n"
+            "Changing it only affects new backups; older ones keep their old password.")
+        warning.setWordWrap(True)
+        root.addWidget(warning)
+
+        form = QFormLayout()
+        self.current = QLineEdit()
+        self.new = QLineEdit()
+        self.confirm = QLineEdit()
+        for edit in (self.current, self.new, self.confirm):
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+        if changing:
+            form.addRow("Current password:", self.current)
+        self.new.setPlaceholderText(f"At least {MIN_PASSWORD_LENGTH} characters")
+        form.addRow("New password:", self.new)
+        form.addRow("Repeat new password:", self.confirm)
+        root.addLayout(form)
+
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        ok = FunctionButton("Save", "okBtn")
+        ok.clicked.connect(self._on_ok)
+        buttons = QHBoxLayout()
+        for btn in (cancel, ok):
+            btn.setFixedHeight(DIALOG_BUTTON_HEIGHT)
+            buttons.addWidget(btn)
+        root.addLayout(buttons)
+
+    def _on_ok(self):
+        if self.new.text() != self.confirm.text():
+            self.overlay.show_message("The new passwords don't match.", kind="error")
+            return
+        try:
+            BackupService.set_password(self.new.text(), self.current.text() if self.changing else None)
+        except BackupError as e:
+            self.overlay.show_message(str(e), kind="error")
+            return
+        self.accept()
 
 
 def restart_app():
@@ -88,6 +144,16 @@ class BackupDialog(QDialog):
         form.addRow("Extra copy:", extra_row)
         root.addWidget(folders)
 
+        encryption = QGroupBox("Encryption")
+        enc_row = QHBoxLayout(encryption)
+        self.encryption_label = QLabel()
+        self.encryption_label.setWordWrap(True)
+        self.btn_password = QPushButton()
+        self.btn_password.clicked.connect(self._set_password)
+        enc_row.addWidget(self.encryption_label, 1)
+        enc_row.addWidget(self.btn_password)
+        root.addWidget(encryption)
+
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Date", "Type", "Size", "Folder"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -138,6 +204,17 @@ class BackupDialog(QDialog):
                 self.table.setItem(row, col, QTableWidgetItem(text))
             self._row_paths[row] = str(info.path)
 
+        if BackupService.has_password():
+            self.encryption_label.setText("New backups are encrypted with the backup password.")
+            self.encryption_label.setStyleSheet("")
+            self.btn_password.setText("Change password…")
+        else:
+            self.encryption_label.setText(
+                "Backups are NOT encrypted: anyone with a backup file can read your clients, "
+                "sales and settings. Set a backup password.")
+            self.encryption_label.setStyleSheet("color: rgb(%d, %d, %d);" % COLOR_LOG_ERROR)
+            self.btn_password.setText("Set password…")
+
         if backups:
             latest = backups[0]
             self.status_label.setText(
@@ -148,7 +225,7 @@ class BackupDialog(QDialog):
 
     def _set_busy(self, busy: bool):
         for btn in (self.btn_backup, self.btn_restore, self.btn_restore_file,
-                    self.btn_browse, self.btn_clear_dir, self.btn_close):
+                    self.btn_browse, self.btn_clear_dir, self.btn_close, self.btn_password):
             btn.setEnabled(not busy)
         if busy:
             self.status_label.setText("Backing up…")
@@ -206,6 +283,22 @@ class BackupDialog(QDialog):
             SettingsService.set(session, BACKUP_SETTING_EXTRA_DIR, path)
         self._reload()
 
+    # ── Password ─────────────────────────────────────────────────────────
+
+    def _set_password(self):
+        if not self.is_admin:
+            self.overlay.show_message("Only admin.")
+            return
+        if BackupPasswordDialog(self, changing=BackupService.has_password()).exec():
+            self._reload()
+            self.overlay.show_message("Backup password saved. New backups are encrypted with it.")
+
+    def _ask_archive_password(self, wrong: bool) -> str | None:
+        """The password the backup was made with; None if cancelled."""
+        prompt = "Wrong password. Try again:" if wrong else "This backup is encrypted. Enter its password:"
+        text, ok = QInputDialog.getText(self, "Backup Password", prompt, QLineEdit.EchoMode.Password)
+        return text if ok else None
+
     # ── Restore ──────────────────────────────────────────────────────────
 
     def _restore_selected(self):
@@ -229,8 +322,24 @@ class BackupDialog(QDialog):
             self.overlay.show_message("Only admin.")
             logger.info("Restore refused: not in admin mode")
             return
+        # An encrypted backup always needs its password typed, even when it's
+        # stored on this PC: admin mode alone shouldn't be enough to overwrite
+        # the shop's data.
+        password = None
         try:
-            manifest = BackupService.verify_archive(path)
+            if BackupService.is_encrypted(BackupService.read_manifest(path)):
+                password = self._ask_archive_password(wrong=False)
+                if password is None:
+                    return
+            while True:
+                try:
+                    manifest = BackupService.verify_archive(path, password)
+                    break
+                except BackupPasswordError:
+                    logger.warning("Restore: wrong password for %s", path)
+                    password = self._ask_archive_password(wrong=True)
+                    if password is None:
+                        return
         except BackupError as e:
             logger.error("Restore: %s failed verification: %s", path, e)
             self.overlay.show_message(f"This backup can't be used:\n{e}", kind="error")
@@ -254,7 +363,7 @@ class BackupDialog(QDialog):
         # Blocking on purpose: nothing else may touch the DB meanwhile.
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            BackupService.restore_backup(path, self._destinations())
+            BackupService.restore_backup(path, self._destinations(), password=password)
         except BackupError as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Restore Failed", str(e))

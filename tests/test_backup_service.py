@@ -6,6 +6,7 @@ needs a file, not :memory:) and passes it explicitly — nothing here reads
 the real per-user database or writes into its backups folder.
 """
 import json
+import os
 import sqlite3
 import zipfile
 from contextlib import closing
@@ -15,11 +16,20 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
+import app.core.database as database
+from app.core import backup_key
 from app.core.backup_service import (
-    DB_MEMBER, KIND_DAILY, KIND_MANUAL, KIND_PRE_RESTORE, KIND_PRE_Z, MANIFEST_MEMBER,
-    RETENTION, BackupError, BackupService, archive_name,
+    DB_MEMBER, ENC_MEMBER, KIND_DAILY, KIND_MANUAL, KIND_PRE_RESTORE, KIND_PRE_Z,
+    MANIFEST_MEMBER, RETENTION, BackupError, BackupPasswordError, BackupService, archive_name,
 )
 from app.models.models import Base, Category, ZReport
+
+
+@pytest.fixture(autouse=True)
+def isolated_key_store(monkeypatch, tmp_path):
+    """The backup password file lives next to DB_PATH: point that at
+    tmp_path so no test reads or writes the real one."""
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "superpos.db"))
 
 
 @pytest.fixture
@@ -46,8 +56,8 @@ def _categories(path):
         return sorted(r[0] for r in conn.execute("SELECT name FROM categories"))
 
 
-def _backup(live_db, dests, kind=KIND_MANUAL):
-    return BackupService.create_backup(kind, dests, db_path=live_db[0])
+def _backup(live_db, dests, kind=KIND_MANUAL, password=None):
+    return BackupService.create_backup(kind, dests, db_path=live_db[0], password=password)
 
 
 def _add_z_report(Session, number):
@@ -292,3 +302,137 @@ def test_restore_warns_when_z_reports_would_be_lost(live_db, tmp_path):
 
     [warning] = BackupService.restore_warnings(manifest, db_path=path)
     assert "Z report" in warning
+
+
+# ── Encryption ───────────────────────────────────────────────────────────
+
+PASSWORD = "correct horse battery"
+
+
+def _rewrite_archive(src, dst, manifest=None, payload=None):
+    """Copy an archive, optionally replacing its manifest / encrypted member."""
+    with zipfile.ZipFile(src) as zf:
+        m = manifest if manifest is not None else zf.read(MANIFEST_MEMBER)
+        data = payload if payload is not None else zf.read(ENC_MEMBER)
+    with zipfile.ZipFile(dst, "w") as zf:
+        zf.writestr(MANIFEST_MEMBER, m)
+        zf.writestr(ENC_MEMBER, data)
+    return dst
+
+
+def test_encrypted_archive_reveals_no_data(live_db, tmp_path):
+    archive = _backup(live_db, [tmp_path / "backups"], password=PASSWORD).archives[0]
+
+    with zipfile.ZipFile(archive) as zf:
+        assert set(zf.namelist()) == {MANIFEST_MEMBER, ENC_MEMBER}
+        manifest = json.loads(zf.read(MANIFEST_MEMBER))
+    assert manifest["format"] == 2
+    assert "row_counts" not in manifest and "db_sha256" not in manifest and "host" not in manifest
+    raw = archive.read_bytes()
+    assert b"Dairy" not in raw and b"SQLite format" not in raw
+
+
+def test_encrypted_archive_verifies_only_with_its_password(live_db, tmp_path):
+    archive = _backup(live_db, [tmp_path / "backups"], password=PASSWORD).archives[0]
+
+    manifest = BackupService.verify_archive(archive, PASSWORD)
+    assert manifest["row_counts"]["categories"] == 1
+    with pytest.raises(BackupPasswordError):
+        BackupService.verify_archive(archive)
+    with pytest.raises(BackupPasswordError):
+        BackupService.verify_archive(archive, "wrong password")
+
+
+def test_unicode_password_matches_however_it_was_typed(live_db, tmp_path):
+    composed, decomposed = "café-secret", "café-secret"
+    archive = _backup(live_db, [tmp_path / "backups"], password=composed).archives[0]
+    BackupService.verify_archive(archive, decomposed)
+
+
+def test_edited_manifest_is_detected(live_db, tmp_path):
+    archive = _backup(live_db, [tmp_path / "backups"], password=PASSWORD).archives[0]
+    manifest = BackupService.read_manifest(archive)
+    manifest["created_at"] = "2020-01-01T00:00:00"
+    forged = _rewrite_archive(archive, tmp_path / "forged.zip", manifest=json.dumps(manifest))
+    with pytest.raises(BackupPasswordError):
+        BackupService.verify_archive(forged, PASSWORD)
+
+
+def test_flipped_ciphertext_byte_is_detected(live_db, tmp_path):
+    archive = _backup(live_db, [tmp_path / "backups"], password=PASSWORD).archives[0]
+    with zipfile.ZipFile(archive) as zf:
+        data = bytearray(zf.read(ENC_MEMBER))
+    data[len(data) // 2] ^= 0x01
+    damaged = _rewrite_archive(archive, tmp_path / "damaged.zip", payload=bytes(data))
+    with pytest.raises(BackupError):
+        BackupService.verify_archive(damaged, PASSWORD)
+
+
+def test_restore_encrypted_backup(live_db, tmp_path):
+    path, engine, Session = live_db
+    dest = tmp_path / "backups"
+    archive = _backup(live_db, [dest], password=PASSWORD).archives[0]
+    with Session() as s:
+        s.add(Category(name="Bakery"))
+        s.commit()
+
+    with pytest.raises(BackupPasswordError):
+        BackupService.restore_backup(archive, [dest], db_path=path, engine=engine)
+    assert _categories(path) == ["Bakery", "Dairy"]
+
+    BackupService.restore_backup(archive, [dest], db_path=path, engine=engine, password=PASSWORD)
+    assert _categories(path) == ["Dairy"]
+
+
+# ── Stored password ──────────────────────────────────────────────────────
+
+def test_backups_use_the_stored_password(live_db, tmp_path):
+    assert not BackupService.has_password()
+    BackupService.set_password(PASSWORD)
+    assert BackupService.has_password()
+
+    result = BackupService.create_backup(KIND_DAILY, [tmp_path / "backups"], db_path=live_db[0])
+
+    assert result.encrypted
+    BackupService.verify_archive(result.archives[0], PASSWORD)
+
+
+def test_safety_backup_before_restore_is_encrypted_too(live_db, tmp_path):
+    path, engine, _ = live_db
+    dest = tmp_path / "backups"
+    BackupService.set_password(PASSWORD)
+    archive = BackupService.create_backup(KIND_MANUAL, [dest], db_path=path).archives[0]
+
+    safety = BackupService.restore_backup(archive, [dest], db_path=path, engine=engine, password=PASSWORD)
+
+    assert safety.encrypted
+
+
+def test_password_rules(live_db):
+    with pytest.raises(BackupError, match="at least"):
+        BackupService.set_password("short")
+    BackupService.set_password(PASSWORD)
+    assert BackupService.check_password(PASSWORD)
+    assert not BackupService.check_password("something else")
+
+    with pytest.raises(BackupPasswordError):
+        BackupService.set_password("a new password", current_password="not it")
+    BackupService.set_password("a new password", current_password=PASSWORD)
+    assert BackupService.check_password("a new password")
+
+
+def test_unreadable_stored_password_fails_instead_of_writing_plaintext(live_db, tmp_path):
+    backup_key.key_path().write_bytes(b"\xff\xff\xff not a valid blob")
+    dest = tmp_path / "backups"
+
+    with pytest.raises(BackupError):
+        BackupService.create_backup(KIND_DAILY, [dest], db_path=live_db[0])
+    assert BackupService.list_backups(dest) == []
+
+
+def test_stored_password_is_not_kept_in_plain_text_on_windows(live_db):
+    if os.name != "nt":
+        pytest.skip("DPAPI is Windows-only")
+    BackupService.set_password(PASSWORD)
+    assert PASSWORD.encode() not in backup_key.key_path().read_bytes()
+    assert backup_key.load() == PASSWORD
