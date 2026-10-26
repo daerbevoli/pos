@@ -1,4 +1,5 @@
-"""Runs a BackupService.create_backup() off the Qt UI thread.
+"""
+Runs a BackupService.create_backup() off the Qt UI thread.
 
 Snapshotting is quick, but writing and re-reading the archive on a slow USB
 stick or network share isn't — the till shouldn't freeze for it. As with

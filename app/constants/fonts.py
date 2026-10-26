@@ -1,4 +1,5 @@
-"""Font sizes used when building QFont objects in Python.
+"""
+Font sizes used when building QFont objects in Python.
 
 Font family/size rules driven by resources/styles/main.qss are not
 duplicated here; this covers only fonts set programmatically (e.g. on

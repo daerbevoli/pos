@@ -1,4 +1,5 @@
-"""Widget dimension constants (heights, widths, fixed sizes) shared across the UI.
+"""
+Widget dimension constants (heights, widths, fixed sizes) shared across the UI.
 
 Grouped by the screen/widget that uses them; each name says what it sizes and
 each comment lists the exact rows/buttons/fields it is applied to. Values are pixels.

@@ -30,7 +30,7 @@ class ClientService:
         return session.query(Client).filter_by(name=name, is_active=True).first()
 
     @staticmethod
-    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Client]]:
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[Client]:
         """Search by name or vat."""
         term = f"%{query}%"
         q = session.query(Client).filter(

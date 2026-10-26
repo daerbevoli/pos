@@ -3,9 +3,7 @@ Backup password store.
 
 Daily and pre-Z backups are taken automatically, so the password that
 encrypts them has to be available without anyone typing it. It's kept in
-`backup_password.bin` next to the DB, never in the DB itself: a password
-inside the DB would end up inside every backup, and restoring an old backup
-would silently bring back an old password.
+`backup_password.bin` next to the DB, never in the DB itself.
 
 On Windows the file holds a DPAPI blob (CryptProtectData): only the same
 Windows user on the same PC can decrypt it, so a copy of the SuperPOS

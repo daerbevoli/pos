@@ -1,6 +1,8 @@
-"""ISO 3166-1 alpha-2 codes used to determine invoice VAT treatment:
+"""
+ISO 3166-1 alpha-2 codes used to determine invoice VAT treatment:
 domestic (Belgium), EU (reverse-charge), or non-EU (export) — the latter two
-are both zero-rated, unlike a normal Belgian sale."""
+are both zero-rated, unlike a normal Belgian sale.
+"""
 
 BELGIUM = "BE"
 
