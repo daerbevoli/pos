@@ -4,6 +4,7 @@ Handles SQLite connection, table creation, and provides session access.
 """
 import logging
 import os
+import sys
 from typing import NamedTuple
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Store DB in user's app data folder (works on both Linux and Windows)
 def get_db_path() -> str:
-    if os.name == "nt":  # Windows
+    if sys.platform == "win32":  # Windows
         base = os.environ.get("APPDATA", os.path.expanduser("~"))
     else:  # Linux / Mac
         base = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))

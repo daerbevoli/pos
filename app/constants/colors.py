@@ -1,4 +1,5 @@
-"""Colors used directly in Python.
+"""
+Colors used directly in Python.
 
 Most colors live in resources/styles/main.qss; these are the few that
 must be set programmatically via QColor because QSS cannot target

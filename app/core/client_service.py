@@ -15,22 +15,22 @@ class ClientService:
     # ── Client CRUD ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_all(session: Session, active_only=True) -> list[Client]:
+    def get_all(session: Session, active_only=True) -> list[type[Client]]:
         q = session.query(Client)
         if active_only:
             q = q.filter(Client.is_active == True)
         return q.order_by(Client.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, client_id: int) -> Client | None:
+    def get_by_id(session: Session, client_id: int) -> type[Client] | None:
         return session.query(Client).filter_by(id=client_id).first()
 
     @staticmethod
-    def get_by_name(session: Session, name: str) -> Client | None:
+    def get_by_name(session: Session, name: str) -> type[Client] | None:
         return session.query(Client).filter_by(name=name, is_active=True).first()
 
     @staticmethod
-    def search(session: Session, query: str, include_inactive: bool = False) -> list[Client]:
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Client]]:
         """Search by name or vat."""
         term = f"%{query}%"
         q = session.query(Client).filter(
@@ -38,6 +38,7 @@ class ClientService:
         )
         if not include_inactive:
             q = q.filter(Client.is_active == True)
+
         return (
             q.order_by(Client.name)
             .limit(50)
@@ -54,7 +55,7 @@ class ClientService:
         return client
 
     @staticmethod
-    def update(session: Session, client_id: int, **kwargs) -> Client | None:
+    def update(session: Session, client_id: int, **kwargs) -> type[Client] | None:
         client = session.query(Client).filter_by(id=client_id).first()
         if not client:
             logger.warning("Client update: client %s not found", client_id)

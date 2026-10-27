@@ -25,7 +25,7 @@ from app.core.client_service import ClientService
 from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, \
     generate_invoice_data, save_open_ticket, clear_open_ticket, load_open_tickets
 from app.constants.countries import BELGIUM
-from app.models.models import Sale, Invoice
+from app.models.models import Sale
 from app.core.settings_service import SettingsService, get_erp_data
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
@@ -1383,7 +1383,7 @@ class POSScreen(QWidget):
         if not self.sale_finished or self._current_sale_id is None:
             return
         with get_session() as session:
-            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            sale = SalesService.get_by_id(session, self._current_sale_id)
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
@@ -1481,7 +1481,7 @@ class POSScreen(QWidget):
         self._current_sale_id = sale_id
 
         with get_session() as session:
-            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            sale = SalesService.get_by_id(session, self._current_sale_id)
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
@@ -1507,7 +1507,7 @@ class POSScreen(QWidget):
             self._show_overlay("No ticket to print", kind="error")
             return
         with get_session() as session:
-            sale = session.query(Sale).filter_by(id=self._current_sale_id).first()
+            sale = SalesService.get_by_id(session, self._current_sale_id)
             if not sale:
                 self._show_overlay("Sale not found", kind="error")
                 return
@@ -1529,9 +1529,7 @@ class POSScreen(QWidget):
 
 
         with get_session() as session:
-            invoice = session.query(Invoice).filter_by(
-                sale_id=self._current_sale_id
-            ).first()
+            invoice = SalesService.get_invoice_for_sale(session, self._current_sale_id)
 
             if not invoice:
                 self._show_overlay("This sale has no invoice", kind="error")

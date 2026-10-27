@@ -5,7 +5,7 @@ All business logic for managing products and stock.
 import logging
 from typing import Optional
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, InstrumentedAttribute
 from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo, PromoItem
 
 logger = logging.getLogger(__name__)
@@ -24,18 +24,18 @@ class ProductService:
 
     # ── Product CRUD ──────────────────────────────────────────────────────────
     @staticmethod
-    def get_all(session: Session, active_only=True) -> list[Product]:
+    def get_all(session: Session, active_only=True) -> list[type[Product]]:
         q = session.query(Product)
         if active_only:
             q = q.filter(Product.is_active == True)
         return q.order_by(Product.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, product_id: int) -> Product | None:
+    def get_by_id(session: Session, product_id: int) -> type[Product] | None:
         return session.query(Product).filter_by(id=product_id).first()
 
     @staticmethod
-    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> Product | None:
+    def get_by_barcode(session: Session, barcode: str, include_inactive: bool = False) -> type[Product] | None:
         """include_inactive: also match deactivated products — `barcode` is
         unique across all of them, so a duplicate check must see those too."""
         query = session.query(Product).filter_by(barcode=barcode)
@@ -44,7 +44,7 @@ class ProductService:
         return query.first()
 
     @staticmethod
-    def search(session: Session, query: str, include_inactive: bool = False) -> list[Product]:
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Product]]:
         """Search by name or barcode."""
         term = f"%{query}%"
         q = session.query(Product).filter(
@@ -184,7 +184,7 @@ class ProductService:
         product_id: int,
         quantity_change: float,
         reference: str = None,
-    ) -> Optional[tuple[float, float]]:
+    ) -> tuple[InstrumentedAttribute, InstrumentedAttribute] | None:
         """Change a product's stock (held within STOCK_MIN..STOCK_MAX) so it
         commits or rolls back with the caller's transaction. Used for every
         till sale line: a sale takes its quantity off, a mistake (reversal

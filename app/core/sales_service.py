@@ -758,7 +758,7 @@ class SalesService:
         if not cart.entries:
             raise ValueError("Empty cart.")
 
-        sale = session.query(Sale).filter_by(id=sale_id).first()
+        sale = SalesService.get_by_id(session, sale_id)
         if not sale:
             logger.warning("Sale update refused: sale %s not found", sale_id)
             raise ValueError(f"Sale {sale_id} not found.")
@@ -845,7 +845,7 @@ class SalesService:
         """Locks an invoice once it's been transmitted: after this, the
         sale can no longer be reopened/edited (see update_sale above) and
         corrections must go through a credit note instead."""
-        sale = session.query(Sale).filter_by(id=sale_id).first()
+        sale = SalesService.get_by_id(session, sale_id)
         if not sale or not sale.invoice:
             logger.warning("Mark invoice sent: sale %s has no invoice", sale_id)
             raise ValueError(f"Sale {sale_id} has no invoice.")
@@ -919,7 +919,15 @@ class SalesService:
         return invoice
 
     @staticmethod
-    def get_sales_for_date(session: Session, target_date: date) -> list[Sale]:
+    def get_by_id(session: Session, sale_id: int) -> type[Sale] | None:
+        return session.query(Sale).filter_by(id=sale_id).first()
+
+    @staticmethod
+    def get_invoice_for_sale(session: Session, sale_id: int) -> type[Invoice] | None:
+        return session.query(Invoice).filter_by(sale_id=sale_id).first()
+
+    @staticmethod
+    def get_sales_for_date(session: Session, target_date: date) -> list[type[Sale]]:
         return (
             session.query(Sale)
             .filter(func.date(Sale.created_at) == target_date)

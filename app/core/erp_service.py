@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 # carry the API key.
 _LOG_BODY_MAX = 2000
 
+class ERPError(Exception):
+    """
+    ERP Error thrown at connection problem, bad HTTP request or error in received HTTP data
+    """
+
 
 def _clip(value) -> str:
     text = str(value)
@@ -47,13 +52,13 @@ class ErpService:
         except requests.RequestException as e:
             logger.error("ERP %s.%s connection error after %.2fs: %s",
                          model, method, time.monotonic() - started, e)
-            raise Exception(f"Connection error: {e}")
+            raise ERPError(f"Connection error: {e}")
         elapsed = time.monotonic() - started
 
         if res.status_code != 200:
             logger.error("ERP %s.%s HTTP %s after %.2fs: %s",
                          model, method, res.status_code, elapsed, _clip(res.text))
-            raise Exception(
+            raise ERPError(
                 f"HTTP {res.status_code} {model}.{method}: {res.text}"
             )
 
@@ -62,7 +67,7 @@ class ErpService:
 
         if isinstance(data, dict) and data.get("error"):
             logger.error("ERP %s.%s returned error: %s", model, method, data["error"])
-            raise Exception(data["error"])
+            raise ERPError(data["error"])
 
         return data
 
