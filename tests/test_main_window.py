@@ -12,6 +12,26 @@ from app.core.client_service import ClientService
 from app.core.database import get_session
 
 
+class _FakeNumpad:
+    """Stands in for the admin-code NumpadDialog: "types" `code` and presses OK."""
+    code = "2060"
+
+    def __init__(self, *args, **kwargs):
+        self.value = None
+
+    def exec(self):
+        self.value = _FakeNumpad.code
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _admin_code_typed(monkeypatch):
+    """Settings' Admin button asks for the code; type the right one unless a
+    test sets _FakeNumpad.code to something else."""
+    monkeypatch.setattr("app.ui.settings_screen.NumpadDialog", _FakeNumpad)
+    monkeypatch.setattr(_FakeNumpad, "code", "2060")
+
+
 @pytest.fixture
 def window(qtbot, patched_db):
     w = MainWindow()

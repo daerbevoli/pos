@@ -11,7 +11,7 @@ from app.models.models import Settings
 logger = logging.getLogger(__name__)
 
 # Keys whose values must never reach pos.log or the Logs panel.
-_SECRET_KEYS = ("erp_api_key",)
+_SECRET_KEYS = ("erp_api_key", "admin_code")
 
 
 class SettingsService:

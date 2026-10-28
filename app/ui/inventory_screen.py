@@ -784,22 +784,24 @@ class ArticleDetailPanel(QFrame):
                     except ValueError:
                         min_stock_level = 5.0
 
-                    session.add(Product(
-                        barcode=barcode,
-                        name=name,
-                        price=price,
-                        is_open_price=is_open_price,
-                        tax=tax,
-                        unit=(row.get("unit") or "pcs").strip(),
-                        stock_quantity=stock_quantity,
-                        min_stock_level=min_stock_level,
-                        category_id=category_id_by_name.get((row.get("category") or "").strip()),
-                        is_active=True,
-                    ))
-                    session.flush()
+                    # A savepoint per row: a bad row undoes only itself, not
+                    # the rows already imported in this transaction.
+                    with session.begin_nested():
+                        session.add(Product(
+                            barcode=barcode,
+                            name=name,
+                            price=price,
+                            is_open_price=is_open_price,
+                            tax=tax,
+                            unit=(row.get("unit") or "pcs").strip(),
+                            stock_quantity=stock_quantity,
+                            min_stock_level=min_stock_level,
+                            category_id=category_id_by_name.get((row.get("category") or "").strip()),
+                            is_active=True,
+                        ))
+                        session.flush()
                     added += 1
                 except Exception as e:
-                    session.rollback()
                     skipped += 1
                     logger.warning("Product import: skipped %r: %s", row.get("name"), e)
 

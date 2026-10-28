@@ -215,6 +215,13 @@ def test_client_unique_vat_while_active(db_session):
         db_session.commit()
 
 
+def test_clients_may_share_address_phone_email_and_website(db_session):
+    shared = dict(street="1 Main St", zip_code="1000", city="Brussels", phone="02", email="a@x.com", website="x.com")
+    db_session.add(Client(name="A", vatNumber="V1", **shared))
+    db_session.add(Client(name="B", vatNumber="V2", **shared))
+    db_session.commit()  # should not raise
+
+
 def test_client_requires_address(db_session):
     db_session.add(Client(name="A", vatNumber="V1"))
     with pytest.raises(IntegrityError):
@@ -222,8 +229,7 @@ def test_client_requires_address(db_session):
 
 
 def test_client_null_optional_fields_do_not_collide(db_session):
-    """phone/email/website are nullable; multiple NULLs must not
-    trip the partial unique indexes (SQL NULL != NULL)."""
+    """phone/email/website are nullable; several clients without them is fine."""
     db_session.add(Client(name="A", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels", phone=None, email=None, website=None))
     db_session.add(Client(name="B", vatNumber="V2", street="2 Main St", zip_code="1000", city="Brussels", phone=None, email=None, website=None))
     db_session.commit()  # should not raise

@@ -24,21 +24,18 @@ def _restore_root_logger_and_excepthook():
     sys.excepthook = original_excepthook
 
 
-def test_setup_logging_creates_log_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_setup_logging_creates_log_file(tmp_path):
+    error_handling.setup_logging(tmp_path / "SuperPOS" / "logs")
 
-    error_handling.setup_logging()
-
-    log_file = tmp_path / "logs" / "pos.log"
+    log_file = tmp_path / "SuperPOS" / "logs" / "pos.log"
     assert log_file.parent.is_dir()
     # RotatingFileHandler creates the file lazily on first emit, but the dir must exist.
     logging.getLogger("pos").info("hello")
     assert log_file.exists()
 
 
-def test_setup_logging_file_gets_debug_panel_gets_info(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    error_handling.setup_logging()
+def test_setup_logging_file_gets_debug_panel_gets_info(tmp_path):
+    error_handling.setup_logging(tmp_path / "logs")
     root = logging.getLogger()
     file_handler = next(h for h in root.handlers
                         if isinstance(h, logging.handlers.RotatingFileHandler))

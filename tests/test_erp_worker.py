@@ -74,3 +74,22 @@ def test_exception_emits_failed(run_worker):
     succeeded, failed = run_worker(FakeErp(error=Exception("HTTP 500")))
     assert succeeded == []
     assert failed == ["HTTP 500"]
+
+
+def test_wait_for_all_waits_for_a_running_send(qtbot):
+    """Quitting mid-send must wait: a destroyed running QThread aborts the app."""
+    import threading
+    release = threading.Event()
+
+    class SlowErp:
+        def create_post_invoice(self, invoice_data):
+            release.wait(5)
+            return 1, True
+
+    worker = InvoiceSendWorker(SlowErp(), {"inv_num": "I-1"}, use_peppol=False, use_email=True)
+    worker.start()
+    threading.Timer(0.2, release.set).start()
+
+    InvoiceSendWorker.wait_for_all()
+
+    assert not worker.isRunning()

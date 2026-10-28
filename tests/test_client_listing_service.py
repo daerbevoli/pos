@@ -5,7 +5,8 @@ from datetime import date, datetime
 from app.core.client_listing_service import ClientListingService, LISTING_HEADERS
 from app.core.client_service import ClientService
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, CartItem, SalesService
+from app.core.cart import Cart, CartItem
+from app.core.sales_service import SalesService
 
 
 def _make_client(session, name, vat):

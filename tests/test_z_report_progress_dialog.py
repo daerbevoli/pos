@@ -112,9 +112,9 @@ def _typed_code(monkeypatch, code):
 
 def test_failed_backup_before_can_be_overridden_with_the_admin_code(qtbot, patched_db, backups, printed, monkeypatch):
     from PyQt6.QtWidgets import QLineEdit
-    from app.core.admin import ADMIN_CODE
+    from app.core.admin import DEFAULT_ADMIN_CODE
     backups["fail"].add("pre-z")
-    asked = _typed_code(monkeypatch, ADMIN_CODE)
+    asked = _typed_code(monkeypatch, DEFAULT_ADMIN_CODE)
 
     d = _run(qtbot, QMessageBox.StandardButton.Yes, monkeypatch)
 
@@ -142,12 +142,27 @@ def test_admin_code_is_only_asked_when_the_backup_fails(qtbot, patched_db, backu
     assert asked == []
 
 
-def test_check_admin_code():
-    from app.core.admin import ADMIN_CODE, check_admin_code
-    assert check_admin_code(ADMIN_CODE)
-    assert not check_admin_code(ADMIN_CODE + "0")
+def test_check_admin_code(patched_db):
+    from app.core.admin import DEFAULT_ADMIN_CODE, check_admin_code
+    assert check_admin_code(DEFAULT_ADMIN_CODE)
+    assert not check_admin_code(DEFAULT_ADMIN_CODE + "0")
     assert not check_admin_code("")
     assert not check_admin_code(None)
+
+
+def test_changed_admin_code_replaces_the_default(patched_db):
+    from app.core.admin import DEFAULT_ADMIN_CODE, check_admin_code, set_admin_code
+    set_admin_code("975310")
+    assert check_admin_code("975310")
+    assert not check_admin_code(DEFAULT_ADMIN_CODE)
+
+
+@pytest.mark.parametrize("code", ["123", "12a4", "12.4", ""])
+def test_admin_code_must_be_at_least_four_digits(patched_db, code):
+    from app.core.admin import admin_code_problem, set_admin_code
+    assert admin_code_problem(code) is not None
+    with pytest.raises(ValueError):
+        set_admin_code(code)
 
 
 def test_failed_backup_after_is_reported_but_z_is_done(qtbot, patched_db, backups, printed):

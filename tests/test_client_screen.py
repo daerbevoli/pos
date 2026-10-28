@@ -117,6 +117,24 @@ def test_new_client_happy_path_persists(screen):
     assert found is not None
     assert found.vatNumber == "BE0801427262"
 
+def test_new_client_clashing_with_existing_shows_reason_instead_of_crashing(screen):
+    _add_client(name="Acme", vatNumber="BE0801427262")
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.name.setText("Other Name")
+    panel.street.setText("9 Other St")
+    panel.zip_code.setText("2000")
+    panel.city.setText("Antwerp")
+    panel.vatNumber.setText("BE0801427262")
+
+    panel._on_ok()
+
+    assert panel._mode == "new"  # still editing, nothing saved
+    assert panel.overlay.message_label.text() == "VAT number already used by Acme"
+    with get_session() as session:
+        assert ClientService.get_by_name(session, "Other Name") is None
+
+
 def test_new_client_validation_blocks_empty_name(screen):
     panel = screen.detail_panel
     panel._start_new()
@@ -474,6 +492,30 @@ def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path
         names = {c.name for c in ClientService.get_all(session)}
     assert "Good Row" in names
     assert "Bad Row" not in names
+
+
+def test_import_csv_clashing_row_keeps_rows_imported_before_it(screen, monkeypatch, tmp_path):
+    """A row hitting a unique index (same name, other VAT) must only undo
+    itself, not every row imported before it in the same transaction."""
+    csv_path = tmp_path / "clients.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["name", "vat", "Street", "City", "Country"])
+        writer.writeheader()
+        writer.writerow({"name": "First", "vat": "BE0234567873", "Street": "1 Main St", "City": "Town", "Country": "BE"})
+        writer.writerow({"name": "First", "vat": "BE0345678997", "Street": "2 Main St", "City": "Town", "Country": "BE"})
+        writer.writerow({"name": "Third", "vat": "BE0567890161", "Street": "3 Main St", "City": "Town", "Country": "BE"})
+
+    monkeypatch.setattr(
+        "app.ui.client_screen.FileDialog",
+        lambda parent=None: _FakeFileDialog(str(csv_path)),
+    )
+
+    screen.detail_panel._on_import()
+
+    with get_session() as session:
+        vats = sorted(c.vatNumber for c in ClientService.get_all(session))
+    assert vats == ["BE0234567873", "BE0567890161"]
+    assert "2 added, 1 skipped" in screen.detail_panel.overlay.message_label.text()
 
 
 # ── Buttons stay pressable; handlers check the conditions ───────────────

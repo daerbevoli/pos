@@ -90,9 +90,10 @@ class QtLogHandler(logging.Handler):
 qt_log_handler = QtLogHandler()
 
 
-def setup_logging():
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+def setup_logging(log_dir: Path):
+    """log_dir must be an absolute, writable folder: the one-file .exe runs
+    from a temp dir and may be started from a read-only working directory."""
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     handler = logging.handlers.RotatingFileHandler(
         log_dir / "pos.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8"

@@ -7,6 +7,7 @@ an isolated in-memory engine before touching anything — never the real
 per-user database file.
 """
 import os
+import sys
 
 import pytest
 from sqlalchemy import create_engine
@@ -28,7 +29,7 @@ def _memory_engine():
 # ── get_db_path ──────────────────────────────────────────────────────────
 
 def test_get_db_path_windows(monkeypatch, tmp_path):
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setenv("APPDATA", str(tmp_path))
 
     path = database.get_db_path()
@@ -38,7 +39,7 @@ def test_get_db_path_windows(monkeypatch, tmp_path):
 
 
 def test_get_db_path_falls_back_to_home_without_appdata(monkeypatch, tmp_path):
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.delenv("APPDATA", raising=False)
     monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path))
 
@@ -132,6 +133,27 @@ def test_column_migration_adds_missing_column_preserving_data(monkeypatch):
     with engine.connect() as conn:
         rows = conn.exec_driver_sql("SELECT id, name, colour FROM widgets").fetchall()
     assert rows == [(1, "a", "red")]
+
+
+def test_migrations_drop_client_contact_unique_indexes_from_older_database(monkeypatch):
+    """Databases from before only name/VAT were unique still carry unique
+    indexes on address/phone/email/website; they must go, the others stay."""
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE UNIQUE INDEX ux_clients_address_active ON clients (street, zip_code, city) WHERE is_active = 1")
+        conn.exec_driver_sql("CREATE UNIQUE INDEX ux_clients_email_active ON clients (email) WHERE is_active = 1")
+        conn.commit()
+    monkeypatch.setattr(database, "ENGINE", engine)
+
+    database._run_migrations()
+    database._run_migrations()  # idempotent
+
+    with engine.connect() as conn:
+        names = {row[0] for row in conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'clients'")}
+    assert "ux_clients_address_active" not in names and "ux_clients_email_active" not in names
+    assert {"ux_clients_name_active", "ux_clients_vatnumber_active"} <= names
 
 
 def test_migrations_add_invoice_payment_columns_to_older_database(monkeypatch):

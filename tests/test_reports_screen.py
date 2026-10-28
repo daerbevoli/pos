@@ -5,7 +5,8 @@ from PyQt6.QtCore import QDate
 from app.ui.reports_screen import ReportsScreen
 from app.core.report_service import _payment_breakdown, _amount_for_method, _discounts_and_mistakes
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, CartItem, DiscountEntry, SalesService
+from app.core.cart import Cart, CartItem, DiscountEntry
+from app.core.sales_service import SalesService
 from app.core.client_service import ClientService
 from app.core.database import get_session
 

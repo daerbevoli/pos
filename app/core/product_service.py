@@ -24,14 +24,14 @@ class ProductService:
 
     # ── Product CRUD ──────────────────────────────────────────────────────────
     @staticmethod
-    def get_all(session: Session, active_only=True) -> list[type[Product]]:
+    def get_all(session: Session, active_only=True) -> list[Product]:
         q = session.query(Product)
         if active_only:
             q = q.filter(Product.is_active == True)
         return q.order_by(Product.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, product_id: int) -> type[Product] | None:
+    def get_by_id(session: Session, product_id: int) -> Product | None:
         return session.query(Product).filter_by(id=product_id).first()
 
     @staticmethod
@@ -44,11 +44,10 @@ class ProductService:
         return query.first()
 
     @staticmethod
-    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Product]]:
-        """Search by name or barcode."""
-        term = f"%{query}%"
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[Product]:
+        """Products whose name or barcode contains `query`."""
         q = session.query(Product).filter(
-            (Product.barcode.startswith(term)) | (Product.name.startswith(term))
+            Product.barcode.contains(query, autoescape=True) | Product.name.contains(query, autoescape=True)
         )
         if not include_inactive:
             q = q.filter(Product.is_active == True)

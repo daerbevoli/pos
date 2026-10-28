@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.receipt_service import PrinterError, _get_backend, _parse_id
 from app.core.settings_service import SettingsService
 from app.models.models import Product
+from app.utils.barcodes import barcode_symbology
 
 logger = logging.getLogger(__name__)
 
@@ -66,21 +67,39 @@ def _open(vendor_id: str, product_id: str):
         logger.error("Could not connect to label printer USB %s:%s: %s", vendor_id, product_id, e)
         raise PrinterError(f"Could not connect to label printer: {e}") from e
 
-#TODO: check EAN-8 barcodes by scanning one in Notepad, then decide whether to use leading 0s or make label print EAN-8
+BARCODE_X = 60  # left edge of the barcode, in dots
+
+
+def _zpl_barcode(barcode: str, y: int) -> str:
+    """The ZPL barcode field for `barcode`, in the symbology that scans back
+    as the same digits (see app.utils.barcodes). The EAN/UPC commands get the
+    code without its check digit: the printer adds it."""
+    kind = barcode_symbology(barcode)
+    if kind == "EAN13":
+        return f"^FO{BARCODE_X},{y}^BY3^BEN,45,Y,N^FD{barcode[:12]}^FS"
+    if kind == "UPCA":
+        return f"^FO{BARCODE_X},{y}^BY3^BUN,45,Y,N,Y^FD{barcode[:11]}^FS"
+    if kind == "EAN8":
+        return f"^FO{BARCODE_X},{y}^BY3^B8N,45,Y,N^FD{barcode[:7]}^FS"
+    # Code 128 in automatic mode (digit pairs packed two per symbol). Roughly
+    # 11 modules per symbol plus start/check/stop: narrow the bars when the
+    # code would otherwise run off the label.
+    symbols = (len(barcode) + 1) // 2 if barcode.isdigit() else len(barcode)
+    module = 2 if (11 * symbols + 35) * 2 <= LABEL_WIDTH_DOTS - BARCODE_X else 1
+    return f"^FO{BARCODE_X},{y}^BY{module}^BCN,45,Y,N,N,A^FD{barcode}^FS"
+
 
 def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | None = None) -> str:
     """
     Builds a ZPL label: name at top, barcode in middle, price at bottom.
     Label size: 56mm x 32mm @ 203dpi (448 x 256 dots).
-    barcode must be exactly 12 digits (EAN-13 auto-computes the check digit).
+    The barcode prints as EAN-13, UPC-A or EAN-8 when it is one, else Code 128.
 
     With `promo` ({"price": new price text}), the bottom row becomes
     "PROMO" on the left in a different font (^AD at 2x, vs the regular
     ^A0), and on the right, flush with the label edge, the old price
     struck through above the promo price — leaving the middle empty.
     """
-    barcode_data = barcode[:12]
-
     unit_data = f" / {unit}" if unit in {"kg", "g", "l", "ml"} else ""
     if promo is None:
         barcode_y = 100
@@ -96,27 +115,28 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
         price_right = price_x + price_block_width  # where both prices end
         strike_width = len(price) * 12  # ~12 dots/char at ^A0 24pt
         bottom = f"""
-^FO20,203^ADN,36,20^FDPROMO^FS
-^FO{price_x},178^FB{price_block_width},1,0,R,0^A0N,24,24^FD{price}^FS
-^FO{price_right - strike_width},189^GB{strike_width},3,3^FS
-^FO{price_x},206^FB{price_block_width},1,0,R,0^A0N,44,34^FD{promo["price"]}{unit_data}^FS"""
+                ^FO20,203^ADN,36,20^FDPROMO^FS
+                ^FO{price_x},178^FB{price_block_width},1,0,R,0^A0N,24,24^FD{price}^FS
+                ^FO{price_right - strike_width},189^GB{strike_width},3,3^FS
+                ^FO{price_x},206^FB{price_block_width},1,0,R,0^A0N,44,34^FD{promo["price"]}{unit_data}^FS
+                """
 
     return f"""
-^XA
-^CI28
-^PW{LABEL_WIDTH_DOTS}
-^LL{LABEL_HEIGHT_DOTS}
-^MNY
-^MD15
-
-^FO30,15^A0N,30,30^FB408,2,4,L,0^FD{name}^FS
-
-^FO60,{barcode_y}^BY3^BEN,45,Y,N^FD{barcode_data}^FS
-{bottom}
-
-^PQ1
-^XZ
-"""
+            ^XA
+            ^CI28
+            ^PW{LABEL_WIDTH_DOTS}
+            ^LL{LABEL_HEIGHT_DOTS}
+            ^MNY
+            ^MD15
+            
+            ^FO30,15^A0N,30,30^FB408,2,4,L,0^FD{name}^FS
+            
+            {_zpl_barcode(barcode, barcode_y)}
+            {bottom}
+            
+            ^PQ1
+            ^XZ
+            """
 
 
 def promo_label_data(product: Product, currency: str) -> dict | None:

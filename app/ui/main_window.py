@@ -14,6 +14,7 @@ import logging
 from app.constants.sizes import MAIN_WINDOW_SIZE
 from app.core.backup_service import KIND_DAILY, BackupService
 from app.core.backup_worker import BackupWorker
+from app.core.erp_worker import InvoiceSendWorker
 from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
 from app.ui.customer_display import CustomerDisplay
@@ -174,6 +175,8 @@ class MainWindow(QMainWindow):
     # ── Salesperson ───────────────────────────────────────────────────────────
 
     def _refresh_salesperson(self):
+        if self.settings_screen.is_admin:
+            return  # saving settings in admin mode mustn't show the cashier's name
         with get_session() as session:
             name = SettingsService.get(session, "cashier_name", "Cashier")
         self._set_salesperson(name)
@@ -267,6 +270,7 @@ class MainWindow(QMainWindow):
         self._backup_timer.timeout.connect(self._maybe_daily_backup)
         self._backup_timer.start(BACKUP_CHECK_INTERVAL_MS)
         QApplication.instance().aboutToQuit.connect(BackupWorker.wait_for_all)
+        QApplication.instance().aboutToQuit.connect(InvoiceSendWorker.wait_for_all)
 
     def _maybe_daily_backup(self):
         """Take today's noon backup in the background, if it's due (see

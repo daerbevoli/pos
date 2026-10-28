@@ -11,8 +11,11 @@ from app.core.label_sheet_service import (
 
 @pytest.mark.parametrize("barcode, expected", [
     ("2060000000019", "EAN13"),
-    ("206000000001", "EAN13"),
+    ("036000291452", "UPCA"),         # 12 digits is UPC-A, not EAN-13 data
     ("96385074", "EAN8"),
+    ("2060000000018", "Code128"),     # wrong check digit: EAN-13 would print ...019
+    ("206000000001", "Code128"),      # 12 digits, not a valid UPC-A
+    ("9638507", "Code128"),           # EAN-8 data would print 8 digits
     ("ABC-123", "Code128"),
     ("12345", "Code128"),
 ])

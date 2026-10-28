@@ -416,6 +416,11 @@ class ClientDetailPanel(QFrame):
                 return
             data = self._collect_data()
             with get_session() as session:
+                exclude_id = self.current_client_id if self._mode == "edit" else None
+                clash = ClientService.find_clash(session, data, exclude_id=exclude_id)
+                if clash:
+                    self._show_overlay(clash, kind="error")
+                    return
                 if self._mode == "new":
                     client = ClientService.create(session, **data)
                     self.current_client_id = client.id
@@ -565,9 +570,8 @@ class ClientDetailPanel(QFrame):
                 try:
                     vat = row.get("vat")
                     email = row.get("email") or None
+                    # Already imported = same VAT number. A shared email is fine.
                     existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
-                    if not existing and email:
-                        existing = session.query(Client).filter_by(email=email).first()
                     street = (row.get("street") or row.get("Street") or "").strip()
                     zip_code = (row.get("zip") or row.get("Zip") or row.get("zip_code") or "").strip()
                     city = (row.get("city") or row.get("City") or "").strip()
@@ -585,21 +589,23 @@ class ClientDetailPanel(QFrame):
                         continue
 
                     phone = (row.get("phone") or "").lstrip("'") or None
-                    session.add(Client(
-                        name=row.get("name"),
-                        vatNumber=vat,
-                        street=street,
-                        zip_code=zip_code,
-                        city=city,
-                        country=country,
-                        phone=phone,
-                        email=email,
-                        is_active=True,
-                    ))
-                    session.flush()
+                    # A savepoint per row: a bad row undoes only itself, not
+                    # the rows already imported in this transaction.
+                    with session.begin_nested():
+                        session.add(Client(
+                            name=row.get("name"),
+                            vatNumber=vat,
+                            street=street,
+                            zip_code=zip_code,
+                            city=city,
+                            country=country,
+                            phone=phone,
+                            email=email,
+                            is_active=True,
+                        ))
+                        session.flush()
                     clients_added += 1
                 except Exception as e:
-                    session.rollback()
                     clients_skipped += 1
                     logger.warning("Client import: skipped %r: %s", row.get("name"), e)
 
@@ -607,6 +613,7 @@ class ClientDetailPanel(QFrame):
 
         logger.info("Client import from %s: %d added, %d skipped", path, clients_added, clients_skipped)
         self.parent_screen.refresh()
+        self._show_overlay(f"Import complete: {clients_added} added, {clients_skipped} skipped.")
 
 
     def _show_overlay(self, message: str, kind: str = "info"):
@@ -776,8 +783,8 @@ class ClientScreen(QWidget):
             reactivated = ClientService.reactivate(session, client_id)
         if not reactivated:
             self.detail_panel._show_overlay(
-                "Can't reactivate: an active client already uses the same name, "
-                "address, phone, email, VAT number or website.", kind="error")
+                "Can't reactivate: an active client already uses the same name "
+                "or VAT number.", kind="error")
             return
         self.refresh()
         self._select_client_row(client_id)

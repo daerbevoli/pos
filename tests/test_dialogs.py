@@ -1,14 +1,11 @@
 """
-Tests for the small standalone dialogs: NumpadDialog, PaymentDialog,
-FileDialog.
+Tests for the small standalone dialogs: NumpadDialog and FileDialog.
 """
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QPushButton
 
 from app.ui.dialogs.numpad_dialog import NumpadDialog
-from app.ui.dialogs.payment_dialog import PaymentDialog
 from app.ui.dialogs.file_dialog import FileDialog
-from app.core.sales_service import Cart, CartItem
 
 
 # ── NumpadDialog ─────────────────────────────────────────────────────────
@@ -70,99 +67,6 @@ def test_numpad_dialog_cancel_rejects(qtbot):
     cancel_btn = next(b for b in dlg.findChildren(QPushButton) if b.text() == "Cancel")
     cancel_btn.click()
     assert dlg.result() == QDialog.DialogCode.Rejected
-
-
-# ── PaymentDialog ────────────────────────────────────────────────────────
-
-def _cart_with_total(total: float) -> Cart:
-    return Cart(entries=[
-        CartItem(product_id=1, product_name="X", product_barcode="1", unit_price=total, quantity=1)
-    ])
-
-
-def test_payment_dialog_cash_defaults_to_exact_amount(qtbot):
-    cart = _cart_with_total(15.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    assert dlg.tendered_input.text() == "15.00"
-    assert dlg.change_label.text() == "Change: €0.00"
-
-
-def test_payment_dialog_cash_shows_change_for_overpayment(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg.tendered_input.setText("20.00")
-    assert dlg.change_label.text() == "Change: €10.00"
-
-
-def test_payment_dialog_cash_shows_insufficient_warning(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg.tendered_input.setText("5.00")
-    assert "Insufficient" in dlg.change_label.text()
-    assert "5.00" in dlg.change_label.text()
-
-
-def test_payment_dialog_cash_invalid_input_shows_dash(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg.tendered_input.setText("abc")
-    assert dlg.change_label.text() == "Change: —"
-
-
-def test_payment_dialog_quick_cash_button_sets_amount(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg._set_tendered(20)
-    assert dlg.tendered_input.text() == "20.00"
-
-
-def test_payment_dialog_confirm_blocks_underpayment(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg.tendered_input.setText("5.00")
-    dlg._confirm()
-    assert dlg.result() != QDialog.DialogCode.Accepted
-
-
-def test_payment_dialog_confirm_accepts_exact_or_over_payment(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg.tendered_input.setText("10.00")
-    dlg._confirm()
-    assert dlg.result() == QDialog.DialogCode.Accepted
-    assert dlg.amount_tendered == 10.0
-
-
-def test_payment_dialog_confirm_invalid_text_does_not_accept(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "cash", "€")
-    qtbot.addWidget(dlg)
-    dlg.tendered_input.setText("not a number")
-    dlg._confirm()
-    assert dlg.result() != QDialog.DialogCode.Accepted
-
-
-def test_payment_dialog_card_method_has_no_tendered_input(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "card", "€")
-    qtbot.addWidget(dlg)
-    assert not hasattr(dlg, "tendered_input")
-
-
-def test_payment_dialog_card_confirm_always_accepts(qtbot):
-    cart = _cart_with_total(10.0)
-    dlg = PaymentDialog(cart, "card", "€")
-    qtbot.addWidget(dlg)
-    dlg._confirm()
-    assert dlg.result() == QDialog.DialogCode.Accepted
-
 
 # ── FileDialog ───────────────────────────────────────────────────────────
 

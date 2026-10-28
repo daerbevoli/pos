@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app.core.sales_service import (
+from app.core.cart import (
     Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker, calc_tax,
 )
 
@@ -137,19 +137,14 @@ def test_discount_entry_line_total_rounds_to_2dp():
 
 # ── Cart aggregate properties ───────────────────────────────────────────
 
-def test_cart_subtotal_sums_items_and_discounts_only():
+def test_cart_total_sums_items_and_discounts_only():
     cart = Cart(entries=[
         CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=1),
         DiscountEntry(amount=2.0, label="2"),
         PaymentEntry(method="cash", amount=100.0),
         SubtotalMarker(),
     ])
-    assert cart.subtotal == 8.0
-
-
-def test_cart_total_equals_subtotal():
-    cart = Cart(entries=[CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=3.0, quantity=2)])
-    assert cart.total == cart.subtotal == 6.0
+    assert cart.total == 8.0
 
 
 def test_cart_paid_total_sums_payment_entries():
@@ -168,21 +163,11 @@ def test_cart_remaining_due():
     assert cart.remaining_due == 15.0
 
 
-def test_cart_item_count_ignores_pending_items():
-    cart = Cart(entries=[
-        CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=1.0, quantity=3),
-        CartItem(product_id=2, product_name="B", product_barcode="2", unit_price=1.0, quantity=None),
-    ])
-    assert cart.item_count == 3
-
-
 def test_empty_cart_properties():
     cart = Cart()
-    assert cart.subtotal == 0.0
     assert cart.total == 0.0
     assert cart.paid_total == 0.0
     assert cart.remaining_due == 0.0
-    assert cart.item_count == 0
 
 
 # ── Cart.add_product merging ─────────────────────────────────────────────
@@ -310,7 +295,7 @@ def test_add_product_copies_active_promo_onto_the_line():
     assert discount.amount == 3.0
     assert discount.line_total == -3.0
 
-    assert cart.subtotal == 17.0  # 20.0 gross - 3.0 promo
+    assert cart.total == 17.0  # 20.0 gross - 3.0 promo
 
 
 def test_add_product_ignores_inactive_promo():
@@ -392,14 +377,14 @@ def test_sync_promo_discounts_leaves_manual_discounts_alone():
     assert len(promo_driven) == 1
 
 
-def test_remove_item_drops_its_promo_discount_too():
+def test_remove_entry_drops_its_promo_discount_too():
     cart = Cart()
     promo = _FakePromo(discount_type="percent", discount_value=10.0)
     product = _FakeProduct(id=1, price=10.0, promo=promo)
     cart.add_product(product, quantity=1)
     assert len(cart.entries) == 2
 
-    cart.remove_item(1)
+    cart.remove_entry(cart.entries[0])
 
     assert cart.entries == []
 
@@ -445,7 +430,7 @@ def test_sync_promo_discounts_drops_entry_for_a_reversed_line():
     cart.sync_promo_discounts()
 
     assert [type(e).__name__ for e in cart.entries] == ["CartItem", "CartItem"]
-    assert cart.subtotal == 0.0  # gross fully cancels, no leftover discount
+    assert cart.total == 0.0  # gross fully cancels, no leftover discount
 
 
 # ── Subtotal markers ─────────────────────────────────────────────────────
@@ -457,40 +442,33 @@ def test_add_subtotal_appends_marker():
     assert isinstance(cart.entries[0], SubtotalMarker)
 
 
-def test_clear_subtotals_removes_only_markers():
-    cart = Cart()
-    product = _FakeProduct(id=1, price=1.0)
-    cart.add_product(product, quantity=1)
-    cart.add_subtotal()
-    cart.add_product(product, quantity=1)
+# ── remove_entry / clear ─────────────────────────────────────────────────
 
-    cart.clear_subtotals()
-
-    assert all(not isinstance(e, SubtotalMarker) for e in cart.entries)
-    assert len(cart.entries) == 2
-
-
-# ── remove_item / clear ──────────────────────────────────────────────────
-
-def test_remove_item_removes_first_match():
+def test_remove_entry_removes_that_line():
     cart = Cart()
     p1 = _FakeProduct(id=1, price=1.0)
     p2 = _FakeProduct(id=2, price=2.0)
     cart.add_product(p1, quantity=1)
     cart.add_product(p2, quantity=1)
 
-    cart.remove_item(1)
+    assert cart.remove_entry(cart.entries[0]) == "removed"
 
     assert len(cart.entries) == 1
     assert cart.entries[0].product_id == 2
 
 
-def test_remove_item_missing_product_is_noop():
+def test_remove_entry_removes_the_given_line_not_an_identical_one():
+    """Identical lines compare equal; the selected one must be the one removed."""
     cart = Cart()
     product = _FakeProduct(id=1, price=1.0)
     cart.add_product(product, quantity=1)
-    cart.remove_item(999)
-    assert len(cart.entries) == 1
+    cart.add_product(product, quantity=1)
+    second = cart.entries[1]
+    second.locked = True  # tell them apart
+
+    cart.remove_entry(cart.entries[0])
+
+    assert cart.entries == [second] and cart.entries[0] is second
 
 
 def test_clear_empties_all_entries():
@@ -728,48 +706,52 @@ def test_calc_tax_rounds_to_2dp():
     assert result == round(result, 2)
 
 
-# ── net_line_totals: discounts lower each line's taxable amount ──────────
+# ── net_lines: discounts lower each line's taxable amount ────────────────
 
 def _line(price, qty=1, tax=21, **kw):
     return CartItem(product_id=1, product_name="X", product_barcode="", unit_price=price,
                     quantity=qty, tax_rate=tax, **kw)
 
 
-def test_net_line_totals_without_discounts_are_line_totals():
+def _nets(cart):
+    return [(line.item, line.net) for line in cart.net_lines()]
+
+
+def test_net_lines_without_discounts_are_line_totals():
     a, b = _line(10.0), _line(5.0, qty=2)
-    assert Cart(entries=[a, b]).net_line_totals() == [(a, 10.0), (b, 10.0)]
+    assert _nets(Cart(entries=[a, b])) == [(a, 10.0), (b, 10.0)]
 
 
 def test_item_discount_comes_off_that_item_only():
     a, b = _line(10.0), _line(5.0)
     cart = Cart(entries=[a, DiscountEntry(amount=2.0, label="promo", is_promo=True), b])
-    assert cart.net_line_totals() == [(a, 8.0), (b, 5.0)]
+    assert _nets(cart) == [(a, 8.0), (b, 5.0)]
 
 
 def test_manual_discount_after_promo_still_targets_the_item():
     a = _line(10.0)
     cart = Cart(entries=[a, DiscountEntry(amount=1.0, label="promo", is_promo=True),
                          DiscountEntry(amount=2.0, label="MANUAL DISCOUNT 2.00")])
-    assert cart.net_line_totals() == [(a, 7.0)]
+    assert _nets(cart) == [(a, 7.0)]
 
 
 def test_section_discount_is_split_pro_rata_across_rates():
     food, drink = _line(30.0, tax=6), _line(10.0, tax=21)
     cart = Cart(entries=[food, drink, SubtotalMarker(), DiscountEntry(amount=4.0, label="MANUAL DISCOUNT 10%")])
-    assert cart.net_line_totals() == [(food, 27.0), (drink, 9.0)]
+    assert _nets(cart) == [(food, 27.0), (drink, 9.0)]
 
 
 def test_section_discount_only_covers_its_own_section():
     a, b, c = _line(10.0), _line(10.0), _line(20.0)
     cart = Cart(entries=[a, SubtotalMarker(), b, c, SubtotalMarker(),
                          DiscountEntry(amount=3.0, label="MANUAL DISCOUNT 3.00")])
-    assert cart.net_line_totals() == [(a, 10.0), (b, 9.0), (c, 18.0)]
+    assert _nets(cart) == [(a, 10.0), (b, 9.0), (c, 18.0)]
 
 
 def test_section_discount_rounding_remainder_keeps_the_total_exact():
     items = [_line(1.0), _line(1.0), _line(1.0)]
     cart = Cart(entries=[*items, SubtotalMarker(), DiscountEntry(amount=1.0, label="MANUAL DISCOUNT 1.00")])
-    nets = [net for _, net in cart.net_line_totals()]
+    nets = [net for _, net in _nets(cart)]
     assert nets == [0.67, 0.67, 0.66]
     assert round(sum(nets), 2) == cart.total
 
@@ -777,7 +759,7 @@ def test_section_discount_rounding_remainder_keeps_the_total_exact():
 def test_refund_promo_discount_reduces_the_negative_line():
     a = _line(10.0, qty=-1)
     cart = Cart(entries=[a, DiscountEntry(amount=-2.0, label="promo", is_promo=True)], is_refund=True)
-    assert cart.net_line_totals() == [(a, -8.0)]
+    assert _nets(cart) == [(a, -8.0)]
 
 
 # ── reversal links survive the snapshot round-trip ───────────────────────

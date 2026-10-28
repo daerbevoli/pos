@@ -11,6 +11,29 @@ from app.ui.settings_screen import SettingsScreen
 from app.core.settings_service import SettingsService
 
 
+class _FakeNumpad:
+    """Stands in for the admin-code NumpadDialog: "types" `code` and presses
+    OK, or the next of `queue` when a test sets one (None = Cancel)."""
+    code = "2060"
+    queue: list = []
+
+    def __init__(self, *args, **kwargs):
+        self.value = None
+
+    def exec(self):
+        self.value = _FakeNumpad.queue.pop(0) if _FakeNumpad.queue else _FakeNumpad.code
+        return self.value is not None
+
+
+@pytest.fixture(autouse=True)
+def _admin_code_typed(monkeypatch):
+    """Settings' Admin button asks for the code; type the right one unless a
+    test sets _FakeNumpad.code to something else."""
+    monkeypatch.setattr("app.ui.settings_screen.NumpadDialog", _FakeNumpad)
+    monkeypatch.setattr(_FakeNumpad, "code", "2060")
+    monkeypatch.setattr(_FakeNumpad, "queue", [])
+
+
 @pytest.fixture
 def screen(qtbot, patched_db):
     s = SettingsScreen()
@@ -193,6 +216,75 @@ def test_admin_sets_flag_and_emits_signals(screen, qtbot):
         screen._admin()
     assert screen.is_admin is True
     assert [sig.args for sig in blocker.all_signals_and_args] == [(True,), ("Admin",)]
+
+
+def test_admin_refused_with_wrong_code(screen, monkeypatch):
+    monkeypatch.setattr(_FakeNumpad, "code", "1234")
+    emitted = []
+    screen.admin_changed.connect(emitted.append)
+
+    screen._admin()
+
+    assert screen.is_admin is False
+    assert emitted == []
+    assert screen.overlay.message_label.text() == "Wrong code."
+
+
+def test_admin_button_again_leaves_admin_mode(screen, qtbot):
+    from app.core.database import get_session
+    with get_session() as session:
+        SettingsService.set(session, "cashier_name", "Ann")
+    screen._admin()
+
+    with qtbot.waitSignals([screen.admin_changed, screen.salesperson_changed], timeout=1000) as blocker:
+        screen._admin()
+
+    assert screen.is_admin is False
+    assert [sig.args for sig in blocker.all_signals_and_args] == [(False,), ("Ann",)]
+
+
+def test_admin_code_change_needs_admin_mode(screen, monkeypatch):
+    from app.core.admin import check_admin_code
+    monkeypatch.setattr(_FakeNumpad, "queue", ["5555", "5555"])
+    screen._change_admin_code()
+    assert screen.overlay.message_label.text() == "Only admin."
+    assert not check_admin_code("5555")
+
+
+def test_admin_code_change_typed_twice_takes_effect(screen, monkeypatch):
+    from app.core.admin import check_admin_code
+    screen._admin()
+    monkeypatch.setattr(_FakeNumpad, "queue", ["5555", "5555"])
+
+    screen._change_admin_code()
+
+    assert screen.overlay.message_label.text() == "Admin code changed."
+    assert check_admin_code("5555") and not check_admin_code("2060")
+
+
+@pytest.mark.parametrize("typed, message", [
+    (["5555", "5556"], "The codes didn't match. Admin code not changed."),
+    (["55"], "The admin code needs at least 4 digits."),
+    (["5555", None], "The codes didn't match. Admin code not changed."),
+])
+def test_admin_code_change_refused_keeps_the_old_code(screen, monkeypatch, typed, message):
+    from app.core.admin import check_admin_code
+    screen._admin()
+    monkeypatch.setattr(_FakeNumpad, "queue", typed)
+
+    screen._change_admin_code()
+
+    assert screen.overlay.message_label.text() == message
+    assert check_admin_code("2060")
+
+
+def test_admin_code_never_reaches_the_log(screen, monkeypatch, caplog):
+    import logging
+    screen._admin()
+    monkeypatch.setattr(_FakeNumpad, "queue", ["8642", "8642"])
+    with caplog.at_level(logging.INFO):
+        screen._change_admin_code()
+    assert "8642" not in caplog.text
 
 
 def test_reports_blocked_without_admin(screen, monkeypatch, qtbot):

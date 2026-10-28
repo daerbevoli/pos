@@ -98,7 +98,7 @@ class Product(Base):
     description = Column(Text, nullable=True)
     price = Column(Float, nullable=False)                # Ignored at sale time when is_open_price is set
     is_open_price = Column(Boolean, nullable=False, default=False)  # True = price is typed in per sale
-    stock_quantity = Column(Integer, default=0)           # Float to support weight-based items
+    stock_quantity = Column(Float, default=0)             # Float: weighed items sell fractional amounts
     min_stock_level = Column(Integer, default=5)          # Alert threshold
     unit = Column(String(20), default="pcs")            # pcs, kg, liter, etc.
     tax = Column(Integer, nullable=False, default=21)    # 0, 6, 12, 21 %
@@ -188,9 +188,9 @@ class StockMovement(Base):
         Enum("purchase", "sale", "adjustment", "return", "waste", name="movement_type"),
         nullable=False
     )
-    quantity = Column(Integer, nullable=False)             # Positive = in, Negative = out
-    quantity_before = Column(Integer, nullable=False)
-    quantity_after = Column(Integer, nullable=False)
+    quantity = Column(Float, nullable=False)               # Positive = in, Negative = out
+    quantity_before = Column(Float, nullable=False)
+    quantity_after = Column(Float, nullable=False)
     reference = Column(String(50), nullable=True)        # Sale number or PO number
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -227,15 +227,13 @@ class Client(Base):
     website = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
 
-    # Uniqueness only matters among active clients — deactivating a client
-    # (soft delete) frees up its name/address/phone/email/vat/website for reuse.
+    # Only the name and VAT number identify a client; address, phone, email
+    # and website may be shared (companies in one building, one accountant).
+    # Unique among active clients only: deactivating a client (soft delete)
+    # frees its name/VAT for reuse.
     __table_args__ = (
         Index("ux_clients_name_active", "name", unique=True, sqlite_where=text("is_active = 1")),
-        Index("ux_clients_address_active", "street", "zip_code", "city", unique=True, sqlite_where=text("is_active = 1")),
-        Index("ux_clients_phone_active", "phone", unique=True, sqlite_where=text("is_active = 1")),
-        Index("ux_clients_email_active", "email", unique=True, sqlite_where=text("is_active = 1")),
         Index("ux_clients_vatnumber_active", "vatNumber", unique=True, sqlite_where=text("is_active = 1")),
-        Index("ux_clients_website_active", "website", unique=True, sqlite_where=text("is_active = 1")),
     )
 
     @property

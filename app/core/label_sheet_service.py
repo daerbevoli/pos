@@ -13,6 +13,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
+from app.utils.barcodes import barcode_symbology
+
 logger = logging.getLogger(__name__)
 
 # Labels per page -> (columns, rows). The grids divide A4 edge to edge, which
@@ -36,13 +38,8 @@ _MIN_SCALE, _MAX_SCALE = 0.8, 1.5
 
 
 def _barcode_type(barcode: str) -> str:
-    """EAN-13/EAN-8 where the code fits, otherwise Code128 (accepts any text)."""
-    if barcode.isdigit():
-        if len(barcode) in (12, 13):
-            return "EAN13"
-        if len(barcode) in (7, 8):
-            return "EAN8"
-    return "Code128"
+    """reportlab's name for the symbology that scans back as `barcode`."""
+    return barcode_symbology(barcode)
 
 
 def _fit_text(text: str, font: str, size: float, max_width: float) -> str:

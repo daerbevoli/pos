@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
-from app.core.admin import ADMIN_CODE  # noqa: F401  (used by the commented-out code check in _admin)
+from app.core.admin import admin_code_problem, check_admin_code, set_admin_code
 from app.core.database import get_session
 from app.core.erp_service import ErpService
 from app.core.label_service import LabelPrinterService
@@ -22,6 +22,7 @@ from app.core.settings_service import SettingsService
 from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_FUNCTION_BUTTON_HEIGHT, SETTINGS_OK_BUTTON_HEIGHT, SPACING_XS
 from app.ui.dialogs.backup_dialog import BackupDialog
 from app.ui.dialogs.category_dialog import CategoryDialog
+from app.ui.dialogs.numpad_dialog import NumpadDialog
 from app.ui.dialogs.promo_dialog import PromoDialog
 from app.ui.dialogs.shortcut_dialog import ShortcutDialog
 from app.ui.widgets.log_panel import LogPanel
@@ -122,6 +123,14 @@ class SettingsScreen(QWidget):
         store_form.addRow("Receipt Footer:", self.receipt_footer)
         store_form.addRow("Logo:", logo_row)
         left_col.addWidget(store_group)
+
+        admin_group = QGroupBox("Admin")
+        admin_row = QHBoxLayout(admin_group)
+        self.btn_admin_code = QPushButton("Change Admin Code")
+        self.btn_admin_code.clicked.connect(self._change_admin_code)
+        admin_row.addWidget(self.btn_admin_code)
+        admin_row.addStretch()
+        left_col.addWidget(admin_group)
         left_col.addStretch()
 
         sc_group = QGroupBox("Shortcuts")
@@ -559,21 +568,51 @@ class SettingsScreen(QWidget):
         self.navigate.emit(0)
 
     def _admin(self):
+        """Toggles admin mode: switching it on takes the admin code, switching
+        it off doesn't."""
+        if self.is_admin:
+            self.is_admin = False
+            logger.info("Admin mode disabled")
+            self.admin_changed.emit(False)
+            with get_session() as session:
+                cashier = SettingsService.get(session, "cashier_name", "Cashier")
+            self.salesperson_changed.emit(cashier)
+            return
+        dialog = NumpadDialog(title="Admin code", parent=self, masked=True)
+        if not dialog.exec():
+            return
+        if not check_admin_code(dialog.value):
+            logger.warning("Admin mode refused: wrong code")
+            self._show_overlay("Wrong code.")
+            return
         self.is_admin = True
         logger.info("Admin mode enabled")
         self.admin_changed.emit(True)
         self.salesperson_changed.emit("Admin")
-        # if self.is_admin:
-        #     self.is_admin = False
-        #     self.admin_changed.emit(False)
-        #     self.salesperson_changed.emit(self.cashier_name)
-        #     return
-        # dialog = NumpadDialog(title="Enter Code", parent=self)
-        # if dialog.exec():
-        #     if dialog.value == ADMIN_CODE:
-        #         self.is_admin = True
-        #         self.admin_changed.emit(True)
-        #         self.salesperson_changed.emit("Admin")
+
+    def _ask_code(self, title: str) -> str | None:
+        dialog = NumpadDialog(title=title, parent=self, masked=True)
+        return dialog.value if dialog.exec() else None
+
+    def _change_admin_code(self):
+        """Admin only: the new code typed twice, so a typo can't lock the
+        admin out."""
+        if not self.is_admin:
+            self._show_overlay("Only admin.")
+            logger.info("Admin code change refused: not in admin mode")
+            return
+        code = self._ask_code("New admin code")
+        if code is None:
+            return
+        problem = admin_code_problem(code)
+        if problem:
+            self._show_overlay(problem, kind="error")
+            return
+        if self._ask_code("Repeat new admin code") != code:
+            self._show_overlay("The codes didn't match. Admin code not changed.", kind="error")
+            return
+        set_admin_code(code)
+        self._show_overlay("Admin code changed.")
 
     def _rf_cn(self):
         """Asks MainWindow to toggle refund / credit-note mode on the active

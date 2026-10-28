@@ -4,6 +4,7 @@ Supermarket POS - Entry Point
 import logging
 import platform
 import sys
+from pathlib import Path
 from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
 from PyQt6.QtWidgets import QApplication
 from app.core.database import DB_PATH, get_session, init_db
@@ -13,6 +14,12 @@ from app.utils.error_handling import setup_logging, install_excepthook
 
 logger = logging.getLogger("pos")
 
+# PyInstaller's one-file build unpacks bundled files (see superpos.spec's
+# datas) into sys._MEIPASS; when running from source they sit next to main.py.
+# Never rely on the working directory: a shortcut may start the .exe elsewhere.
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+LOG_DIR = Path(DB_PATH).parent / "logs"
+
 
 def _log_startup_banner():
     """Which machine, build and hardware config a log came from."""
@@ -20,7 +27,7 @@ def _log_startup_banner():
     logger.info("POS starting: Python %s, Qt %s / PyQt %s, %s, frozen=%s",
                 platform.python_version(), QT_VERSION_STR, PYQT_VERSION_STR,
                 platform.platform(), getattr(sys, "frozen", False))
-    logger.info("Database: %s", DB_PATH)
+    logger.info("Database: %s, logs: %s", DB_PATH, LOG_DIR)
     with get_session() as session:
         get = lambda key: SettingsService.get(session, key) or "-"
         logger.info("Receipt printer USB %s:%s, label printer USB %s:%s, ERP %s",
@@ -30,7 +37,7 @@ def _log_startup_banner():
 
 
 def main():
-    setup_logging()
+    setup_logging(LOG_DIR)
 
     # Enable high DPI scaling (important for touch screens)
     app = QApplication(sys.argv)
@@ -42,7 +49,7 @@ def main():
     install_excepthook()
 
     # Load global stylesheet
-    with open("resources/styles/main.qss", "r") as f:
+    with open(BUNDLE_DIR / "resources" / "styles" / "main.qss", "r", encoding="utf-8") as f:
         app.setStyleSheet(f.read())
 
     # Initialize database (creates tables if they don't exist)

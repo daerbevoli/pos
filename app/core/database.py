@@ -108,6 +108,26 @@ def _run_migrations():
         for migration in _COLUMN_MIGRATIONS:
             _add_column_if_missing(conn, migration.table, migration.column, migration.sql_type)
         _backfill_invoice_change(conn)
+        _drop_client_contact_unique_indexes(conn)
+
+
+# Unique indexes the baseline schema put on clients' address/phone/email/
+# website. Only name and VAT number must be unique: two companies may share
+# a building, a phone line or an accountant's email.
+_DROPPED_CLIENT_INDEXES = (
+    "ux_clients_address_active",
+    "ux_clients_phone_active",
+    "ux_clients_email_active",
+    "ux_clients_website_active",
+)
+
+
+def _drop_client_contact_unique_indexes(conn):
+    """Drops _DROPPED_CLIENT_INDEXES from databases created before; a no-op
+    once they're gone (and on a new database, which never gets them)."""
+    for name in _DROPPED_CLIENT_INDEXES:
+        conn.exec_driver_sql(f"DROP INDEX IF EXISTS {name}")
+    conn.commit()
 
 
 def _backfill_invoice_change(conn):

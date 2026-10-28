@@ -22,8 +22,9 @@ from app.core.erp_service import ErpService
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.core.client_service import ClientService
-from app.core.sales_service import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry, SalesService, \
-    generate_invoice_data, save_open_ticket, clear_open_ticket, load_open_tickets
+from app.core.cart import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry
+from app.core.sales_service import SalesService, generate_invoice_data, save_open_ticket, \
+    clear_open_ticket, load_open_tickets
 from app.constants.countries import BELGIUM
 from app.models.models import Sale
 from app.core.settings_service import SettingsService, get_erp_data
@@ -109,7 +110,6 @@ class POSScreen(QWidget):
         self._frozen_total      = 0.0    # cached grand total for the last finalized sale
         self._row_to_entry      = []     # cart_table row -> cart.entries index (None for divider/summary rows)
         self._current_sale_id   = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
-        self.sale_ids           = []     # id: all of today's completed sale ids, chronological, shared across tabs — see _browse_index()
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
         self._barcode_entry_quantity = None   # quantity text typed before the Barcode button was pressed, if any (may be a lone "-")
         self._invoice_send_in_progress = False  # an InvoiceSendWorker is running; Send invoice is ignored until it finishes
@@ -156,8 +156,6 @@ class POSScreen(QWidget):
     def _load_settings(self):
         with get_session() as session:
             settings = SettingsService.get_all(session)
-            sales = SalesService.get_sales_for_date(session, date.today())
-            self.sale_ids = [sale.id for sale in reversed(sales)]  # oldest first
         self.currency     = settings.get("currency_symbol", "€")
         self.cashier_name = settings.get("cashier_name", "Cashier")
 
@@ -600,10 +598,10 @@ class POSScreen(QWidget):
     def _on_ticket_text(self, text: str):
         if self.sale_finished:
             self._unfreeze_ticket()
-        if text in "-" and not self.isAdmin:
+        if text == "-" and not self.isAdmin:
             self._show_overlay("Only admin", kind="error")
             return
-        if text in ".,":
+        if text in (".", ","):
             self._insert_decimal_point()
             return
         self.cart_input.insert(text)
@@ -686,9 +684,14 @@ class POSScreen(QWidget):
         with get_session() as session:
             product = ProductService.get_by_barcode(session, barcode)
             if product:
-                quantity = self._typed_quantity(query, product) if query else 1
-                if quantity is None:
-                    return
+                if query:
+                    quantity = self._typed_quantity(query, product)
+                    if quantity is None:
+                        return
+                elif product.unit in WEIGHT_UNITS:
+                    quantity = None  # waits for the weight, like the Barcode button
+                else:
+                    quantity = 1
                 self.cart.add_product(product, quantity=quantity)
                 self._refresh_cart(select_last=True)
                 self.cart_input.clear()
@@ -791,62 +794,15 @@ class POSScreen(QWidget):
         if idx is None:
             return
         entry = self.cart.entries[idx]
-        if isinstance(entry, DiscountEntry) and entry.is_promo:
-            # A promo's discount line is a child of the product line right
-            # before it (Cart.sync_promo_discounts() always places it there)
-            # — deleting the discount removes the product it belongs to,
-            # not just the discount on its own. Retarget and fall through to
-            # the same (reversal-aware) removal logic below.
-            idx -= 1
-            entry = self.cart.entries[idx]
         if self.payment_in_progress and not isinstance(entry, PaymentEntry):
             self._show_overlay("Finish or remove the pending payment first", kind="error")
             return
-        # Only lines already saved on the reopened sale need a reversal;
-        # anything added since reopening isn't on the record yet, so it's
-        # just deleted.
-        needs_reversal = (
-            isinstance(entry, CartItem)
-            and entry.locked
-            and entry.quantity is not None
-            and not entry.is_reversal
-        )
-        if needs_reversal and entry.has_reversal:
-            # Already reversed once — capped at one reversal per line.
-            self.cart_table.setFocus()
-            return
-        if needs_reversal:
-            # This ticket was already saved as a completed sale, so the
-            # record can't just lose the line — the original row stays put,
-            # and a reversal is appended as the newest row instead.
-            entry.has_reversal = True
-            self.cart.entries.append(CartItem(
-                product_id=entry.product_id,
-                product_name=entry.product_name,
-                product_barcode=entry.product_barcode,
-                unit_price=entry.unit_price,
-                base_unit_price=entry.base_unit_price,
-                tax_rate=entry.tax_rate,
-                base_tax_rate=entry.base_tax_rate,
-                quantity=-entry.quantity,
-                unit=entry.unit,
-                is_reversal=True,
-                reversal_of=entry,
-                # promo fields deliberately not copied — the reversal line
-                # doesn't need its own promo discount; sync_promo_discounts()
-                # drops the original line's discount now that has_reversal
-                # is set, so the promo line disappears rather than getting an
-                # offsetting entry next to it.
-            ))
-            self.cart.sync_promo_discounts()
-        else:
-            if isinstance(entry, CartItem) and entry.is_reversal and entry.reversal_of is not None:
-                # Removing the reversal itself un-caps the original line
-                # so it can be reversed again.
-                entry.reversal_of.has_reversal = False
-            self.cart.entries.pop(idx)
-            self.cart.sync_promo_discounts()
-        self._refresh_cart(select_last=needs_reversal)
+        # A line already saved on the reopened sale gets a reversal appended
+        # (it can't just leave the record); anything else is deleted — see
+        # Cart.remove_entry().
+        action = self.cart.remove_entry(entry)
+        if action is not None:
+            self._refresh_cart(select_last=action == "reversed")
         self.cart_table.setFocus()
 
     def _apply_percent_discount(self):
@@ -858,13 +814,9 @@ class POSScreen(QWidget):
         if value is None:
             self._show_overlay("Enter a number first to apply a discount", kind="info")
             return
-        base = self._get_discount_base()
-        if base is None or base <= 0:
+        if self.cart.apply_percent_discount(value) is None:
             self._show_overlay("Nothing to discount", kind="error")
             return
-        pct = min(value, 100.0)
-        amount = round(base * pct / 100.0, 2)
-        self.cart.entries.append(DiscountEntry(amount=amount, label=f"MANUAL DISCOUNT {pct:g}%"))
         self.cart_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
@@ -878,52 +830,12 @@ class POSScreen(QWidget):
         if value is None:
             self._show_overlay("Enter a number first to apply a discount", kind="info")
             return
-        base = self._get_discount_base()
-        if base is None or base <= 0:
+        if self.cart.apply_amount_discount(value) is None:
             self._show_overlay("Nothing to discount", kind="error")
             return
-        amount = round(min(value, base), 2)
-        self.cart.entries.append(DiscountEntry(amount=amount, label=f"MANUAL DISCOUNT {amount:.2f}"))
         self.cart_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
-
-    def _get_discount_base(self) -> float | None:
-        """
-        Returns the amount the next discount applies to:
-        - last CartItem's line_total  → item discount
-        - last section's net total    → section discount (entry above is SubtotalMarker)
-        minus the DiscountEntry rows (promo or manual) already applied to that
-        target, so stacked discounts can never take it below zero.
-        """
-        already_discounted = 0.0
-        for entry in reversed(self.cart.entries):
-            if isinstance(entry, DiscountEntry):
-                already_discounted += entry.amount
-                continue
-            if isinstance(entry, CartItem):
-                return round(entry.line_total - already_discounted, 2)
-            if isinstance(entry, SubtotalMarker):
-                return round(self._last_section_total() - already_discounted, 2)
-            break
-        return None
-
-    def _last_section_total(self) -> float:
-        """Net total of items+discounts in the section that ends at the last SubtotalMarker."""
-        total = 0.0
-        past_last_marker = False
-        for entry in reversed(self.cart.entries):
-            if isinstance(entry, SubtotalMarker):
-                if not past_last_marker:
-                    past_last_marker = True
-                    continue
-                break
-            if past_last_marker:
-                if isinstance(entry, CartItem):
-                    total += entry.line_total
-                elif isinstance(entry, DiscountEntry):
-                    total -= entry.amount
-        return total
 
     def _show_subtotal(self):
         if self.sale_finished:
@@ -1236,8 +1148,8 @@ class POSScreen(QWidget):
             # A refund is paid out in full by the chosen method in one go —
             # no tendering, partial payments or change.
             payout = self.cart.total
-            self.cart_input.clear()
-            self._save_and_freeze([{"method": method, "amount": payout}], payout, method)
+            if self._save_and_freeze([{"method": method, "amount": payout}], payout, method):
+                self.cart_input.clear()
             return
 
         prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
@@ -1287,13 +1199,29 @@ class POSScreen(QWidget):
             breakdown.append({"method": method, "amount": round(tendered, 2)})
 
         self.cart.entries = [e for e in self.cart.entries if not isinstance(e, PaymentEntry)]
-        self._save_and_freeze(breakdown, total_tendered, final_method)
+        if not self._save_and_freeze(breakdown, total_tendered, final_method):
+            # Not saved: the ticket stays open with its partial payments.
+            self.cart.entries.extend(prior_payments)
+            self._refresh_cart(select_last=True)
 
-    def _save_and_freeze(self, breakdown: list[dict], total_tendered: float, final_method: str):
+    def _save_and_freeze(self, breakdown: list[dict], total_tendered: float, final_method: str) -> bool:
         """Persists the fully-paid cart (new sale, new invoice, or overwrite of
         a reopened sale), then freezes the ticket. RF/CN mode stays on — only
-        the button leaves it (see set_rf_cn())."""
+        the button leaves it (see set_rf_cn()). Returns False, with the reason
+        on screen and the ticket left open, if the sale service refused it
+        (e.g. the invoice was sent meanwhile, or the day's sale numbers ran out)."""
         total = self.cart.total
+        try:
+            self._save_sale(breakdown, total_tendered, final_method)
+        except ValueError as e:
+            logger.warning("Sale not saved: %s", e)
+            self._show_overlay(f"Not saved: {e}", kind="error")
+            return False
+        change = max(0.0, total_tendered - total)
+        self._freeze_ticket(breakdown, change)
+        return True
+
+    def _save_sale(self, breakdown: list[dict], total_tendered: float, final_method: str):
         with get_session() as session:
             if self._current_sale_id is not None:
                 # Re-paying a reopened ticket: overwrite the existing sale in place.
@@ -1318,7 +1246,6 @@ class POSScreen(QWidget):
                     payment_breakdown=breakdown,
                 )
                 self._current_sale_id = invoice.sale_id
-                self.sale_ids.append(invoice.sale_id)
             else:
                 sale = SalesService.finalize_sale(
                     session,
@@ -1328,9 +1255,6 @@ class POSScreen(QWidget):
                     payment_breakdown=breakdown,
                 )
                 self._current_sale_id = sale.id
-                self.sale_ids.append(sale.id)
-        change = max(0.0, total_tendered - total)
-        self._freeze_ticket(breakdown, change)
 
     def _set_frozen_style(self, frozen: bool):
         for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date, self.cart_input, self.ticket_total_lbl):
@@ -1437,27 +1361,34 @@ class POSScreen(QWidget):
         self.client_id = invoice.client_id if invoice is not None else None
         self.cart.is_domestic = invoice is None or invoice.client_country == BELGIUM
 
-    def _browse_index(self) -> int:
-        """This tab's position within today's sale_ids (oldest-first), for
-        _previous_sale()/_next_sale() to step by ±1. len(sale_ids) — one
-        past the end — if the currently shown sale isn't in today's list:
-        a blank/new ticket, or a sale from a previous day."""
-        if self._current_sale_id in self.sale_ids:
-            return self.sale_ids.index(self._current_sale_id)
-        return len(self.sale_ids)
+    @staticmethod
+    def _todays_sale_ids() -> list[int]:
+        """Today's completed sale ids, oldest first. Read fresh on every
+        browse, not kept: that way it has every tab's sales, loses the ones
+        a Z report purged, and starts over after midnight."""
+        with get_session() as session:
+            sales = SalesService.get_sales_range(session, date.today(), date.today())
+            return [sale.id for sale in reversed(sales)]
+
+    def _browse_index(self, sale_ids: list[int]) -> int:
+        """This tab's position within `sale_ids`, for _previous_sale()/
+        _next_sale() to step by ±1. len(sale_ids) — one past the end — if
+        the currently shown sale isn't in the list: a blank/new ticket, or a
+        sale from a previous day."""
+        if self._current_sale_id in sale_ids:
+            return sale_ids.index(self._current_sale_id)
+        return len(sale_ids)
 
     def _previous_sale(self):
         if self.cart_active and not self.sale_finished:
             self._show_overlay("Sale active", kind="info")
             return
-        if not self.sale_ids:
-            self._show_overlay("No earlier sales", kind="info")
-            return
-        idx = self._browse_index()
+        sale_ids = self._todays_sale_ids()
+        idx = self._browse_index(sale_ids)
         if idx <= 0:
             self._show_overlay("No earlier sales", kind="info")
             return
-        self._show_sale_at(self.sale_ids[idx - 1])
+        self._show_sale_at(sale_ids[idx - 1])
         self.cart_table.setFocus()
 
     def _next_sale(self):
@@ -1467,11 +1398,12 @@ class POSScreen(QWidget):
         if not self.sale_finished:
             self._show_overlay("No later sales", kind="info")
             return
-        idx = self._browse_index()
-        if idx >= len(self.sale_ids) - 1:
+        sale_ids = self._todays_sale_ids()
+        idx = self._browse_index(sale_ids)
+        if idx >= len(sale_ids) - 1:
             self._show_overlay("No later sales", kind="info")
             return
-        self._show_sale_at(self.sale_ids[idx + 1])
+        self._show_sale_at(sale_ids[idx + 1])
         self.cart_table.setFocus()
 
     def _show_sale_at(self, sale_id: int):
@@ -1526,10 +1458,15 @@ class POSScreen(QWidget):
         if self._current_sale_id is None:
             self._show_overlay("No ticket to send", kind="info")
             return
-
+        if self.reopened_ticket:
+            # Sending locks the sale, so the payment that saves these edits
+            # would then be refused.
+            self._show_overlay("Pay the reopened ticket before sending it", kind="error")
+            return
 
         with get_session() as session:
-            invoice = SalesService.get_invoice_for_sale(session, self._current_sale_id)
+            sale = SalesService.get_by_id(session, self._current_sale_id)
+            invoice = sale.invoice if sale is not None else None
 
             if not invoice:
                 self._show_overlay("This sale has no invoice", kind="error")
@@ -1696,15 +1633,22 @@ class POSScreen(QWidget):
 
     def set_client(self, client_id: int, client_name: str):
         if client_id and client_name:
+            # A client of another country changes the prices, so not once part
+            # of the total is paid, nor on lines a saved sale already charged.
+            if self._guard_payment_in_progress():
+                return
+            with get_session() as session:
+                client = ClientService.get_by_id(session, client_id)
+            is_domestic = not client or client.country == BELGIUM
+            if self.reopened_ticket and is_domestic != self.cart.is_domestic:
+                self._show_overlay("This sale's VAT can't change: refund it and ring it up again", kind="error")
+                return
             if self.sale_finished:
                 self._unfreeze_ticket()
             self.client_label.setText("INVOICE - " + client_name)
             self.client_label.show()
             self.client_id = client_id
             self.is_invoice = True
-            with get_session() as session:
-                client = ClientService.get_by_id(session, client_id)
-            is_domestic = not client or client.country == BELGIUM
             self.cart.retax_for_client(is_domestic)
             self._refresh_cart(select_last=True)
         self.cart_table.setFocus()

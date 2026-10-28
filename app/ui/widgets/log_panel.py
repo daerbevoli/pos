@@ -1,6 +1,6 @@
 """
 Live view of the application log (Settings > Logs tab).
-Shows everything sent to Python's `logging` since startup, same lines as logs/pos.log.
+Shows everything sent to Python's `logging` since startup, same lines as pos.log (in the logs folder next to the database).
 """
 import logging
 

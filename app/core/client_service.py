@@ -10,27 +10,34 @@ from app.models.models import Client
 
 logger = logging.getLogger(__name__)
 
+# Fields unique among active clients (the partial unique indexes on Client),
+# with the name the cashier sees.
+_UNIQUE_FIELDS = {
+    ("name",): "Name",
+    ("vatNumber",): "VAT number",
+}
+
 class ClientService:
 
     # ── Client CRUD ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_all(session: Session, active_only=True) -> list[type[Client]]:
+    def get_all(session: Session, active_only=True) -> list[Client]:
         q = session.query(Client)
         if active_only:
             q = q.filter(Client.is_active == True)
         return q.order_by(Client.name).all()
 
     @staticmethod
-    def get_by_id(session: Session, client_id: int) -> type[Client] | None:
+    def get_by_id(session: Session, client_id: int) -> Client | None:
         return session.query(Client).filter_by(id=client_id).first()
 
     @staticmethod
-    def get_by_name(session: Session, name: str) -> type[Client] | None:
+    def get_by_name(session: Session, name: str) -> Client | None:
         return session.query(Client).filter_by(name=name, is_active=True).first()
 
     @staticmethod
-    def search(session: Session, query: str, include_inactive: bool = False) -> list[type[Client]]:
+    def search(session: Session, query: str, include_inactive: bool = False) -> list[Client]:
         """Search by name or vat."""
         term = f"%{query}%"
         q = session.query(Client).filter(
@@ -44,6 +51,23 @@ class ClientService:
             .limit(50)
             .all()
         )
+
+    @staticmethod
+    def find_clash(session: Session, data: dict, exclude_id: int | None = None) -> str | None:
+        """Why saving `data` would break a unique index, e.g. "VAT number
+        already used by Acme", or None if it wouldn't. Checked before saving
+        so the cashier gets a reason instead of an IntegrityError."""
+        for columns, label in _UNIQUE_FIELDS.items():
+            values = {column: data.get(column) for column in columns}
+            if any(value is None for value in values.values()):
+                continue  # NULLs never clash, and a field not being saved can't either
+            q = session.query(Client).filter_by(is_active=True, **values)
+            if exclude_id is not None:
+                q = q.filter(Client.id != exclude_id)
+            other = q.first()
+            if other is not None:
+                return f"{label} already used by {other.name}"
+        return None
 
     @staticmethod
     def create(session: Session, **kwargs) -> Client:
@@ -83,8 +107,8 @@ class ClientService:
     @staticmethod
     def reactivate(session: Session, client_id: int) -> bool:
         """Undoes deactivate(). Returns False if the client doesn't exist, or
-        if an active client has since taken one of its unique fields (name,
-        address, phone, email, VAT, website — unique among active clients only)."""
+        if an active client has since taken its name or VAT number (unique
+        among active clients only)."""
         client = session.query(Client).filter_by(id=client_id).first()
         if not client:
             logger.warning("Client reactivate: client %s not found", client_id)

@@ -139,3 +139,44 @@ def test_deactivate_preserves_row_not_deletes(db_session):
 
     still_there = db_session.query(Client).filter_by(id=client.id).first()
     assert still_there is not None
+
+
+# ── find_clash: unique fields checked before saving ──────────────────────
+
+def _data(**overrides):
+    data = {"name": "New", "vatNumber": "VAT-NEW", "street": "9 Other St", "zip_code": "2000",
+            "city": "Antwerp", "phone": None, "email": None}
+    data.update(overrides)
+    return data
+
+
+def test_find_clash_none_for_unique_data(db_session):
+    _make_client(db_session, name="Acme", email="a@x.com")
+    assert ClientService.find_clash(db_session, _data()) is None
+
+
+@pytest.mark.parametrize("field,value,label", [
+    ("name", "Acme", "Name"),
+    ("vatNumber", "VAT-A", "VAT number"),
+])
+def test_find_clash_names_the_field_and_the_other_client(db_session, field, value, label):
+    _make_client(db_session, name="Acme", vatNumber="VAT-A", email="a@x.com")
+    assert ClientService.find_clash(db_session, _data(**{field: value})) == f"{label} already used by Acme"
+
+
+def test_find_clash_allows_shared_address_phone_and_email(db_session):
+    """Two companies in one building, or with one accountant, are fine."""
+    _make_client(db_session, name="Acme", street="1 Main St", zip_code="1000", city="Brussels",
+                 phone="021234567", email="books@x.com")
+    shared = _data(street="1 Main St", zip_code="1000", city="Brussels", phone="021234567", email="books@x.com")
+    assert ClientService.find_clash(db_session, shared) is None
+    ClientService.create(db_session, **shared)  # and the database agrees
+
+
+def test_find_clash_ignores_the_client_being_edited_and_inactive_ones(db_session):
+    acme = _make_client(db_session, name="Acme")
+    old = _make_client(db_session, name="Old", vatNumber="VAT-OLD")
+    ClientService.deactivate(db_session, old.id)
+
+    assert ClientService.find_clash(db_session, _data(name="Acme"), exclude_id=acme.id) is None
+    assert ClientService.find_clash(db_session, _data(name="Old", vatNumber="VAT-OLD")) is None

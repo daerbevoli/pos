@@ -22,12 +22,36 @@ class InvoiceSendWorker(QThread):
     succeeded = pyqtSignal(int, str, str)  # invoice_id, inv_num, send message
     failed = pyqtSignal(str)
 
+    # Every started worker, so quitting can wait for them (see wait_for_all).
+    _started: "set[InvoiceSendWorker]" = set()
+
     def __init__(self, erp, invoice_data, use_peppol, use_email, parent=None):
         super().__init__(parent)
         self.erp = erp
         self.invoice_data = invoice_data
         self.use_peppol = use_peppol
         self.use_email = use_email
+        self.finished.connect(lambda: InvoiceSendWorker._started.discard(self))
+
+    def start(self, *args, **kwargs):
+        InvoiceSendWorker._started.add(self)
+        super().start(*args, **kwargs)
+
+    @staticmethod
+    def wait_for_all():
+        """Block until every running send is done. Called on quit: a
+        destroyed running QThread aborts the process. Its result slot no
+        longer runs then, so a sent invoice isn't locked in the POS yet;
+        sending it again picks it up as already sent and locks it."""
+        for worker in list(InvoiceSendWorker._started):
+            try:
+                running = worker.isRunning()
+            except RuntimeError:  # the QThread is already gone
+                InvoiceSendWorker._started.discard(worker)
+                continue
+            if running:
+                logger.info("Waiting for invoice %s to finish sending", worker.invoice_data.get("inv_num"))
+                worker.wait()
 
     def run(self):
         inv_num = self.invoice_data.get("inv_num")

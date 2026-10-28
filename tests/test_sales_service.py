@@ -5,7 +5,8 @@ from datetime import date, timedelta
 import pytest
 
 from app.core.product_service import ProductService
-from app.core.sales_service import Cart, CartItem, SalesService
+from app.core.cart import Cart, CartItem
+from app.core.sales_service import SalesService
 from app.models.models import Sale, SaleItem, Invoice
 
 
@@ -491,42 +492,24 @@ def test_update_sale_refuses_once_invoice_sent(db_session):
 
 # ── Reports / queries ────────────────────────────────────────────────────
 
-def test_get_sales_for_date_returns_that_days_sales(db_session):
+def test_get_sales_range_of_one_day_returns_that_days_sales(db_session):
     product = _make_product(db_session)
     sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
 
-    result = SalesService.get_sales_for_date(db_session, date.today())
+    result = SalesService.get_sales_range(db_session, date.today(), date.today())
 
     assert [s.id for s in result] == [sale.id]
 
 
-def test_get_sales_for_date_empty_for_other_dates(db_session):
+def test_get_sales_range_empty_for_other_dates(db_session):
     product = _make_product(db_session)
     SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
 
-    result = SalesService.get_sales_for_date(db_session, date.today() - timedelta(days=1))
+    yesterday = date.today() - timedelta(days=1)
+    result = SalesService.get_sales_range(db_session, yesterday, yesterday)
     assert result == []
 
 
-def test_get_daily_summary_aggregates_correctly(db_session):
-    product = _make_product(db_session, price=10.0, tax=0)
-
-    SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)), payment_method="cash")
-    SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=2)), payment_method="card")
-
-    summary = SalesService.get_daily_summary(db_session, date.today())
-
-    assert summary["total_transactions"] == 2
-    assert summary["total_revenue"] == 30.0
-    assert summary["average_transaction"] == 15.0
-    assert summary["cash_sales"] == 10.0
-    assert summary["card_sales"] == 20.0
-
-
-def test_get_daily_summary_no_sales_avoids_division_by_zero(db_session):
-    summary = SalesService.get_daily_summary(db_session, date.today())
-    assert summary["total_transactions"] == 0
-    assert summary["average_transaction"] == 0
 
 
 def test_get_sales_range_includes_boundaries_and_excludes_outside(db_session):
@@ -630,7 +613,7 @@ def test_credit_note_lines_leave_out_voided_pairs():
 # ── VAT on the discounted amount ─────────────────────────────────────────
 
 def test_vat_is_charged_on_the_discounted_line_amount(db_session):
-    from app.core.sales_service import DiscountEntry
+    from app.core.cart import DiscountEntry
     product = _make_product(db_session, price=12.10, tax=21)
     cart = _cart_with(_item_for(product), DiscountEntry(amount=2.10, label="MANUAL DISCOUNT 2.10"))
 
@@ -643,7 +626,7 @@ def test_vat_is_charged_on_the_discounted_line_amount(db_session):
 
 
 def test_section_discount_vat_is_split_per_rate(db_session):
-    from app.core.sales_service import DiscountEntry, SubtotalMarker
+    from app.core.cart import DiscountEntry, SubtotalMarker
     food = _make_product(db_session, name="Food", price=10.60, tax=6)
     drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
     cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker(),
@@ -659,7 +642,8 @@ def test_section_discount_vat_is_split_per_rate(db_session):
 
 def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
     from app.core.client_service import ClientService
-    from app.core.sales_service import DiscountEntry, SubtotalMarker, invoice_lines
+    from app.core.cart import DiscountEntry, SubtotalMarker
+    from app.core.sales_service import invoice_lines
     client = ClientService.create(db_session, name="C", vatNumber="V9", street="s", zip_code="1000", city="Brussels")
     food = _make_product(db_session, name="Food", price=10.60, tax=6)
     drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
@@ -669,7 +653,6 @@ def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
     invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
     lines = invoice_lines(invoice)
 
-    assert [line.is_discount for line in lines] == [False, False]
     assert [line.discount_percent for line in lines] == [10.0, 10.0]
     assert [line.line_total_excl_tax for line in lines] == [9.0, 9.0]
     assert invoice.tax_amount == round(0.54 + 1.89, 2)

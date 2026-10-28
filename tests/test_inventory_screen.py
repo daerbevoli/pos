@@ -546,6 +546,35 @@ def test_import_adds_new_articles_and_skips_barcode_duplicates(screen, monkeypat
     assert "Existing" in names
 
 
+def test_import_failing_row_keeps_rows_imported_before_it(screen, monkeypatch, tmp_path):
+    """A row that fails on insert must not undo the rows already imported."""
+    import app.ui.inventory_screen as inventory_screen_module
+
+    real_init = inventory_screen_module.Product.__init__
+
+    def flaky_init(self, *args, **kwargs):
+        if kwargs.get("name") == "Clash":
+            raise RuntimeError("boom")
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(inventory_screen_module.Product, "__init__", flaky_init)
+
+    csv_path = tmp_path / "articles.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["barcode", "name", "price"])
+        writer.writeheader()
+        writer.writerow({"barcode": "A1", "name": "First", "price": "1"})
+        writer.writerow({"barcode": "B2", "name": "Second", "price": "1"})
+        writer.writerow({"barcode": "X9", "name": "Clash", "price": "1"})
+        writer.writerow({"barcode": "C3", "name": "Fourth", "price": "1"})
+
+    _import_from(screen, monkeypatch, csv_path)
+
+    with get_session() as session:
+        names = sorted(p.name for p in ProductService.get_all(session, active_only=False))
+    assert names == ["First", "Fourth", "Second"]
+
+
 def test_import_resolves_category_by_name(screen, monkeypatch, tmp_path):
     csv_path = tmp_path / "articles.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

@@ -1,7 +1,9 @@
 """Tests for the ZPL shelf labels in app.core.label_service."""
 from types import SimpleNamespace
 
-from app.core.label_service import _build_zpl, promo_label_data
+import pytest
+
+from app.core.label_service import _build_zpl, _zpl_barcode, promo_label_data
 
 
 def _product(price=2.50, promo=None):
@@ -26,7 +28,7 @@ def test_fixed_promo_price_never_below_zero():
 
 
 def test_regular_label_is_unchanged_without_promo():
-    zpl = _build_zpl("Cola", "541234567890", "€ 2.50", "pcs")
+    zpl = _build_zpl("Cola", "5410000000002", "€ 2.50", "pcs")
     assert "PROMO" not in zpl
     assert "^FO60,100^BY3" in zpl
     assert "^FO30,210^A0N,40,40^FD€ 2.50^FS" in zpl
@@ -46,3 +48,19 @@ def test_promo_label_puts_unit_only_on_the_new_price():
     zpl = _build_zpl("Bananas", "200000000004", "€ 2.49", "kg", promo={"price": "€ 1.99"})
     assert "^FD€ 2.49^FS" in zpl
     assert "^FD€ 1.99 / kg^FS" in zpl
+
+
+@pytest.mark.parametrize("barcode, field", [
+    ("5410000000002", "^BY3^BEN,45,Y,N^FD541000000000^FS"),   # EAN-13: printer adds the check digit
+    ("036000291452", "^BY3^BUN,45,Y,N,Y^FD03600029145^FS"),   # UPC-A, not EAN-13 data
+    ("96385074", "^BY3^B8N,45,Y,N^FD9638507^FS"),             # EAN-8
+    ("5410000000003", "^BY2^BCN,45,Y,N,N,A^FD5410000000003^FS"),  # bad check digit: printed as is
+    ("ABC-123", "^BY2^BCN,45,Y,N,N,A^FDABC-123^FS"),
+])
+def test_label_barcode_scans_back_as_the_stored_code(barcode, field):
+    """Regression: barcode[:12] went out as EAN-13 whatever the code was."""
+    assert _zpl_barcode(barcode, 100) == f"^FO60,100{field}"
+
+
+def test_long_code128_narrows_its_bars_to_fit_the_label():
+    assert "^BY1^BC" in _zpl_barcode("ABCDEFGHIJKLMNOPQRS", 100)

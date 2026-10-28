@@ -16,7 +16,8 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.sales_service import Cart, calc_tax, SalesService
+from app.core.cart import Cart
+from app.core.sales_service import SalesService
 from app.models.models import Invoice, OpenTicket, Product, Sale, ZReport
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def _vat_breakdown(lines) -> dict:
 def invoice_vat_breakdown(invoices) -> dict:
     """VAT breakdown rebuilt from each invoice's frozen line_items_snapshot,
     so it still works after a Z report has purged the invoices' sales.
-    Uses the same discounted line amounts as checkout (Cart.net_line_totals),
+    Uses the same discounted line amounts as checkout (Cart.net_lines),
     so it matches the sale-based breakdown."""
     lines = []
     for invoice in invoices:
@@ -110,10 +111,10 @@ def invoice_vat_breakdown(invoices) -> dict:
             logger.warning("Invoice %s: unreadable line snapshot, left out of the VAT breakdown",
                            invoice.invoice_number)
             continue
-        for entry, net_total in cart.net_line_totals():
-            if entry.quantity is None:
+        for line in cart.net_lines():
+            if line.item.quantity is None:
                 continue
-            lines.append((entry.tax_rate, calc_tax(net_total, entry.tax_rate), net_total))
+            lines.append((line.item.tax_rate, line.tax, line.net))
     return _vat_breakdown(lines)
 
 
@@ -135,7 +136,7 @@ def invoice_category_breakdown(session: Session, invoices) -> dict:
     """{category: [qty, amount]} rebuilt from each invoice's frozen
     line_items_snapshot, like compute_totals() does from SaleItems — so it
     still works after a Z report has purged the invoices' sales. Amounts are
-    the discounted line totals (Cart.net_line_totals). The category is the
+    the discounted line totals (Cart.net_lines). The category is the
     product's current one: categories aren't frozen on the invoice, and
     products are only ever deactivated, never deleted."""
     category_names: dict[int, str] = {}
@@ -147,7 +148,8 @@ def invoice_category_breakdown(session: Session, invoices) -> dict:
             logger.warning("Invoice %s: unreadable line snapshot, left out of the category breakdown",
                            invoice.invoice_number)
             continue
-        for entry, net_total in cart.net_line_totals():
+        for line in cart.net_lines():
+            entry, net_total = line.item, line.net
             if entry.quantity is None:
                 continue
             if entry.product_id not in category_names:

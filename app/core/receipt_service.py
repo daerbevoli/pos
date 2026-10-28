@@ -15,7 +15,7 @@ from datetime import datetime
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from app.core.sales_service import Cart, CartItem, DiscountEntry, SubtotalMarker
+from app.core.cart import Cart, CartItem, DiscountEntry, SubtotalMarker
 from app.core.settings_service import SettingsService
 from app.models.models import Invoice, Sale, ZReport
 
@@ -101,9 +101,9 @@ def _open(vendor_id: str, product_id: str):
         raise PrinterError(f"Could not connect to receipt printer: {e}") from e
 
 
-def _print_text_header(printer):
+def _print_text_header(printer, settings: dict):
     printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
-    printer.text(f"EUROSTAR SUPERMARKET\n")
+    printer.text(f"{settings.get('store_name', '')}\n")
     printer.text("-" * LINE_WIDTH + "\n")
     printer.set(align="left")
 
@@ -132,7 +132,7 @@ def _load_logo(logo_path: str) -> Image.Image | None:
 def _print_logo(printer, settings: dict):
     img = _load_logo(settings.get("logo_path", ""))
     if img is None:
-        _print_text_header(printer)
+        _print_text_header(printer, settings)
         return
     # Outside the try above on purpose: a printer failure here is a real
     # print failure and must fail the receipt, not fall back silently.
@@ -256,10 +256,10 @@ def _print_company_info(printer, settings):
     printer.set(align="center", bold=False, width=1, height=1, custom_size=True)
     if settings.get("store_address"):
         printer.text(f"{settings['store_address']}\n")
-    if settings.get("store_phone"):
-        printer.text(f"{settings['store_phone']} - ")
-    if settings.get("vat_number"):
-        printer.text(f"{settings['vat_number']}")
+    # Saved by the Settings screen as store_phone / store_vat.
+    contact = " - ".join(v for v in (settings.get("store_phone"), settings.get("store_vat")) if v)
+    if contact:
+        printer.text(f"{contact}\n")
 
 RATE_COL = 6
 AMT_COL = (LINE_WIDTH - RATE_COL) // 3  # 14 — Base / Tax / Total (incl.) columns
@@ -443,7 +443,7 @@ class ReceiptService:
             printer.text("\n")
             printer.text("\n")
 
-            printer.text(f"Printed on {totals["period_end"]}")
+            printer.text(f"Printed on {totals['period_end']}")
 
             printer.cut(mode="PART")
             logger.info("X-report %s printed", totals["report_number"])

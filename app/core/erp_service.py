@@ -166,27 +166,20 @@ class ErpService:
         account_id = self.get_sales_account_id()  # Default 700000
 
         lines = []
+        tax_ids = {}  # rate -> Odoo tax id: one lookup per rate, not per line
 
+        # Discounts travel as each line's discount_percent, not as lines of their own.
         for invoiceLine in invoice_lines:
-            if invoiceLine.is_discount:
-                tax_id = self.get_sale_tax_id(0)
-                lines.append((0, 0, {
-                    "name": invoiceLine.product_name,
-                    "quantity": invoiceLine.quantity,
-                    "price_unit": (-1)*invoiceLine.unit_price_excl_tax,
-                    "discount": 0,
-                    "account_id": account_id,
-                    "tax_ids": [(6, 0, [tax_id])]
-                }))
-            else:
-                tax_id = self.get_sale_tax_id(invoiceLine.tax_rate)
-                lines.append((0, 0, {
-                    "name": invoiceLine.product_name,
-                    "quantity": invoiceLine.quantity,
-                    "price_unit": invoiceLine.unit_price_excl_tax,
-                    "discount": invoiceLine.discount_percent,
-                    "account_id": account_id,
-                    "tax_ids": [(6, 0, [tax_id])]}))
+            if invoiceLine.tax_rate not in tax_ids:
+                tax_ids[invoiceLine.tax_rate] = self.get_sale_tax_id(invoiceLine.tax_rate)
+            tax_id = tax_ids[invoiceLine.tax_rate]
+            lines.append((0, 0, {
+                "name": invoiceLine.product_name,
+                "quantity": invoiceLine.quantity,
+                "price_unit": invoiceLine.unit_price_excl_tax,
+                "discount": invoiceLine.discount_percent,
+                "account_id": account_id,
+                "tax_ids": [(6, 0, [tax_id])]}))
         if not lines:
             raise ValueError("No invoice lines created. Check parsed totals.")
         logger.debug("Built %d invoice lines: %s", len(lines), _clip(lines))

@@ -23,7 +23,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from sqlalchemy.orm import Session
 
 from app.core.product_service import ProductService
-from app.core.sales_service import calc_tax
+from app.core.cart import calc_tax
 
 logger = logging.getLogger(__name__)
 

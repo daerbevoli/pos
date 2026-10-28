@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import QMessageBox
 from app.ui.pos_screen import POSScreen
 from app.core.product_service import ProductService
 from app.core.client_service import ClientService
-from app.core.sales_service import CartItem, DiscountEntry, PaymentEntry, SubtotalMarker, SalesService
+from app.core.cart import Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker
+from app.core.sales_service import SalesService
 from app.core.database import get_session
 from app.models.models import Sale
 
@@ -303,6 +304,22 @@ def test_scan_weight_unit_without_quantity_creates_pending_item(screen):
     item = screen.cart.entries[0]
     assert item.quantity is None
     assert item.unit == "kg"
+
+
+def test_scanner_weight_unit_without_quantity_creates_pending_item(screen):
+    """The hardware scanner path must wait for a weight too, not add 1 kg."""
+    pid, barcode, unit = _add_product(barcode="2220000000000", unit="kg", price=3.0)
+    screen._on_barcode_scan(barcode)
+
+    item = screen.cart.entries[0]
+    assert item.quantity is None
+    assert screen._selected_pending_item() is item
+
+
+def test_scanner_unit_product_without_quantity_adds_one(screen):
+    pid, barcode, unit = _add_product(barcode="2230000000000", price=3.0)
+    screen._on_barcode_scan(barcode)
+    assert screen.cart.entries[0].quantity == 1
 
 
 def test_scan_weight_unit_with_typed_quantity_is_not_pending(screen):
@@ -997,7 +1014,7 @@ def test_remove_selected_on_promo_discount_after_reopen_reverses_the_product_lin
     original, reversal = screen.cart.entries
     assert isinstance(original, CartItem) and original.has_reversal is True
     assert isinstance(reversal, CartItem) and reversal.is_reversal is True
-    assert screen.cart.subtotal == 0.0
+    assert screen.cart.total == 0.0
 
 
 def test_reversal_capped_at_one_per_line(screen):
@@ -1103,6 +1120,110 @@ def test_repaying_a_reopened_ticket_overwrites_the_same_sale(screen):
     assert sale.final_amount == 10.0
 
 
+def test_send_invoice_refused_while_ticket_is_reopened(screen, monkeypatch):
+    """Sending locks the sale; the payment saving the reopened edits would then fail."""
+    client_id = _make_client("Acme", "BE", "BE0234567873")
+    pid, barcode, _ = _add_product(barcode="send1", price=5.0)
+    screen.set_client(client_id, "Acme")
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+    started = []
+    monkeypatch.setattr("app.ui.pos_screen.InvoiceSendWorker", lambda *a, **kw: started.append(a))
+
+    screen._send_invoice()
+
+    assert started == []
+    assert "reopened" in screen.overlay.message_label.text()
+
+
+def test_repaying_reopened_ticket_after_invoice_sent_keeps_ticket_open(screen):
+    """If the invoice got locked meanwhile, paying shows why and keeps the
+    ticket and its partial payments, instead of the generic crash dialog."""
+    client_id = _make_client("Acme", "BE", "BE0234567873")
+    pid, barcode, _ = _add_product(barcode="send2", price=5.0)
+    screen.set_client(client_id, "Acme")
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    sale_id = screen._current_sale_id
+    screen._reopen_ticket()
+    _scan(screen, barcode)  # total now 10.00
+    screen.cart_input.setText("4")
+    screen._open_payment("cash")  # partial
+    with get_session() as session:
+        SalesService.mark_invoice_sent(session, sale_id)
+
+    screen._open_payment("cash")  # pays the remaining 6.00
+
+    assert screen.sale_finished is False
+    assert "already been sent" in screen.overlay.message_label.text()
+    assert [e.amount for e in screen.cart.entries if isinstance(e, PaymentEntry)] == [4.0]
+    with get_session() as session:
+        assert session.get(Sale, sale_id).final_amount == 5.0
+
+
+def test_reopened_ticket_recovered_after_crash_keeps_saved_lines_locked(screen, qtbot):
+    """The saved lines of a reopened sale must still be reversed, not deleted,
+    after the POS restarts with the ticket open (they'd vanish from the Z
+    report's mistakes otherwise)."""
+    pid, barcode, _ = _add_product(barcode="lock1", price=5.0, stock_quantity=50)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+    _scan(screen, barcode)  # a new, unlocked line; autosaves the open ticket
+
+    restarted = POSScreen()
+    qtbot.addWidget(restarted)
+
+    assert [e.locked for e in restarted.cart.entries] == [True, False]
+    restarted.cart_table.selectRow(0)
+    restarted._remove_selected()
+    items = [e for e in restarted.cart.entries if isinstance(e, CartItem)]
+    assert len(items) == 3 and items[2].is_reversal and items[2].reversal_of is items[0]
+
+
+def test_client_cannot_change_once_part_is_paid(screen):
+    client_id = _make_client("Euro", "NL", "NL123456789B01")
+    pid, barcode, _ = _add_product(barcode="cl1", price=12.10, tax=21)
+    _scan(screen, barcode)
+    screen.cart_input.setText("5")
+    screen._open_payment("cash")  # partial
+
+    screen.set_client(client_id, "Euro")
+
+    assert screen.is_invoice is False
+    assert screen.cart.total == 12.10
+
+
+def test_reopened_receipt_cannot_switch_to_a_foreign_client(screen):
+    """Its saved lines were charged with VAT; zero-rating them in place would
+    change what was already charged."""
+    foreign = _make_client("Euro", "NL", "NL123456789B01")
+    pid, barcode, _ = _add_product(barcode="cl2", price=12.10, tax=21)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+
+    screen.set_client(foreign, "Euro")
+
+    assert screen.is_invoice is False
+    assert screen.cart.total == 12.10
+    assert "VAT" in screen.overlay.message_label.text()
+
+
+def test_reopened_receipt_can_become_an_invoice_for_a_domestic_client(screen):
+    domestic = _make_client("Acme", "BE", "BE0234567873")
+    pid, barcode, _ = _add_product(barcode="cl3", price=12.10, tax=21)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    screen._reopen_ticket()
+
+    screen.set_client(domestic, "Acme")
+
+    assert screen.is_invoice is True and screen.client_id == domestic
+    assert screen.cart.total == 12.10
+
+
 def test_reopened_ticket_blocks_quantity_changes(screen):
     pid, barcode, _ = _add_product(barcode="rev5", price=5.0, stock_quantity=50)
     _scan(screen, barcode)
@@ -1200,6 +1321,39 @@ def test_previous_then_next_returns_to_the_same_sale(screen):
     screen._next_sale()      # and back
 
     assert screen._current_sale_id == second_sale_id
+
+
+def test_browsing_sees_sales_made_after_the_screen_was_built(screen):
+    """Regression: the list of today's sales was read once at startup."""
+    pid, barcode, _ = _add_product(barcode="nav7", price=5.0)
+    with get_session() as session:
+        product = ProductService.get_by_id(session, pid)
+        cart = Cart()
+        cart.add_product(product)
+        elsewhere = SalesService.finalize_sale(session, cart, payment_method="cash").id
+
+    screen._previous_sale()
+
+    assert screen._current_sale_id == elsewhere
+
+
+def test_browsing_skips_sales_purged_by_a_z_report(screen):
+    pid, barcode, _ = _add_product(barcode="nav8", price=5.0)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    first = screen._current_sale_id
+    screen._clear_cart(override=True)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+    second = screen._current_sale_id
+    with get_session() as session:
+        session.delete(session.get(Sale, first))  # as the Z report's purge does
+        session.commit()
+
+    screen._previous_sale()
+
+    assert screen._current_sale_id == second  # stays put: nothing earlier
+    assert screen.overlay.message_label.text() == "No earlier sales"
 
 
 def test_show_sale_jumps_directly_to_sale_by_id(screen):
