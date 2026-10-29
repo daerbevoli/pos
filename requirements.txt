@@ -1,4 +1,5 @@
-PyQt6>=6.6.0
+PyQt6==6.11.0  # pinned: a different PyQt6 on the POS PC hid the price/stock QDoubleSpinBox text
+PyQt6-Qt6==6.11.0  # must match PyQt6
 SQLAlchemy>=2.0.0
 python-escpos>=3.0.0
 pyserial>=3.5
@@ -10,7 +11,7 @@ Pillow>=10.0.0
 cryptography>=42  # AES-256-GCM encryption of backup archives
 pyinstaller>=6.0.0
 
-pyqt6-sip
+pyqt6-sip==13.11.1
 pytest
 pytest-qt
 requests
