@@ -3,7 +3,8 @@ from unittest import mock
 import pytest
 from PIL import Image
 
-from app.core.receipt_service import LOGO_MAX_WIDTH_PX, _print_company_info, _print_logo
+from app.core.cart import Cart, CartItem, SubtotalMarker
+from app.core.receipt_service import LOGO_MAX_WIDTH_PX, _print_company_info, _print_line_items, _print_logo
 
 
 def _printed_text(printer):
@@ -55,3 +56,17 @@ def test_company_info_prints_the_saved_phone_and_vat(settings, expected):
     printer = mock.Mock()
     _print_company_info(printer, settings)
     assert _printed_text(printer) == expected
+
+
+def test_subtotal_lines_print_their_own_block():
+    """Same figures as the till's SUBTOTAL rows (Cart.subtotals()), not a running total."""
+    cart = Cart(entries=[
+        CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=10.0, quantity=1),
+        SubtotalMarker(),
+        CartItem(product_id=2, product_name="B", product_barcode="2", unit_price=2.5, quantity=2),
+        SubtotalMarker(),
+    ])
+    printer = mock.Mock()
+    _print_line_items(printer, cart)
+    lines = [l.split() for l in _printed_text(printer).splitlines() if "SUBTOTAL" in l]
+    assert lines == [["1", "SUBTOTAL", "10.00"], ["2", "SUBTOTAL", "5.00"]]

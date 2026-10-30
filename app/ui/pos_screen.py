@@ -257,14 +257,14 @@ class POSScreen(QWidget):
         self._amount_validator = QRegularExpressionValidator(
             QRegularExpression(r'-?[0-9]{0,7}([.,][0-9]{0,3})?'), self
         )
-        self._barcode_validator = QRegularExpressionValidator(QRegularExpression(r'[0-9]*'), self)
+        self._barcode_validator = QRegularExpressionValidator(QRegularExpression(r'[0-9]{0, 15}'), self)
         self.cart_input.setValidator(self._amount_validator)
 
         self.payment_footer = QWidget()
         self.payment_footer.setObjectName("paymentFooter")
         self.payment_footer.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         _fl = QHBoxLayout(self.payment_footer)
-        _fl.setContentsMargins(10, 4, 10, 4)
+        _fl.setContentsMargins(5, 2, 5, 2)
         self.footer_total_lbl  = QLabel()
         self.footer_change_lbl = QLabel()
         _footer_font = QFont()
@@ -843,7 +843,8 @@ class POSScreen(QWidget):
         if self._guard_payment_in_progress():
             return
         if not self.cart.entries:
-            self._show_overlay(message="Cart empty")
+            self._show_overlay("Cart empty", kind="info")
+            return
         # Allow subtotal if the current section has at least a CartItem or DiscountEntry
         section_has_content = False
         for entry in reversed(self.cart.entries):
@@ -853,6 +854,10 @@ class POSScreen(QWidget):
                 section_has_content = True
                 break
         if not section_has_content:
+            self._show_overlay("Already subtotalled", kind="info")
+            return
+        if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
+            self._show_overlay("Fill in the amount for pending items first", kind="error")
             return
         self.cart.add_subtotal()
         self._refresh_cart(select_last=True)
@@ -860,11 +865,11 @@ class POSScreen(QWidget):
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
-    def _insert_subtotal_row(self, total: float, count: int):
+    def _insert_subtotal_row(self, total: float, count: float):
         row = self.cart_table.rowCount()
         self.cart_table.insertRow(row)
         cells = [
-            QTableWidgetItem(str(count)),
+            QTableWidgetItem(f"{count:g}"),
             QTableWidgetItem("SUBTOTAL"),
             QTableWidgetItem(""),
             QTableWidgetItem(f"{total:.2f}"),
@@ -931,10 +936,7 @@ class POSScreen(QWidget):
         self.cart_table.setRowCount(0)
         self._row_to_entry: list[int | None] = []
 
-        section_total = 0.0
-        section_count = 0
-        section_has_items = False
-        prev_subtotal = 0.0
+        subtotals = iter(self.cart.subtotals())
         payment_divider_shown = False
         font_bold = _cart_font(bold=True)
         font_item = _cart_font(bold=False)
@@ -950,18 +952,14 @@ class POSScreen(QWidget):
                     weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
                     name_text = f"{entry.product_name}  ·  {weight_text}"
                     price_text = f"{entry.unit_price:.2f}/{entry.unit}"
-                    # A weight article is one line item, not `quantity` kg of them.
-                    count_contribution = 0 if pending else (-1 if entry.quantity < 0 else 1)
                 elif entry.is_open_price:
                     qty_text = f"{entry.quantity:g}"
                     name_text = entry.product_name
                     price_text = "?" if pending else f"{entry.unit_price:.2f}"
-                    count_contribution = entry.quantity or 0
                 else:
                     qty_text = "?" if pending else f"{entry.quantity:g}"
                     name_text = entry.product_name
                     price_text = f"{entry.unit_price:.2f}"
-                    count_contribution = entry.quantity or 0
                 for col, text in enumerate([
                     qty_text,
                     name_text,
@@ -974,9 +972,6 @@ class POSScreen(QWidget):
                         cell.setBackground(self._row_brush(COLOR_ROW_PENDING))
                     self.cart_table.setItem(r, col, cell)
                 self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
-                section_total += entry.line_total
-                section_count += count_contribution
-                section_has_items = True
 
             elif isinstance(entry, DiscountEntry):
                 r = self.cart_table.rowCount()
@@ -993,17 +988,11 @@ class POSScreen(QWidget):
                     cell.setBackground(self._row_brush(COLOR_ROW_SUMMARY))
                     self.cart_table.setItem(r, c, cell)
                 self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
-                section_total += entry.line_total   # negative
 
             elif isinstance(entry, SubtotalMarker):
-                # Discount-only section: show net against the previous subtotal
-                display_total = section_total if section_has_items else prev_subtotal + section_total
-                self._insert_subtotal_row(display_total, section_count)
+                count, total = next(subtotals)
+                self._insert_subtotal_row(total, count)
                 self._row_to_entry.append(i)
-                prev_subtotal = display_total
-                section_total = 0.0
-                section_count = 0
-                section_has_items = False
 
             elif isinstance(entry, PaymentEntry):
                 if not payment_divider_shown:

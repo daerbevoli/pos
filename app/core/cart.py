@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+WEIGHT_UNITS = {"kg", "g", "ml", "l"}
+
 @dataclass
 class ReceiptEntry:
     pass
@@ -42,6 +44,17 @@ class CartItem(ReceiptEntry):
         be paid: a weight/volume item awaiting its quantity, or an
         open-price item awaiting its price."""
         return self.quantity is None or (self.is_open_price and self.unit_price == 0.0)
+
+    @property
+    def article_count(self) -> float:
+        """How many articles this line counts as on a subtotal: its quantity,
+        or one for a weighed/measured line (1.25 kg of apples is one
+        article), negative on a reversal/refund. Zero while pending."""
+        if self.pending:
+            return 0
+        if self.unit in WEIGHT_UNITS:
+            return -1 if self.quantity < 0 else 1
+        return self.quantity
 
     @property
     def discount_amount(self) -> float:
@@ -292,8 +305,12 @@ class Cart:
         """What the Error key does to a selected row: "reversed" for a line
         already saved on a reopened sale (see reverse()), "removed" for
         anything else, None if nothing changed (a line reversed already).
-        A promo or VOID discount row stands for the line it belongs to."""
+        A promo or VOID discount row stands for the line it belongs to; a
+        subtotal takes the discount rows right under it along."""
         self._pin_allocations()
+        if isinstance(entry, SubtotalMarker):
+            self._delete_subtotal(entry)
+            return "removed"
         if isinstance(entry, DiscountEntry) and (entry.is_promo or entry.is_void) and entry.allocations:
             entry = entry.allocations[0].item
         if (isinstance(entry, CartItem) and entry.locked and entry.quantity is not None
@@ -308,6 +325,16 @@ class Cart:
             entry.reversal_of.has_reversal = False
         self._delete(entry)
         return "removed"
+
+    def _delete_subtotal(self, marker: SubtotalMarker):
+        """Drops a subtotal and the discount rows directly under it: left
+        behind, they'd read as coming off the last item rather than the
+        block they were given on."""
+        start = next(i for i, e in enumerate(self.entries) if e is marker)
+        end = start + 1
+        while end < len(self.entries) and isinstance(self.entries[end], DiscountEntry):
+            end += 1
+        del self.entries[start:end]
 
     def _delete(self, entry: ReceiptEntry):
         """Drops one entry (by identity: identical lines compare equal). A
@@ -339,6 +366,36 @@ class Cart:
             NetLine(item=item, gross=item.line_total, net=net[id(item)], tax=calc_tax(net[id(item)], item.tax_rate))
             for item in items
         ]
+
+    def subtotals(self) -> list[tuple[float, float]]:
+        """(article count, amount) for each SubtotalMarker, in order: what the
+        block of items since the previous subtotal comes to, net of the
+        discounts on them that sit above the marker (one entered after it
+        prints as its own line below it). A block holding only discounts
+        re-totals the block before it, discounts included. The till,
+        customer display and receipt all show these, so they agree."""
+        _, _, resolved = self._resolve()
+        allocations = {id(discount): allocs for discount, allocs in resolved}
+        net: dict[int, float] = {}  # id(item) -> amount so far, at this point in the list
+        block: list[CartItem] = []
+        prev_block: list[CartItem] = []
+        result = []
+        for entry in self.entries:
+            if isinstance(entry, CartItem):
+                net[id(entry)] = entry.line_total
+                block.append(entry)
+            elif isinstance(entry, DiscountEntry):
+                for a in allocations[id(entry)]:
+                    if id(a.item) in net:
+                        net[id(a.item)] -= a.amount
+            elif isinstance(entry, SubtotalMarker):
+                block = block or prev_block
+                result.append((
+                    sum(item.article_count for item in block),
+                    round(sum(net[id(item)] for item in block), 2),
+                ))
+                prev_block, block = block, []
+        return result
 
     def add_product(self, product, quantity: float | None = 1, price: float | None = None):
         """price overrides product.price for this line only — used for the

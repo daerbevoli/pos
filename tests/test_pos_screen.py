@@ -482,6 +482,22 @@ def test_show_subtotal_inserts_marker(screen):
     assert any(isinstance(e, SubtotalMarker) for e in screen.cart.entries)
 
 
+def test_subtotal_rows_show_their_own_block(screen):
+    _, b1, _ = _add_product(barcode="sub2", price=10.0)
+    _, b2, _ = _add_product(barcode="sub3", price=5.0)
+    _scan(screen, b1)
+    screen._show_subtotal()
+    screen.cart_input.setText("10")
+    screen._apply_percent_discount()  # 10% off the first block, under its subtotal
+    _scan(screen, b2)
+    screen._show_subtotal()
+
+    rows = [[screen.cart_table.item(r, c).text() for c in range(4)]
+            for r in range(screen.cart_table.rowCount())]
+    subtotal_rows = [row for row in rows if row[1] == "SUBTOTAL"]
+    assert subtotal_rows == [["1", "SUBTOTAL", "", "10.00"], ["1", "SUBTOTAL", "", "5.00"]]
+
+
 def test_show_subtotal_on_empty_section_is_noop(screen):
     screen._unfreeze_ticket()
     screen._show_subtotal()

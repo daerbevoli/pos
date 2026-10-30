@@ -168,8 +168,7 @@ def _print_line_items(printer, cart: Cart):
     printer.text(f"{'#':<{QTY_COL}}{'Description':<{NAME_COL}}{'Price':>{UNIT_COL}}{'Total':>{TOTAL_COL}}\n")
     printer.text("-" * LINE_WIDTH + "\n")
     printer.set(bold=False)
-    running_qty = 0.0
-    running_total = 0.0
+    subtotals = iter(cart.subtotals())
     for entry in cart.entries:
         if isinstance(entry, CartItem):
             if entry.quantity is None:
@@ -180,17 +179,13 @@ def _print_line_items(printer, cart: Cart):
                 # One weighed article, not `quantity` units of it — the
                 # subtotal counts articles, and the actual weight prints
                 # on its own centered line below the article.
-                qty_count = -1 if entry.quantity < 0 else 1
-                qty = f"{qty_count}"
+                qty = "-1" if entry.quantity < 0 else "1"
                 weight_text = f"{abs(entry.quantity):g}{entry.unit}"
                 unit_price = f"{entry.unit_price:.2f}/{entry.unit}"
             else:
-                qty_count = entry.quantity
                 qty = f"{entry.quantity:g}"
                 unit_price = f"{entry.unit_price:.2f}"
             name = prefix + entry.product_name
-            running_qty += qty_count
-            running_total += entry.line_total
             name_lines = _wrap_name(name)
             printer.text(
                 f"{qty:<{QTY_COL}}{name_lines[0]:<{NAME_COL}}"
@@ -201,16 +196,16 @@ def _print_line_items(printer, cart: Cart):
             if weight_text:
                 printer.text(weight_text.center(LINE_WIDTH // 2) + "\n")
         elif isinstance(entry, SubtotalMarker):
-            qty_str = f"{running_qty:g}"
+            count, total = next(subtotals)
+            qty_str = f"{count:g}"
             printer.set(bold=True)
             printer.text(
-                f"{qty_str:<{QTY_COL}}{'Subtotal':<{NAME_COL}}{'':>{UNIT_COL}}"
-                f"{running_total:>{TOTAL_COL}.2f}\n"
+                f"{qty_str:<{QTY_COL}}{'SUBTOTAL':<{NAME_COL}}{'':>{UNIT_COL}}"
+                f"{total:>{TOTAL_COL}.2f}\n"
             )
             printer.set(bold=False)
         elif isinstance(entry, DiscountEntry):
             printer.set(bold=True)
-            running_total += entry.line_total
             label_lines = _wrap_name(entry.label)
             # amount is usually positive (deducts); a promo entry undoing a
             # reversed line's discount is negative (adds back) — sign comes

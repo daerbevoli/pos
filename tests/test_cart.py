@@ -442,6 +442,67 @@ def test_add_subtotal_appends_marker():
     assert isinstance(cart.entries[0], SubtotalMarker)
 
 
+def test_subtotals_cover_only_the_block_since_the_previous_one():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=10.0))
+    cart.add_subtotal()
+    cart.add_product(_FakeProduct(id=2, price=2.5), quantity=2)
+    cart.add_subtotal()
+    assert cart.subtotals() == [(1, 10.0), (2, 5.0)]
+
+
+def test_subtotals_discount_after_a_subtotal_stays_with_its_block():
+    """The 10% off the first block shows on its own line and in a
+    discount-only subtotal under it — never in the next block's subtotal."""
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=10.0))
+    cart.add_subtotal()
+    cart.apply_percent_discount(10)
+    cart.add_subtotal()
+    cart.add_product(_FakeProduct(id=2, price=5.0))
+    cart.add_subtotal()
+    assert cart.subtotals() == [(1, 10.0), (1, 9.0), (1, 5.0)]
+
+
+def test_subtotals_include_item_and_promo_discounts_above_them():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=10.0, promo=_FakePromo(discount_value=10.0)))
+    cart.add_product(_FakeProduct(id=2, price=4.0))
+    cart.apply_amount_discount(1.0)
+    cart.add_subtotal()
+    assert cart.subtotals() == [(2, 12.0)]
+
+
+def test_subtotals_count_a_weighed_line_as_one_article():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=4.0, unit="kg"), quantity=1.25)
+    cart.add_subtotal()
+    assert cart.subtotals() == [(1, 5.0)]
+
+
+def test_remove_entry_takes_the_discounts_under_a_subtotal_along():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=10.0))
+    cart.add_product(_FakeProduct(id=2, price=5.0))
+    cart.apply_amount_discount(1.0)  # on the 5.00 item, above the subtotal: stays
+    cart.add_subtotal()
+    cart.apply_percent_discount(10)
+    cart.apply_amount_discount(2.0)
+    cart.add_product(_FakeProduct(id=3, price=3.0))
+
+    assert cart.remove_entry(cart.entries[3]) == "removed"
+    assert [type(e).__name__ for e in cart.entries] == ["CartItem", "CartItem", "DiscountEntry", "CartItem"]
+    assert cart.total == 17.0
+
+
+def test_remove_entry_removes_a_plain_subtotal():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=10.0))
+    cart.add_subtotal()
+    assert cart.remove_entry(cart.entries[-1]) == "removed"
+    assert not any(isinstance(e, SubtotalMarker) for e in cart.entries)
+
+
 # ── remove_entry / clear ─────────────────────────────────────────────────
 
 def test_remove_entry_removes_that_line():
