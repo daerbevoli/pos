@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
+from app.__version__ import __version__
 from app.core.admin import admin_code_problem, check_admin_code, set_admin_code
 from app.core.database import get_session
 from app.core.erp_service import ErpService
@@ -131,6 +132,13 @@ class SettingsScreen(QWidget):
         admin_row.addWidget(self.btn_admin_code)
         admin_row.addStretch()
         left_col.addWidget(admin_group)
+
+        about_group = QGroupBox("About")
+        about_row = QHBoxLayout(about_group)
+        self.version_label = QLabel(f"SuperPOS version {__version__}")
+        about_row.addWidget(self.version_label)
+        about_row.addStretch()
+        left_col.addWidget(about_group)
         left_col.addStretch()
 
         sc_group = QGroupBox("Shortcuts")

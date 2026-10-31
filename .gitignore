@@ -1,0 +1,7 @@
+# PyInstaller / installer build output (built by CI for releases)
+build/
+dist/
+
+# Python bytecode
+__pycache__/
+*.pyc

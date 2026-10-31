@@ -61,6 +61,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy.orm import Session
 
 import app.core.database as database
+from app.__version__ import __version__
 from app.core import backup_key
 from app.core.settings_service import SettingsService
 
@@ -527,6 +528,7 @@ def _sha256(path: Path) -> str:
 def _base_manifest(kind: str, created_at: datetime, db_size: int) -> dict:
     return {
         "app": "SuperPOS",
+        "app_version": __version__,  # which build wrote it, for restores across versions
         "kind": kind,
         "created_at": created_at.isoformat(timespec="seconds"),
         "db_size": db_size,
