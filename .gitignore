@@ -5,3 +5,6 @@ dist/
 # Python bytecode
 __pycache__/
 *.pyc
+
+logs
+.idea

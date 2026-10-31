@@ -70,3 +70,43 @@ def test_subtotal_lines_print_their_own_block():
     _print_line_items(printer, cart)
     lines = [l.split() for l in _printed_text(printer).splitlines() if "SUBTOTAL" in l]
     assert lines == [["1", "SUBTOTAL", "10.00"], ["2", "SUBTOTAL", "5.00"]]
+
+
+@pytest.fixture
+def fresh_backend(monkeypatch):
+    """Undo _get_backend()'s module-level cache and usb.core.find patch."""
+    import usb.core
+    import app.core.receipt_service as receipt_service
+    monkeypatch.setattr(receipt_service, "_backend", None)
+    monkeypatch.setattr(usb.core, "find", usb.core.find)
+    return receipt_service
+
+
+def test_backend_on_linux_uses_system_libusb_and_patches_find_once(fresh_backend, monkeypatch):
+    import usb.backend.libusb1
+    import usb.core
+    backend = object()
+    get_backend = mock.Mock(return_value=backend)
+    monkeypatch.setattr(fresh_backend.sys, "platform", "linux")
+    monkeypatch.setattr(usb.backend.libusb1, "get_backend", get_backend)
+
+    assert fresh_backend._get_backend() is backend
+    patched_find = usb.core.find
+    assert fresh_backend._get_backend() is backend
+
+    get_backend.assert_called_once_with()  # no find_library: pyusb finds the system lib
+    assert usb.core.find is patched_find  # cached: not wrapped a second time
+
+
+def test_backend_that_cannot_load_raises_and_leaves_find_alone(fresh_backend, monkeypatch):
+    import usb.backend.libusb1
+    import usb.core
+    original_find = usb.core.find
+    monkeypatch.setattr(fresh_backend.sys, "platform", "linux")
+    monkeypatch.setattr(usb.backend.libusb1, "get_backend", mock.Mock(return_value=None))
+
+    for _ in range(2):  # each retry fails the same way
+        with pytest.raises(fresh_backend.PrinterError):
+            fresh_backend._get_backend()
+    assert usb.core.find is original_find
+    assert fresh_backend._backend is None

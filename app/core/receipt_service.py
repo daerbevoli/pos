@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import platform
+import sys
 import textwrap
 from datetime import datetime
 
@@ -40,18 +41,11 @@ class PrinterError(Exception):
     """Raised when the receipt printer can't be reached or fails to print."""
 
 
-def _get_backend():
-    """Lazily resolve the libusb1 backend, patching PyUSB's global find() so
-    python-escpos's internal usb.core.find() calls use it too. The `libusb`
-    pip package nests DLLs in per-arch subfolders and pyusb won't find them
-    via PATH alone (see Zadig/WinUSB setup)."""
-    global _backend
-    if _backend is not None:
-        return _backend
-
+def _bundled_libusb_dll() -> str:
+    """Windows has no system libusb: use the DLL shipped in the `libusb` pip
+    package, which nests it in per-arch subfolders pyusb won't find via PATH
+    alone (see Zadig/WinUSB setup)."""
     import libusb
-    import usb.core
-    import usb.backend.libusb1
 
     pkg_dir = os.path.dirname(libusb.__file__)
     arch = ("arm64" if "arm" in platform.machine().lower()
@@ -60,9 +54,33 @@ def _get_backend():
     if not matches:
         logger.error("libusb-1.0.dll not found under %s for arch %s", pkg_dir, arch)
         raise PrinterError("libusb-1.0.dll not found for this platform/architecture.")
+    return matches[0]
 
-    backend = usb.backend.libusb1.get_backend(find_library=lambda x: matches[0])
-    logger.info("USB backend loaded: %s (backend %s)", matches[0], "OK" if backend else "None")
+
+def _get_backend():
+    """Lazily resolve the libusb1 backend, patching PyUSB's global find() so
+    python-escpos's internal usb.core.find() calls use it too. Windows uses the
+    bundled DLL; Linux uses the system libusb-1.0 (package libusb-1.0-0).
+    Raises PrinterError if it can't be loaded; nothing is cached or patched
+    then, so the next print retries."""
+    global _backend
+    if _backend is not None:
+        return _backend
+
+    import usb.core
+    import usb.backend.libusb1
+
+    if sys.platform == "win32":
+        library = _bundled_libusb_dll()
+        backend = usb.backend.libusb1.get_backend(find_library=lambda x: library)
+    else:
+        library = "system libusb-1.0"
+        backend = usb.backend.libusb1.get_backend()
+    if backend is None:
+        logger.error("USB backend could not be loaded from %s", library)
+        raise PrinterError(f"USB backend could not be loaded from {library}.")
+
+    logger.info("USB backend loaded: %s", library)
     original_find = usb.core.find
     usb.core.find = lambda *a, **kw: original_find(*a, **{**kw, "backend": backend})
     _backend = backend

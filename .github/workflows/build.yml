@@ -1,0 +1,92 @@
+# Builds SuperPOS with PyInstaller on every push/PR and on version tags.
+#
+# Each matrix entry is one platform; adding Linux later means uncommenting its
+# entry (and installing its system packages, see superpos.spec). Artifacts are
+# named SuperPOS-<version>-<platform> so the installer step and the in-app
+# updater can pick the right download per platform.
+#
+# A release is made by tagging the commit "v" + app/__version__.py; the build
+# fails if the two disagree.
+#
+# Still to add: the Inno Setup installer and publishing a GitHub Release on tags.
+
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          # - os: ubuntu-22.04   # oldest glibc we'd support: the build only runs on the same or newer
+          #   platform: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0 libxcb-cursor0
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Read version (and check it matches the tag)
+        id: version
+        run: |
+          version=$(python -c "from app.__version__ import __version__; print(__version__)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match app/__version__.py ($version)"
+            exit 1
+          fi
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm superpos.spec
+
+      # The exe is windowed (console=False): the shell wouldn't wait for it or
+      # see its exit code, and its results only go to the log file.
+      - name: Self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\SuperPOS\SuperPOS.exe -ArgumentList '--self-test' -Wait -PassThru
+          Select-String -Path "$env:APPDATA\SuperPOS\logs\pos.log" -Pattern 'SELF-TEST'
+          exit $p.ExitCode
+
+      - name: Self-test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          code=0
+          dist/SuperPOS/SuperPOS --self-test || code=$?
+          grep 'SELF-TEST' ~/.local/share/SuperPOS/logs/pos.log
+          exit $code
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SuperPOS-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          path: dist/SuperPOS/
+          if-no-files-found: error

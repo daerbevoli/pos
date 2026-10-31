@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def _usb_backend():
+    # Raises if libusb can't be loaded: the bundled DLL on Windows, the
+    # system libusb-1.0 on Linux.
     from app.core.receipt_service import _get_backend
-    if _get_backend() is None:
-        raise RuntimeError("libusb backend could not be loaded")
+    _get_backend()
 
 
 def _usb_enumerate():
@@ -63,7 +64,7 @@ def _erp_http():
 
 
 CHECKS = [
-    ("USB backend (libusb DLL)", _usb_backend),
+    ("USB backend (libusb)", _usb_backend),
     ("USB device enumeration", _usb_enumerate),
     ("Receipt printer driver (escpos)", _escpos),
     ("Label sheet PDF (reportlab barcodes)", _label_sheet_pdf),

@@ -5,40 +5,72 @@
 # the bundled resources. The Inno Setup installer copies this whole folder into
 # Program Files. (A one-file exe would unpack itself to a temp folder on every
 # launch: slower to start and far more likely to be flagged by antivirus.)
+#
+# PyInstaller can't cross-compile: it builds for the OS it runs on. The same
+# spec on Linux gives dist/SuperPOS/SuperPOS, which needs the system packages
+# libusb-1.0-0 and libxcb-cursor0 plus a udev rule granting access to the
+# printers (none of that is bundled).
 
 import os
 import re
+import sys
 
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
-from PyInstaller.utils.win32.versioninfo import (
-    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, StringStruct,
-    VarFileInfo, VarStruct,
-)
 
 ROOT = SPECPATH  # folder holding this spec, so the build works from any cwd
+WINDOWS = sys.platform == 'win32'
 
 # Read the version as text rather than importing the app package.
 with open(os.path.join(ROOT, 'app', '__version__.py'), encoding='utf-8') as f:
     VERSION = re.search(r'__version__\s*=\s*"([^"]+)"', f.read()).group(1)
-_v = tuple(int(n) for n in VERSION.split('.')) + (0,)  # Windows wants 4 numbers
 
-# Shown in the exe's Properties -> Details tab.
-version_info = VSVersionInfo(
-    ffi=FixedFileInfo(filevers=_v, prodvers=_v),
-    kids=[
-        StringFileInfo([StringTable('040904B0', [
-            StringStruct('CompanyName', 'SKBC bv'),
-            StringStruct('FileDescription', 'SuperPOS'),
-            StringStruct('FileVersion', VERSION),
-            StringStruct('InternalName', 'SuperPOS'),
-            StringStruct('OriginalFilename', 'SuperPOS.exe'),
-            StringStruct('ProductName', 'SuperPOS'),
-            StringStruct('ProductVersion', VERSION),
-        ])]),
-        VarFileInfo([VarStruct('Translation', [0x0409, 1200])]),
-    ],
-)
+version_info = None
+if WINDOWS:
+    # Windows-only: versioninfo needs pefile, which isn't installed elsewhere.
+    from PyInstaller.utils.win32.versioninfo import (
+        VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, StringStruct,
+        VarFileInfo, VarStruct,
+    )
+    _v = tuple(int(n) for n in VERSION.split('.')) + (0,)  # Windows wants 4 numbers
+
+    # Shown in the exe's Properties -> Details tab.
+    version_info = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=_v, prodvers=_v),
+        kids=[
+            StringFileInfo([StringTable('040904B0', [
+                StringStruct('CompanyName', 'SKBC bv'),
+                StringStruct('FileDescription', 'SuperPOS'),
+                StringStruct('FileVersion', VERSION),
+                StringStruct('InternalName', 'SuperPOS'),
+                StringStruct('OriginalFilename', 'SuperPOS.exe'),
+                StringStruct('ProductName', 'SuperPOS'),
+                StringStruct('ProductVersion', VERSION),
+            ])]),
+            VarFileInfo([VarStruct('Translation', [0x0409, 1200])]),
+        ],
+    )
+
+# The `libusb` pip package (Windows only, see requirements.txt) ships the DLL
+# that receipt_service._get_backend() loads; Linux uses the system libusb.
+libusb_datas, libusb_hiddenimports = [], []
+if WINDOWS:
+    libusb_datas = [
+        # libusb.cfg and the per-arch libusb-1.0.dll that
+        # receipt_service._bundled_libusb_dll() looks up under the package folder.
+        *collect_data_files('libusb', include_py_files=False),
+        # libusb and its helper packages (pkg_about, py-utlx, ...) each read
+        # their own version from their installed-package metadata on import;
+        # recursive=True bundles it for every package in libusb's dependency tree.
+        *copy_metadata('libusb', recursive=True),
+    ]
+    libusb_hiddenimports = [
+        # libusb loads pkg_about through __import__("pkg_about"), invisible to
+        # PyInstaller: the first print / drawer kick would crash without it.
+        *collect_submodules('libusb', filter=lambda name: not name.startswith(
+            ('libusb._platform.macos', 'libusb._platform.linux'))),
+        *collect_submodules('pkg_about'),
+    ]
 
 a = Analysis(
     [os.path.join(ROOT, 'main.py')],
@@ -49,22 +81,12 @@ a = Analysis(
         # escpos reads capabilities.json at print time; without it the exe
         # starts fine but crashes on the first receipt.
         *collect_data_files('escpos'),
-        # libusb: libusb.cfg and the per-arch libusb-1.0.dll that
-        # receipt_service._get_backend() looks up under the package folder.
-        *collect_data_files('libusb', include_py_files=False),
-        # libusb and its helper packages (pkg_about, py-utlx, ...) each read
-        # their own version from their installed-package metadata on import;
-        # recursive=True bundles it for every package in libusb's dependency tree.
-        *copy_metadata('libusb', recursive=True),
+        *libusb_datas,
     ],
     hiddenimports=[
         'sqlalchemy.dialects.sqlite',
         *collect_submodules('escpos'),
-        # libusb loads pkg_about through __import__("pkg_about"), invisible to
-        # PyInstaller: the first print / drawer kick would crash without it.
-        *collect_submodules('libusb', filter=lambda name: not name.startswith(
-            ('libusb._platform.macos', 'libusb._platform.linux'))),
-        *collect_submodules('pkg_about'),
+        *libusb_hiddenimports,
         # reportlab imports its barcode types through exec() strings, which
         # PyInstaller can't see: the exe would crash at startup without these.
         *collect_submodules('reportlab.graphics.barcode'),
@@ -87,7 +109,9 @@ exe = EXE(
     strip=False,
     upx=False,               # UPX-packed DLLs trigger antivirus and can break Qt
     console=False,           # no console window on Windows
-    icon=os.path.join(ROOT, 'resources', 'icons', 'kassa.ico'),
+    # Linux executables carry no icon or version resource; a .desktop file
+    # sets the icon there.
+    icon=os.path.join(ROOT, 'resources', 'icons', 'kassa.ico') if WINDOWS else None,
     version=version_info,
 )
 

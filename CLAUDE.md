@@ -14,10 +14,13 @@ pytest tests/test_sales_service.py            # single file
 pytest tests/test_sales_service.py::test_foo  # single test
 pytest -k promo                 # by keyword
 
-pyinstaller superpos.spec       # build Windows .exe (must run on Windows/Windows VM) -> dist/
+pyinstaller superpos.spec       # one-folder build for the current OS (no cross-compiling: Windows .exe needs Windows) -> dist/SuperPOS/
+python main.py --self-test      # exercise dynamically loaded deps (USB, escpos, reportlab, crypto, HTTPS); results in the log, exit code 0 = pass
 ```
 
-Logs go to a `logs/` folder next to the DB (never the working directory: the one-file .exe may start anywhere; bundled resources are read via `sys._MEIPASS`, see `main.py`). The SQLite DB lives outside the repo at `~/.local/share/SuperPOS/superpos.db` (Linux) / `%APPDATA%\SuperPOS\superpos.db` (Windows), created automatically by `init_db()` on first launch. Tests never touch it — every fixture in `tests/conftest.py` uses an isolated in-memory SQLite engine (`db_session`, or `seeded_session` which runs the real `_seed_defaults()` seeding logic).
+CI (`.github/workflows/build.yml`) runs tests, the PyInstaller build and `--self-test` per platform (Windows only for now; a Linux entry is ready to uncomment) and checks a `v*` tag matches `app/__version__.py`, the single source of the version.
+
+Logs go to a `logs/` folder next to the DB (never the working directory: the .exe may be started from anywhere; bundled resources are read via `sys._MEIPASS`, see `main.py`). The SQLite DB lives outside the repo at `~/.local/share/SuperPOS/superpos.db` (Linux) / `%APPDATA%\SuperPOS\superpos.db` (Windows), created automatically by `init_db()` on first launch. Tests never touch it — every fixture in `tests/conftest.py` uses an isolated in-memory SQLite engine (`db_session`, or `seeded_session` which runs the real `_seed_defaults()` seeding logic).
 
 ## Architecture
 
@@ -39,6 +42,6 @@ Logs go to a `logs/` folder next to the DB (never the working directory: the one
 
 **Z report flow** (`app/ui/dialogs/z_report_progress_dialog.py`): after confirmation, `ZReportProgressDialog` runs backup before → `close_z_report()` → backup after → print, each step on a `_StepWorker` thread feeding a progress bar, decisions (e.g. "continue without a backup?") on the UI thread between steps. The popup is modal with no close button until done, so no sale can be rung up between the pre-Z backup and the purge.
 
-**Hardware I/O**: receipt printing/cash-drawer kick via `python-escpos` (`app/core/receipt_service.py`), shelf-label printing via raw ZPL over `pyusb` (`app/core/label_service.py`). Both printers are identified by USB vendor/product ID stored in `Settings` and configured in the Settings screen. The barcode scanner needs no driver — it acts as a keyboard (wedge input).
+**Hardware I/O**: receipt printing/cash-drawer kick via `python-escpos` (`app/core/receipt_service.py`), shelf-label printing via raw ZPL over `pyusb` (`app/core/label_service.py`). Both printers are identified by USB vendor/product ID stored in `Settings` and configured in the Settings screen. libusb comes from the DLL bundled by the `libusb` pip package on Windows and from the system `libusb-1.0` on Linux (`receipt_service._get_backend()`). The barcode scanner needs no driver — it acts as a keyboard (wedge input).
 
 **Constants** (`app/constants/`): shared UI sizing/spacing/colors/fonts live here rather than being hardcoded per-screen — check here before adding new magic numbers to a screen.
