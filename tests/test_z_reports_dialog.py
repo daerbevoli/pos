@@ -2,7 +2,7 @@
 Tests for app.ui.dialogs.z_reports_dialog.ZReportsDialog and reprinting a
 Z report. All DB access goes through patched_db; the printer is faked.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -14,7 +14,7 @@ from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 
 def _add_z(number, final_amount=100.0):
     with get_session() as session:
-        now = datetime(2026, 10, 24, 20, 0)
+        now = datetime(2026, 10, 24, 20, 0, tzinfo=timezone.utc)
         session.add(ZReport(report_number=number, period_start=now, period_end=now,
                             transaction_count=3, final_amount=final_amount))
         session.commit()

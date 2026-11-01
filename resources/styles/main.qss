@@ -33,10 +33,6 @@ QPushButton#ticketTab:checked {
     color: #2a2410;
 }
 
-QPushButton#ticketTab:hover {
-    background-color: #b9c8e8;
-}
-
 /* Clock / salesperson box at the right end of the V-tab bar */
 QFrame#clockFrame {
     background-color: #dcefe0;
@@ -84,7 +80,7 @@ QLabel#ticketDate {
 QLineEdit#cartInput {
     background-color: #fbf3ee;
     border: none;
-    border-top: 2px solid #4a90d9;
+    border-top: 3px solid #4a90d9;
     border-radius: 0;
     padding: 2px 6px;
     font-size: 22px;
@@ -101,7 +97,7 @@ QLineEdit#cartInput[frozen="true"] {
 QLabel#ticketTotalLbl {
     background-color: #fbf3ee;
     border: none;
-    border-top: 2px solid #4a90d9;
+    border-top: 3px solid #4a90d9;
     border-radius: 0;
     padding: 2px 6px;
     font-size: 22px;
@@ -667,7 +663,7 @@ QLabel#clientLabel[frozen="true"] {
 
 QWidget#header {
     background-color: #fbf3ee;
-
+    border-bottom: 3px solid #4a90d9;  /* same blue stripe as above the input row */
 }
 
 /* Fixed-width slot in the V-tab bar: blank grey box when there are no errors,
@@ -705,7 +701,7 @@ QLabel#ticketDate[frozen="true"] {
 
 QWidget#paymentFooter {
     background-color: #ccc5be;
-
+    border-top: 3px solid #4a90d9;  /* keeps the input row's blue stripe on a paid ticket */
 }
 
 QLabel#footerTotalLabel {

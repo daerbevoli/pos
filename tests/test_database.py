@@ -215,3 +215,72 @@ def test_column_migration_skips_missing_table(monkeypatch):
 
     with engine.connect() as conn:
         assert database._table_columns(conn, "widgets") == set()
+
+
+# ── Timestamps to UTC ────────────────────────────────────────────────────
+
+def _user_version(engine):
+    with engine.connect() as conn:
+        return conn.exec_driver_sql("PRAGMA user_version").scalar()
+
+
+def test_new_database_is_marked_utc_without_converting(monkeypatch):
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, "ENGINE", engine)
+
+    database._run_migrations()
+
+    assert _user_version(engine) == database._UTC_TIMESTAMPS_VERSION
+
+
+def test_local_timestamps_are_converted_to_utc_once(monkeypatch, brussels_tz):
+    """A database from before the switch (user_version 0) holds naive local
+    times; they're rewritten as UTC exactly once, whatever the DST period."""
+    from datetime import datetime, timezone
+    from app.models.models import ZReport
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, "ENGINE", engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO z_reports (id, report_number, period_start, period_end, created_at, "
+            "transaction_count, total_amount, tax_amount, final_amount) "
+            "VALUES (1, 'Z-0001', '2026-01-15 12:00:00.000000', '2026-07-15 12:00:00.500000', NULL, 0, 0, 0, 0)")
+        conn.commit()
+
+    database._run_migrations()
+    database._run_migrations()  # must not shift the times a second time
+
+    with sessionmaker(bind=engine)() as session:
+        z = session.get(ZReport, 1)
+        assert z.period_start == datetime(2026, 1, 15, 11, 0, tzinfo=timezone.utc)          # CET
+        assert z.period_end == datetime(2026, 7, 15, 10, 0, 0, 500000, tzinfo=timezone.utc)  # CEST
+        assert z.created_at is None
+    assert _user_version(engine) == database._UTC_TIMESTAMPS_VERSION
+
+
+def test_timestamp_conversion_skips_already_utc_database(monkeypatch, brussels_tz):
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, "ENGINE", engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql(f"PRAGMA user_version = {database._UTC_TIMESTAMPS_VERSION}")
+        conn.exec_driver_sql("INSERT INTO categories (id, name, created_at) "
+                             "VALUES (1, 'X', '2026-01-15 12:00:00.000000')")
+        conn.commit()
+
+    database._run_migrations()
+
+    with engine.connect() as conn:
+        value = conn.exec_driver_sql("SELECT created_at FROM categories").scalar()
+    assert value == "2026-01-15 12:00:00.000000"
+
+
+def test_timestamp_columns_list_covers_every_utc_column():
+    """Every UTCDateTime column existing at the switch is in the list the
+    conversion rewrites (columns added later must not be added to it)."""
+    from app.models.models import UTCDateTime
+    columns = {(t.name, c.name) for t in Base.metadata.sorted_tables
+               for c in t.columns if isinstance(c.type, UTCDateTime)}
+    assert set(database._LOCAL_TIMESTAMP_COLUMNS) <= columns

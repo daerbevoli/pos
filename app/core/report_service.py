@@ -11,7 +11,6 @@ I-/CN- is booked through the ERP, so counting it here too would book it twice.
 """
 import json
 import logging
-from datetime import datetime
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.cart import Cart
 from app.core.sales_service import SalesService
 from app.models.models import Invoice, OpenTicket, Product, Sale, ZReport
+from app.utils.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +250,8 @@ class XZReportService:
         sales = session.query(Sale).order_by(Sale.created_at.asc()).all()
         totals = XZReportService.compute_totals(session, till_sales(sales))
         totals["report_number"] = f"X-{XZReportService.current_period_number(session):04d}"
-        totals["period_start"] = sales[0].created_at if sales else datetime.now()
-        totals["period_end"] = datetime.now()
+        totals["period_start"] = sales[0].created_at if sales else utc_now()
+        totals["period_end"] = utc_now()
         logger.info("X report %s generated: %d transactions, total %.2f",
                     totals["report_number"], totals["transaction_count"], totals["final_amount"])
         return totals
@@ -318,8 +318,8 @@ class XZReportService:
         elif sales:
             period_start = sales[0].created_at
         else:
-            period_start = datetime.now()
-        period_end = datetime.now()
+            period_start = utc_now()
+        period_end = utc_now()
 
         z_report = ZReport(
             report_number=report_number,

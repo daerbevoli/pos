@@ -1279,6 +1279,41 @@ def test_switching_tabs_preserves_independent_carts(screen):
     assert screen.cart.entries[0].product_barcode == "tab2"
 
 
+def test_switching_to_an_unused_tab_shows_no_zero_total(screen):
+    """A fresh tab is "finished" but has nothing paid: it must look like a
+    cleared tab (frozen input row), not a paid ticket saying "Total 0.00"."""
+    _, barcode, _ = _add_product(barcode="tab0", price=5.0)
+    _scan(screen, barcode)
+
+    screen.set_active_tab(2)
+
+    assert screen.input_stack.currentWidget() is screen.cart_input
+    assert screen.ticket_total_lbl.isHidden()
+    assert screen.footer_total_lbl.text() == ""
+
+
+def test_switching_back_to_a_paid_tab_still_shows_its_total(screen):
+    _, barcode, _ = _add_product(barcode="tabpaid", price=5.0)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+
+    screen.set_active_tab(2)
+    screen.set_active_tab(1)
+
+    assert screen.input_stack.currentWidget() is screen.payment_footer
+    assert screen.footer_total_lbl.text() == "Total  5.00"
+
+
+def test_clearing_a_paid_ticket_blanks_the_paid_total(screen):
+    _, barcode, _ = _add_product(barcode="tabclr", price=5.0)
+    _scan(screen, barcode)
+    screen._open_payment("cash")
+
+    screen._clear_cart(override=True)
+
+    assert screen.footer_total_lbl.text() == ""
+
+
 def test_switching_to_same_tab_is_noop(screen):
     pid, barcode, _ = _add_product(barcode="tab3")
     _scan(screen, barcode)

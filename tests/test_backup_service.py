@@ -10,7 +10,7 @@ import os
 import sqlite3
 import zipfile
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -62,7 +62,7 @@ def _backup(live_db, dests, kind=KIND_MANUAL, password=None):
 
 def _add_z_report(Session, number):
     with Session() as s:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         s.add(ZReport(report_number=number, period_start=now, period_end=now))
         s.commit()
 

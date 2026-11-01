@@ -16,6 +16,7 @@ from app.core.database import get_session
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.report_service import XZReportService
 from app.models.models import ZReport
+from app.utils.clock import format_local
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 logger = logging.getLogger(__name__)
@@ -63,8 +64,8 @@ class ZReportsDialog(QDialog):
         with get_session() as session:
             reports = XZReportService.all_z_reports(session)
             rows = [
-                (z.id, z.report_number, z.period_start.strftime(_DATE_FORMAT),
-                 z.period_end.strftime(_DATE_FORMAT), str(z.transaction_count),
+                (z.id, z.report_number, format_local(z.period_start, _DATE_FORMAT),
+                 format_local(z.period_end, _DATE_FORMAT), str(z.transaction_count),
                  f"{z.final_amount:.2f}")
                 for z in reports
             ]

@@ -2,14 +2,36 @@
 Database Models
 All tables are defined here using SQLAlchemy ORM.
 """
-from datetime import date, datetime
+from datetime import date, timezone
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
     DateTime, Date, ForeignKey, Text, Enum, Index, text, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, backref, DeclarativeBase
+from sqlalchemy.types import TypeDecorator
 
 from app.constants.countries import BELGIUM
+from app.utils.clock import utc_now
+
+
+class UTCDateTime(TypeDecorator):
+    """A point in time, stored as UTC. Takes only timezone-aware datetimes
+    (any zone; converted to UTC) and returns aware UTC ones. SQLite has no
+    timezone type, so the column holds the naive UTC value; a naive datetime
+    is refused rather than guessed at, since it could be local or UTC.
+    Use app.utils.clock to display one in local time or filter by local days."""
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError(f"Naive datetime {value!r}: store a timezone-aware one (utc_now())")
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    def process_result_value(self, value, dialect):
+        return None if value is None else value.replace(tzinfo=timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -24,7 +46,7 @@ class Category(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False, unique=True)
     description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(UTCDateTime, default=utc_now)
 
     # A category had products
     products = relationship("Product", back_populates="category")
@@ -104,8 +126,8 @@ class Product(Base):
     tax = Column(Integer, nullable=False, default=21)    # 0, 6, 12, 21 %
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(UTCDateTime, default=utc_now)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
     category = relationship("Category", back_populates="products")
     promo_item = relationship("PromoItem", back_populates="product", uselist=False)
@@ -141,8 +163,8 @@ class Sale(Base):
     change_given = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(Enum("completed", "refunded", name="sale_status"), default="completed")
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now) # shows if and when sale reopened and updated
+    created_at = Column(UTCDateTime, default=utc_now)
+    updated_at = Column(UTCDateTime, default=utc_now) # shows if and when sale reopened and updated
     cart_snapshot = Column(Text, nullable=True)  # JSON: ordered cart entries as they were at payment time
     payment_breakdown = Column(Text, nullable=True)  # JSON: [{"method": "cash", "amount": 20.0}, ...] — how much of final_amount each method covered
 
@@ -193,7 +215,7 @@ class StockMovement(Base):
     quantity_after = Column(Float, nullable=False)
     reference = Column(String(50), nullable=True)        # Sale number or PO number
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(UTCDateTime, default=utc_now)
 
     product = relationship("Product", back_populates="stock_movements")
 
@@ -264,9 +286,9 @@ class ZReport(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     report_number = Column(String(20), unique=True, nullable=False)  # e.g. "Z-0001"
-    period_start = Column(DateTime, nullable=False)
-    period_end = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    period_start = Column(UTCDateTime, nullable=False)
+    period_end = Column(UTCDateTime, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now)
     transaction_count = Column(Integer, nullable=False, default=0)
     total_amount = Column(Float, nullable=False, default=0.0)   # excl. tax
     tax_amount = Column(Float, nullable=False, default=0.0)
@@ -296,7 +318,7 @@ class OpenTicket(Base):
     client_name = Column(String, nullable=True)
     sale_id = Column(Integer, ForeignKey("sales.id"), nullable=True)  # set while re-editing a reopened sale
     is_refund = Column(Boolean, nullable=False, default=False)  # tab was in RF/CN mode
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
 
 
 class Invoice(Base):
@@ -306,8 +328,8 @@ class Invoice(Base):
     sale_id = Column(Integer, ForeignKey("sales.id"), unique=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     invoice_number = Column(String, unique=True)
-    issued_at = Column(DateTime, default=datetime.now)
-    sent_at = Column(DateTime, nullable=True)  # None = still editable; set once transmitted, after which it's locked
+    issued_at = Column(UTCDateTime, default=utc_now)
+    sent_at = Column(UTCDateTime, nullable=True)  # None = still editable; set once transmitted, after which it's locked
     client_name = Column(String, nullable=False)
     client_vat_number = Column(String, nullable=False)
     client_street = Column(String, nullable=False)
@@ -348,7 +370,7 @@ class Shortcut(Base):
     id         = Column(Integer, primary_key=True, autoincrement=True)
     name       = Column(String(100), nullable=False, unique=True)
     position   = Column(Integer, nullable=False, default=0)   # order of the shortcut buttons
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(UTCDateTime, default=utc_now)
 
     items = relationship(
         "ShortcutItem",

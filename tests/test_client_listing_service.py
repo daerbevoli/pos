@@ -19,7 +19,12 @@ def _item(product, quantity=1):
                     unit_price=product.price, quantity=quantity, tax_rate=product.tax)
 
 
-def _invoice(session, client, *items, issued_at=datetime(2026, 3, 10, 12), refund=False):
+def _local(*args):
+    """An aware datetime at this local wall-clock time — the range is in local days."""
+    return datetime(*args).astimezone()
+
+
+def _invoice(session, client, *items, issued_at=_local(2026, 3, 10, 12), refund=False):
     cart = Cart(entries=list(items))
     cart.is_refund = refund
     invoice = SalesService.finalize_invoice(session, cart, client_id=client.id)
@@ -53,9 +58,9 @@ def test_rows_total_per_client_with_vat_breakdown(db_session):
 def test_only_invoices_in_range_count_and_end_date_is_inclusive(db_session):
     p21, _ = _products(db_session)
     acme = _make_client(db_session, "Acme", "BE0123456789")
-    _invoice(db_session, acme, _item(p21), issued_at=datetime(2026, 2, 28, 23, 59))
-    _invoice(db_session, acme, _item(p21), issued_at=datetime(2026, 3, 31, 23, 59))
-    _invoice(db_session, acme, _item(p21), issued_at=datetime(2026, 4, 1, 0, 0))
+    _invoice(db_session, acme, _item(p21), issued_at=_local(2026, 2, 28, 23, 59))
+    _invoice(db_session, acme, _item(p21), issued_at=_local(2026, 3, 31, 23, 59))
+    _invoice(db_session, acme, _item(p21), issued_at=_local(2026, 4, 1, 0, 0))
 
     rows = ClientListingService.build(db_session, date(2026, 3, 1), date(2026, 3, 31))
 

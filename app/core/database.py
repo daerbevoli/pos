@@ -5,6 +5,7 @@ Handles SQLite connection, table creation, and provides session access.
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from typing import NamedTuple
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
@@ -109,6 +110,65 @@ def _run_migrations():
             _add_column_if_missing(conn, migration.table, migration.column, migration.sql_type)
         _backfill_invoice_change(conn)
         _drop_client_contact_unique_indexes(conn)
+        _convert_timestamps_to_utc(conn)
+
+
+# PRAGMA user_version from which every stored timestamp is UTC. It lives in
+# the database file's header, so it travels with the data: a backup taken
+# before the switch restores with version 0 and is converted on the restart
+# that follows the restore.
+_UTC_TIMESTAMPS_VERSION = 1
+
+# Every timestamp column as of the switch to UTC. Columns added later are
+# UTC from the start and must NOT be listed here.
+_LOCAL_TIMESTAMP_COLUMNS = (
+    ("categories", "created_at"),
+    ("products", "created_at"),
+    ("products", "updated_at"),
+    ("sales", "created_at"),
+    ("sales", "updated_at"),
+    ("stock_movements", "created_at"),
+    ("z_reports", "period_start"),
+    ("z_reports", "period_end"),
+    ("z_reports", "created_at"),
+    ("open_tickets", "updated_at"),
+    ("invoices", "issued_at"),
+    ("invoices", "sent_at"),
+    ("shortcuts", "created_at"),
+)
+
+# How SQLAlchemy's SQLite DateTime writes a value; kept identical so
+# converted rows look like ones written by UTCDateTime.
+_SQLITE_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+
+
+def _convert_timestamps_to_utc(conn):
+    """Timestamps used to be stored as naive local time; rewrites them as
+    UTC (see UTCDateTime), reading each one in this PC's timezone. Runs once,
+    in one transaction with the version bump, so a crash can't convert a
+    value twice. A no-op on a new database except for setting the version.
+    A time in the repeated hour when DST ends is ambiguous; it's taken as
+    the first (summer-time) occurrence."""
+    version = conn.exec_driver_sql("PRAGMA user_version").scalar()
+    if version >= _UTC_TIMESTAMPS_VERSION:
+        return
+    converted = 0
+    for table, column in _LOCAL_TIMESTAMP_COLUMNS:
+        if column not in _table_columns(conn, table):
+            continue
+        rows = conn.exec_driver_sql(
+            f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL").fetchall()
+        for rowid, value in rows:
+            # A naive datetime's astimezone() reads it as local time.
+            utc = datetime.fromisoformat(value).astimezone(timezone.utc)
+            conn.exec_driver_sql(
+                f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
+                (utc.strftime(_SQLITE_DATETIME_FORMAT), rowid))
+        converted += len(rows)
+    conn.exec_driver_sql(f"PRAGMA user_version = {_UTC_TIMESTAMPS_VERSION}")
+    conn.commit()
+    if converted:
+        logger.info("Converted %d stored timestamps from local time to UTC", converted)
 
 
 # Unique indexes the baseline schema put on clients' address/phone/email/

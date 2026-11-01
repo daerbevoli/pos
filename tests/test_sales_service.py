@@ -1,6 +1,6 @@
 """Tests for app.core.sales_service.SalesService business logic."""
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -522,6 +522,31 @@ def test_get_sales_range_includes_boundaries_and_excludes_outside(db_session):
 
     result_future = SalesService.get_sales_range(db_session, today + timedelta(days=1), today + timedelta(days=2))
     assert result_future == []
+
+
+def test_get_sales_range_uses_local_days_not_utc_days(db_session, brussels_tz):
+    """00:30 local on 2 July is still 1 July in UTC: it belongs to 2 July."""
+    product = _make_product(db_session)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    sale.created_at = datetime(2026, 7, 1, 22, 30, tzinfo=timezone.utc)   # 00:30 CEST
+    db_session.commit()
+
+    assert SalesService.get_sales_range(db_session, date(2026, 7, 1), date(2026, 7, 1)) == []
+    assert [s.id for s in SalesService.get_sales_range(db_session, date(2026, 7, 2), date(2026, 7, 2))] == [sale.id]
+
+
+def test_invoice_data_is_dated_in_local_time(db_session, brussels_tz):
+    from app.core.client_service import ClientService
+    from app.core.sales_service import generate_invoice_data
+    product = _make_product(db_session)
+    client = ClientService.create(db_session, name="Acme", street="Kerkstraat 1", zip_code="2000",
+                                  city="Antwerpen", vatNumber="BE0123456789")
+    invoice = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product)), client_id=client.id)
+    invoice.issued_at = datetime(2026, 7, 1, 22, 30, tzinfo=timezone.utc)   # 00:30 CEST on 2 July
+
+    data = generate_invoice_data(invoice)
+    assert data["inv_date"] == "2026-07-02"
+    assert data["due_date"] == "2026-07-09"
 
 
 # ── Refund / credit-note numbering ───────────────────────────────────────

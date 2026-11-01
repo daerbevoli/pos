@@ -24,6 +24,7 @@ from app.core.report_service import (
 from app.models.models import Invoice, Sale
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
 from app.ui.dialogs.z_reports_dialog import ZReportsDialog
+from app.utils.clock import format_local
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_SM, SPACING_MD, SPACING_LG
 
@@ -379,7 +380,7 @@ class ReportsScreen(QWidget):
             self._invoice_row_ids[row] = invoice.id
 
         def fmt(dt):
-            return "/" if dt is None else dt.strftime("%d/%m/%Y %H:%M")
+            return format_local(dt, "%d/%m/%Y %H:%M", empty="/")
 
         if invoice is not None:
             number = invoice.invoice_number

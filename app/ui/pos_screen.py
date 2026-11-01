@@ -32,6 +32,7 @@ from app.core.receipt_service import PrinterError, ReceiptService
 from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
 from app.ui.widgets.shortcut_grid import ShortcutGrid
 from app.core.erp_worker import InvoiceSendWorker
+from app.utils.clock import format_local
 from app.constants import (
     CART_INFO_BAR_HEIGHT,
     CART_ROW_HEIGHT,
@@ -180,7 +181,7 @@ class POSScreen(QWidget):
         self._tick_time()
         t = QTimer(self)
         t.timeout.connect(self._tick_time)
-        t.start(1000)
+        t.start(500)
 
     def _tick_time(self, override: bool = False):
         # No time ticking at finished (frozen) sale
@@ -552,7 +553,9 @@ class POSScreen(QWidget):
         self.ticket_total_lbl.setVisible(not s.sale_finished)
         if s.sale_finished:
             self._update_payment_footer()
-            self.input_stack.setCurrentIndex(1)
+            # A finished tab with an empty cart (never used, or cleared) has no
+            # paid sale to show: same look as right after Clear, no "Total 0.00".
+            self.input_stack.setCurrentIndex(1 if self.cart.entries else 0)
             if s.ticket_date_text:
                 self.ticket_date.setText(s.ticket_date_text)
             else:
@@ -767,6 +770,7 @@ class POSScreen(QWidget):
             self.input_stack.setCurrentIndex(0)
             self.ticket_total_lbl.setVisible(False)
             self.cart.clear()
+            self._update_payment_footer()
             self._set_barcode_entry_mode(False)
             self.cart_input.clear()
             self.client_label.setVisible(False)
@@ -1267,6 +1271,12 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def _update_payment_footer(self):
+        if not self.cart.entries:
+            # Nothing was paid: blank, also on the customer display, which
+            # shows these labels whenever the tab is finished.
+            self.footer_total_lbl.setText("")
+            self.footer_change_lbl.setText("")
+            return
         total_str = f"{self._frozen_total:.2f}"
         self.footer_total_lbl.setText(f"Total  {total_str}")
         if self._frozen_change > 0:
@@ -1419,7 +1429,7 @@ class POSScreen(QWidget):
         self._set_frozen_style(True)
         self._update_payment_footer()
         self.input_stack.setCurrentIndex(1)
-        self.ticket_date.setText(sale.created_at.strftime("%d-%m-%Y %H:%M"))
+        self.ticket_date.setText(format_local(sale.created_at, "%d-%m-%Y %H:%M"))
         self._refresh_cart()
 
 
@@ -1462,7 +1472,7 @@ class POSScreen(QWidget):
                 return
 
             if invoice.sent_at is not None:
-                sent_str = invoice.sent_at.strftime("%d-%m-%Y %H:%M")
+                sent_str = format_local(invoice.sent_at, "%d-%m-%Y %H:%M")
                 self._show_overlay(f"Already sent at {sent_str}", kind="info")
                 return
 

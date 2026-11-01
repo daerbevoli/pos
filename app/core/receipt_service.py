@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.cart import Cart, CartItem, DiscountEntry, SubtotalMarker
 from app.core.settings_service import SettingsService
 from app.models.models import Invoice, Sale, ZReport
+from app.utils.clock import format_local
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ def _left_right(left: str, right: str, width: int = LINE_WIDTH) -> str:
 def _print_receipt_header(printer, sale: Sale):
     printer.set(align="left", bold=False, width=1, height=1, custom_size=True)
     doc_number = sale.invoice.invoice_number if sale.invoice else sale.sale_number
-    printer.text(_left_right(doc_number, sale.created_at.strftime('%d-%m-%Y %H:%M')))
+    printer.text(_left_right(doc_number, format_local(sale.created_at, '%d-%m-%Y %H:%M')))
     if sale.invoice:
         printer.set(bold=True)
         printer.text("THIS IS NOT AN INVOICE\n")
@@ -284,7 +285,7 @@ def _print_report_header(printer, title: str, report_number, period_start, perio
     printer.text("-" * LINE_WIDTH + "\n")
     printer.set(align="left", bold=False, width=1, height=1, custom_size=True)
     printer.text(
-        f"{period_start.strftime('%d/%m/%Y %H:%M')}\n{period_end.strftime('%d/%m/%Y %H:%M')}\n"
+        f"{format_local(period_start, '%d/%m/%Y %H:%M')}\n{format_local(period_end, '%d/%m/%Y %H:%M')}\n"
     )
     printer.set(align="left")
     printer.text("-" * LINE_WIDTH + "\n")
@@ -456,7 +457,7 @@ class ReceiptService:
             printer.text("\n")
             printer.text("\n")
 
-            printer.text(f"Printed on {totals['period_end']}")
+            printer.text(f"Printed on {format_local(totals['period_end'], '%d/%m/%Y %H:%M')}")
 
             printer.cut(mode="PART")
             logger.info("X-report %s printed", totals["report_number"])
@@ -495,7 +496,7 @@ class ReceiptService:
             printer.text("\n")
             printer.text("\n")
 
-            printer.text(f"Printed on {z_report.period_end.strftime('%d/%m/%Y %H:%M')}")
+            printer.text(f"Printed on {format_local(z_report.period_end, '%d/%m/%Y %H:%M')}")
             if reprint:
                 printer.text(f"\nCopy printed on {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 

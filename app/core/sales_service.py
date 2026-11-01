@@ -6,15 +6,15 @@ and sales/invoice lookups. The ticket itself lives in app.core.cart.
 """
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from dataclasses import dataclass
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.constants.countries import BELGIUM
 from app.core.cart import Cart, CartItem, DiscountEntry
 from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket, NumberSequence
 from app.core.product_service import ProductService
+from app.utils.clock import local_days_range, to_local, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +130,12 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
 
 
 def generate_invoice_data(invoice: Invoice) -> dict:
+    issued = to_local(invoice.issued_at).date()
     invoice_data = {
         "inv_num": invoice.invoice_number,
-        "inv_date": invoice.issued_at.strftime("%Y-%m-%d"),
-        "due_date": (invoice.issued_at + timedelta(weeks=1)).strftime("%Y-%m-%d")
+        # Dates as in the shop: an invoice issued at 00:30 local is dated that day.
+        "inv_date": issued.strftime("%Y-%m-%d"),
+        "due_date": (issued + timedelta(weeks=1)).strftime("%Y-%m-%d")
     }
     receiver = {
         "name": invoice.client_name,
@@ -440,7 +442,7 @@ class SalesService:
             sale.notes = notes
 
         sale.tax_amount = SalesService._add_sale_items(session, sale, cart)
-        sale.updated_at = datetime.now()
+        sale.updated_at = utc_now()
 
         # Not-yet-sent invoice: keep its frozen snapshot in step with the
         # edit instead of letting it go stale (see the comment on
@@ -489,7 +491,7 @@ class SalesService:
         if invoice.sent_at is not None:
             logger.debug("Invoice %s already marked sent at %s", invoice.invoice_number, invoice.sent_at)
             return invoice
-        invoice.sent_at = datetime.now()
+        invoice.sent_at = utc_now()
         session.commit()
         session.refresh(invoice)
         logger.info("Invoice %s marked sent and locked", invoice.invoice_number)
@@ -537,23 +539,23 @@ class SalesService:
         """Invoices/credit notes issued in [start, end], newest first. Read
         from the invoices table itself, not through sales: a Z report purges
         the sales but keeps the invoices (their sale_id becomes NULL)."""
+        since, until = local_days_range(start, end)
         return (
             session.query(Invoice)
-            .filter(
-                func.date(Invoice.issued_at) >= start,
-                func.date(Invoice.issued_at) <= end,
-            )
+            .filter(Invoice.issued_at >= since, Invoice.issued_at < until)
             .order_by(Invoice.issued_at.desc())
             .all()
         )
 
     @staticmethod
     def get_sales_range(session: Session, start: date, end: date) -> list[Sale]:
+        """Completed sales rung up on local days start..end (inclusive), newest first."""
+        since, until = local_days_range(start, end)
         return (
             session.query(Sale)
             .filter(
-                func.date(Sale.created_at) >= start,
-                func.date(Sale.created_at) <= end,
+                Sale.created_at >= since,
+                Sale.created_at < until,
                 Sale.status == "completed"
             )
             .order_by(Sale.created_at.desc())

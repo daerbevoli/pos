@@ -79,3 +79,26 @@ def patched_db(monkeypatch, tmp_path):
 
     yield TestSessionFactory
     engine.dispose()
+
+
+@pytest.fixture
+def brussels_tz():
+    """Run the test with the process's local timezone set to Europe/Brussels
+    (UTC+1, UTC+2 in summer), so local/UTC conversions are actually
+    exercised even on a CI machine running in UTC. Needs time.tzset(),
+    which Windows lacks."""
+    import os
+    import time
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset() is not available on this platform")
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/Brussels"
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()

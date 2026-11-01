@@ -9,7 +9,7 @@ their client's totals. Exported as CSV or as a PDF table.
 import csv
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.report_service import invoice_vat_breakdown
 from app.models.models import Invoice
+from app.utils.clock import local_days_range
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,10 @@ class ClientListingService:
         start and end (both inclusive), sorted by company name. Name and VAT
         number come from the client's most recent document in the range —
         the frozen snapshot, not the live Client, which may have changed since."""
+        since, until = local_days_range(start, end)
         invoices = (
             session.query(Invoice)
-            .filter(
-                Invoice.issued_at >= datetime.combine(start, time.min),
-                Invoice.issued_at < datetime.combine(end + timedelta(days=1), time.min),
-            )
+            .filter(Invoice.issued_at >= since, Invoice.issued_at < until)
             .order_by(Invoice.issued_at)
             .all()
         )

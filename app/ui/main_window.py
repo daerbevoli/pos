@@ -263,7 +263,7 @@ class MainWindow(QMainWindow):
         self._update_clock()
         timer = QTimer(self)
         timer.timeout.connect(self._update_clock)
-        timer.start(1000)
+        timer.start(500)
 
     def _update_clock(self):
         now = datetime.now().strftime("%a %d-%m-%Y  %H:%M")
