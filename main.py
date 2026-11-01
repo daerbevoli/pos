@@ -69,7 +69,7 @@ def main():
     # Launch main window
     window = MainWindow()
     # if "--windowed" in sys.argv:
-    window.show()            # development: normal window with title bar
+    window.showFullScreen()            # development: normal window with title bar
     # else:
     #     window.showFullScreen()  # till: no title bar / close buttons, covers the taskbar
 
