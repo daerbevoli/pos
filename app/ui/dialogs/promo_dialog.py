@@ -139,6 +139,8 @@ class PromoDialog(QDialog):
             ["Product", "Price", "Discount", "Value", "New price", ""]
         )
         self.table.verticalHeader().setVisible(False)
+        # Rows as tall as the 40px per-row Remove button, so it isn't clipped.
+        self.table.verticalHeader().setDefaultSectionSize(DIALOG_BUTTON_HEIGHT)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         header = self.table.horizontalHeader()

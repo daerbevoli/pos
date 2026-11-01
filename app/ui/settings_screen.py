@@ -20,7 +20,7 @@ from app.core.label_service import LabelPrinterService
 from app.core.product_service import ProductService
 from app.core.receipt_service import PrinterError, ReceiptService
 from app.core.settings_service import SettingsService
-from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_FUNCTION_BUTTON_HEIGHT, SETTINGS_OK_BUTTON_HEIGHT, SPACING_XS
+from app.constants import COLOR_LOGO_PREVIEW_BORDER, LOGO_PREVIEW_SIZE, SETTINGS_BUTTON_HEIGHT, SPACING_XS, SPACING_MD, MARGIN_SETTINGS
 from app.ui.dialogs.backup_dialog import BackupDialog
 from app.ui.dialogs.category_dialog import CategoryDialog
 from app.ui.dialogs.numpad_dialog import NumpadDialog
@@ -54,8 +54,8 @@ class SettingsScreen(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(*MARGIN_SETTINGS)
+        layout.setSpacing(SPACING_MD)
 
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
@@ -258,10 +258,10 @@ class SettingsScreen(QWidget):
         buttons_layout = QHBoxLayout(buttons_group)
         buttons_layout.setSpacing(SPACING_XS)
         self.btn_admin   = FunctionButton("Admin", "secFunc")
-        self.btn_rf_cn   = FunctionButton("Refund / \nCreditnote", "secFunc")
+        self.btn_rf_cn   = FunctionButton("Refund / Creditnote", "secFunc")
         self.btn_reports = FunctionButton("Reports", "secFunc")
         self.btn_backup = FunctionButton("Backup", "secFunc")
-        self.btn_customer_display = FunctionButton("Customer\nDisplay", "secFunc")
+        self.btn_customer_display = FunctionButton("Customer Display", "secFunc")
         self.btn_close_pos = FunctionButton("Close POS", "closePosBtn")
         self.btn_admin.clicked.connect(self._admin)
         self.btn_rf_cn.clicked.connect(self._rf_cn)
@@ -271,15 +271,18 @@ class SettingsScreen(QWidget):
         self.btn_close_pos.clicked.connect(self._close_pos)
         for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_backup,
                     self.btn_customer_display, self.btn_close_pos):
-            btn.setFixedHeight(SETTINGS_FUNCTION_BUTTON_HEIGHT)
             buttons_layout.addWidget(btn, 1)
         layout.addWidget(buttons_group)
 
         ok_btn = FunctionButton("OK", "okBtn")
-        ok_btn.setFixedHeight(SETTINGS_OK_BUTTON_HEIGHT)
         ok_btn.clicked.connect(self._on_ok)
         layout.addWidget(ok_btn)
         layout.addStretch()
+
+        # One height for every button on this screen, whichever tab it is on
+        # (FunctionButtons would otherwise stretch to fill their column).
+        for btn in self.findChildren(QPushButton):
+            btn.setFixedHeight(SETTINGS_BUTTON_HEIGHT)
 
     def _show_logo_preview(self, path: str):
         pixmap = QPixmap(path)

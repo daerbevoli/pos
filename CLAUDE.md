@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-source venv/bin/activate        # Linux/Mac (venv/ already exists in this repo)
+.venv\Scripts\Activate.ps1      # Windows (Python 3.14; Linux/Mac: source .venv/bin/activate). CI uses the same version (build.yml)
 pip install -r requirements.txt # app deps AND test deps (pytest, pytest-qt) live in one file — no requirements-dev.txt
 python main.py                  # run the app (currently always a normal window: the full-screen switch in main.py is commented out)
 

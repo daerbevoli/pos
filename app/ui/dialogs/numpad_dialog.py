@@ -6,7 +6,6 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from app.constants import (
     NUMPAD_DIALOG_KEY_HEIGHT,
-    NUMPAD_DIALOG_OK_HEIGHT,
     NUMPAD_DIALOG_WIDTH,
     SPACING_MD,
     SPACING_SM,
@@ -77,7 +76,6 @@ class NumpadDialog(QDialog):
 
         ok = QPushButton("OK")
         ok.setObjectName("okBtn")
-        ok.setMinimumHeight(NUMPAD_DIALOG_OK_HEIGHT)
         ok.clicked.connect(self._confirm)
         btn_row.addWidget(ok)
 

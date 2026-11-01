@@ -9,7 +9,7 @@ from PyQt6.QtGui import QColor, QFontDatabase, QTextCharFormat, QTextCursor
 
 from app.constants import (
     COLOR_LOG_DEBUG, COLOR_LOG_ERROR, COLOR_LOG_WARNING,
-    LOG_PANEL_MAX_LINES, SETTINGS_OK_BUTTON_HEIGHT, SPACING_XS,
+    LOG_PANEL_MAX_LINES, SETTINGS_BUTTON_HEIGHT, SPACING_XS,
 )
 from app.utils.error_handling import qt_log_handler
 from app.utils.utils import FunctionButton
@@ -49,7 +49,7 @@ class LogPanel(QWidget):
         btn_clear = FunctionButton("Clear")
         btn_clear.clicked.connect(self.view.clear)
         for btn in (btn_copy, btn_clear):
-            btn.setFixedHeight(SETTINGS_OK_BUTTON_HEIGHT)
+            btn.setFixedHeight(SETTINGS_BUTTON_HEIGHT)
             btn_row.addWidget(btn, 1)
         layout.addLayout(btn_row)
 

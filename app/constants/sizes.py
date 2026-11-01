@@ -7,9 +7,9 @@ each comment lists the exact rows/buttons/fields it is applied to. Values are pi
 
 # ── Main window ──────────────────────────────────────────────────────────
 MAIN_WINDOW_SIZE = (1024, 768)         # fixed window size
-TAB_BAR_MIN_HEIGHT = 44                # V-tab button bar — min height
-TAB_BAR_MAX_HEIGHT = 56                # V-tab button bar — max height
-VTAB_BUTTON_HEIGHT = 40                # each V-tab button (TicketTab) — min height
+TAB_BAR_MIN_HEIGHT = 45                # V-tab button bar — min height (2px margins + 41px buttons/clock box)
+TAB_BAR_MAX_HEIGHT = 45                # V-tab button bar — max height
+VTAB_BUTTON_HEIGHT = 35                # each V-tab button (TicketTab) — min content height; keep equal to min-height in main.qss (+2px padding, 1px border each side = 41px)
 ERROR_BADGE_WIDTH = 140                # error badge in the V-tab bar — fixed, so the V-tabs don't resize when it fills/empties
 
 # ── POS screen: cart / ticket ────────────────────────────────────────────
@@ -20,7 +20,7 @@ CART_INFO_BAR_HEIGHT = 21              # client label, running total label, scan
 CUSTOMER_DISPLAY_WINDOW_SIZE = (800, 600)  # initial (width, height) when shown as a normal window (no second monitor)
 
 # ── Shared buttons (app/utils/utils.py) ──────────────────────────────────
-FUNCTION_BUTTON_HEIGHT = 36            # every FunctionButton (POS, Inventory, Clients, Reports, Settings, dialogs), every
+FUNCTION_BUTTON_HEIGHT = 40            # every FunctionButton (POS, Inventory, Clients, Reports, Settings, dialogs), every
                                        # CategoryButton (POS shortcut selector & product slots) and the POS numpad keys — min height
 # ── Inventory / Clients screens ──────────────────────────────────────────
 LIST_ACTION_BUTTON_HEIGHT = 26         # action-button grid beside the list (new/modify/delete, up/down, search, OK, …) — min height
@@ -33,22 +33,22 @@ REPORTS_BUTTON_HEIGHT = 40             # date pickers, range dropdown, report-ty
 REPORT_ROW_HEIGHT = 30                 # rows of the sales, VAT and categories tables
 
 # ── Settings screen ──────────────────────────────────────────────────────
-SETTINGS_OK_BUTTON_HEIGHT = 40         # OK (save) button at the bottom of the screen
-SETTINGS_FUNCTION_BUTTON_HEIGHT = 60   # Admin / RF-CN / Reports buttons in the Buttons box below the tabs
+SETTINGS_BUTTON_HEIGHT = 40            # every button on the Settings screen (all tabs incl. Logs, Buttons box, OK) — fixed; labels must fit on one line
 LOGO_PREVIEW_SIZE = (120, 60)          # receipt-logo preview box (width, height)
 LOG_PANEL_MAX_LINES = 2000             # Logs tab: oldest lines are dropped beyond this (also the startup backlog size)
 
 # ── Dialogs ──────────────────────────────────────────────────────────────
-DIALOG_BUTTON_HEIGHT = 40              # OK / Cancel buttons of the category, file, shortcut, promo, backup and Z reports dialogs;
-                                       # labels-per-page and Cancel buttons of the label sheet dialog
+DIALOG_BUTTON_HEIGHT = 40              # every button in every dialog (incl. message boxes) except the numpad keys — enforced by the
+                                       # "QDialog QPushButton" rule in main.qss (keep the two in sync); also the promo dialog's table rows,
+                                       # which hold a Remove button
 NUMPAD_DIALOG_WIDTH = 300              # numpad dialog — min width
-NUMPAD_DIALOG_KEY_HEIGHT = 48          # numpad dialog keys and its display field — min height
-NUMPAD_DIALOG_OK_HEIGHT = 44           # numpad dialog OK button — min height
+NUMPAD_DIALOG_KEY_HEIGHT = 48          # numpad dialog keys and its display field — min height (keys: also in main.qss, keep in sync)
 PAYMENT_DIALOG_WIDTH = 400             # payment dialog — min width
 PAYMENT_AMOUNT_INPUT_HEIGHT = 40       # payment dialog tendered-amount input
 PAYMENT_METHOD_BUTTON_HEIGHT = 44      # payment dialog cash/card method buttons
 PAYMENT_CONFIRM_BUTTON_HEIGHT = 54     # payment dialog Confirm button
 STOCK_ADJUST_DIALOG_WIDTH = 420        # stock adjustment dialog — min width
+INVENTORY_FORMAT_DIALOG_WIDTH = 300    # inventory format (PDF/CSV) dialog — min width
 SHORTCUT_DIALOG_MIN_SIZE = (680, 460)  # shortcut dialog — min (width, height)
 PROMO_DIALOG_MIN_SIZE = (820, 520)     # promo dialog — min (width, height)
 LABEL_SHEET_DIALOG_WIDTH = 480         # label sheet (print barcodes) dialog — min width
@@ -78,19 +78,18 @@ __all__ = [
     "FORM_LABEL_WIDTH",
     "REPORTS_BUTTON_HEIGHT",
     "REPORT_ROW_HEIGHT",
-    "SETTINGS_OK_BUTTON_HEIGHT",
-    "SETTINGS_FUNCTION_BUTTON_HEIGHT",
+    "SETTINGS_BUTTON_HEIGHT",
     "LOGO_PREVIEW_SIZE",
     "LOG_PANEL_MAX_LINES",
     "DIALOG_BUTTON_HEIGHT",
     "NUMPAD_DIALOG_WIDTH",
     "NUMPAD_DIALOG_KEY_HEIGHT",
-    "NUMPAD_DIALOG_OK_HEIGHT",
     "PAYMENT_DIALOG_WIDTH",
     "PAYMENT_AMOUNT_INPUT_HEIGHT",
     "PAYMENT_METHOD_BUTTON_HEIGHT",
     "PAYMENT_CONFIRM_BUTTON_HEIGHT",
     "STOCK_ADJUST_DIALOG_WIDTH",
+    "INVENTORY_FORMAT_DIALOG_WIDTH",
     "SHORTCUT_DIALOG_MIN_SIZE",
     "PROMO_DIALOG_MIN_SIZE",
     "LABEL_SHEET_DIALOG_WIDTH",

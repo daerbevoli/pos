@@ -71,10 +71,9 @@ class MainWindow(QMainWindow):
         # ── Persistent V-tab bar (+ error badge, clock / salesperson box) ────
         tab_bar = QWidget()
         tab_bar.setObjectName("vtabBar")
-        tab_bar.setMinimumHeight(TAB_BAR_MIN_HEIGHT)
         tab_bar.setMaximumHeight(TAB_BAR_MAX_HEIGHT)
         tbl = QHBoxLayout(tab_bar)
-        tbl.setContentsMargins(8, 4, 8, 4)
+        tbl.setContentsMargins(8, 2, 8, 2)
         tbl.setSpacing(SPACING_XS)
 
         self._vtab_group = QButtonGroup(self)
@@ -107,6 +106,13 @@ class MainWindow(QMainWindow):
         info_col.addWidget(self.clock_label)
         info_col.addWidget(self.salesperson_label)
         tbl.addWidget(clock_frame)
+
+        # Never let the bar be squeezed below what its buttons need (QSS
+        # min-height + padding + border, not just VTAB_BUTTON_HEIGHT). A screen
+        # in the stack below (Settings) asks for more height than the window
+        # has, and the layout used to take the shortfall from this bar, so the
+        # stack was drawn over the bottom of the V-tab buttons.
+        tab_bar.setMinimumHeight(max(TAB_BAR_MIN_HEIGHT, tab_bar.sizeHint().height()))
 
         root.addWidget(tab_bar)
 

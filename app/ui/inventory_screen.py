@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel,
     QHeaderView, QMessageBox, QComboBox, QFrame, QCheckBox,
-    QDoubleSpinBox, QAbstractSpinBox, QStackedWidget, QFileDialog
+    QDoubleSpinBox, QAbstractSpinBox, QStackedWidget, QFileDialog, QDialog
 )
 from PyQt6.QtCore import Qt, QEvent, QLocale, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices
@@ -32,6 +32,7 @@ from app.ui.widgets.form_fields import PickerDisplay, FieldRow
 from app.ui.widgets.shortcut_grid import ShortcutGrid
 # from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
 from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.utils.utils import TapToDismissOverlay, FunctionButton, SelectionKeepingTable
 from app.constants import (
@@ -676,20 +677,10 @@ class ArticleDetailPanel(QFrame):
 
     def _ask_inventory_format(self) -> str | None:
         """"pdf", "csv", or None when cancelled."""
-        box = QMessageBox(self)
-        box.setWindowTitle("Inventory")
-        box.setText("Save the inventory as:")
-        pdf_btn = box.addButton("PDF", QMessageBox.ButtonRole.AcceptRole)
-        csv_btn = box.addButton("CSV", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(pdf_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is pdf_btn:
-            return "pdf"
-        if clicked is csv_btn:
-            return "csv"
-        return None
+        dialog = InventoryFormatDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dialog.file_format
 
     def _on_search_sc(self):
         if self._mode != "display":

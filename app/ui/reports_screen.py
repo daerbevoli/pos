@@ -25,7 +25,7 @@ from app.models.models import Invoice, Sale
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
 from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 from app.utils.utils import FunctionButton, TapToDismissOverlay
-from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_MD, SPACING_LG
+from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_SM, SPACING_MD, SPACING_LG
 
 
 # Range dropdown entries, in order (the index is the combo box index).
@@ -166,7 +166,9 @@ class ReportsScreen(QWidget):
             btn.setFixedWidth(button_width)
 
         controls = QGridLayout()
-        controls.setHorizontalSpacing(20)
+        # Kept narrow: with 6 column gaps, 20px pushed the grid 50px past the
+        # 1024px window and squeezed the date pickers (8px was still 2px over).
+        controls.setHorizontalSpacing(SPACING_SM)
         controls.addLayout(dates, 0, 0)
         # The dropdown spans the two columns the old range buttons used.
         self.range_combo.setFixedWidth(2 * button_width + controls.horizontalSpacing())
@@ -418,7 +420,7 @@ class ReportsScreen(QWidget):
                 totals = XZReportService.generate_x_report(session)
                 ReceiptService.print_x_report(session, totals)
             except PrinterError as e:
-                QMessageBox.critical(self, "Printer Error", str(e))
+                self._show_overlay(f"Printer error: {e}", kind="error")
 
     def _print_z_report(self):
         # Checked before the confirmation, so the cashier learns why up front.

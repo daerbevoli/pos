@@ -23,7 +23,7 @@ QPushButton#ticketTab {
     border-radius: 4px;
     font-size: 13px;
     font-weight: 600;
-    min-height: 40px;
+    min-height: 35px;  /* = VTAB_BUTTON_HEIGHT; with padding + border the button is 41px, filling the 45px bar */
     padding: 2px;
 }
 
@@ -42,7 +42,7 @@ QFrame#clockFrame {
     background-color: #dcefe0;
     border: 1px solid #a9cdb2;
     border-radius: 4px;
-    min-height: 40px;
+    min-height: 39px;  /* + 1px border each side = 41px, same as the V-tab buttons */
 }
 
 /* Transparent so the box colour shows through the global QWidget background */
@@ -55,14 +55,14 @@ QLabel#clockLabel {
     font-size: 14px;
     font-weight: 700;
     color: #2a2410;
-    padding: 2px 10px 0 10px;
+    padding: 1px 10px 0 10px;
 }
 
 QLabel#cashierLabel {
     font-size: 13px;
     font-weight: 600;
     color: #052F6C;
-    padding: 0 10px 2px 10px;
+    padding: 0 10px 1px 10px;
 }
 
 
@@ -450,6 +450,35 @@ QMessageBox {
     background-color: #eef1f5;
 }
 
+/* Every button in every dialog (QMessageBox / QInputDialog included, and
+   buttons added later, e.g. per-row Remove) is DIALOG_BUTTON_HEIGHT = 40px:
+   30px content + 4px padding + 1px border, top and bottom. Labels must fit on
+   one line. Change DIALOG_BUTTON_HEIGHT in sizes.py together with this. */
+QDialog QPushButton {
+    min-height: 30px;
+    max-height: 30px;
+}
+
+/* Message box buttons (Yes / No / OK / Cancel …) at least 100px wide —
+   90px content + 4px padding + 1px border, left and right — so they're
+   easy to hit on the touchscreen.
+   Caveat: QMessageBox sizes itself from its buttons' minimum widths, and this
+   rule replaces a long label's own minimum, so a custom addButton() label
+   wider than ~90px of text gets clipped. The app only uses standard buttons
+   (longest: "Discard"); for long labels use a QDialog instead. */
+QMessageBox QPushButton {
+    min-width: 90px;
+}
+
+/* Except the numpad dialog's keys: big touch targets, at least
+   NUMPAD_DIALOG_KEY_HEIGHT = 48px (38px content + padding + border), growing
+   with the dialog. (QSS has no :not(), so this rule undoes the one above.) */
+QDialog QPushButton#numKey,
+QDialog QPushButton#numKeyDel {
+    min-height: 38px;
+    max-height: 16777215px;
+}
+
 QLabel#grandTotal {
     font-size: 32px;
     font-weight: 700;
@@ -650,7 +679,7 @@ QPushButton#errorBadge {
     font-weight: 700;
     border: 1px solid #c3c9d3;
     border-radius: 4px;
-    min-height: 40px;
+    min-height: 35px;  /* same 41px as the V-tab buttons beside it */
     padding: 2px;
 }
 

@@ -8,6 +8,8 @@ import pytest
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
 from app.ui.inventory_screen import InventoryScreen
+from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
+from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.core.product_service import ProductService
 from app.core.database import get_session
 from app.models.models import Product
@@ -498,13 +500,23 @@ def test_inventory_save_dialog_cancelled_writes_nothing(screen, monkeypatch, tmp
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("button_text, expected", [("PDF", "pdf"), ("CSV", "csv"), ("Cancel", None)])
-def test_ask_inventory_format_returns_clicked_choice(screen, monkeypatch, button_text, expected):
-    def fake_exec(box):
-        next(b for b in box.buttons() if b.text().replace("&", "") == button_text).click()
-        return 0
-    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+@pytest.mark.parametrize("choice, button, expected", [
+    ("PDF", "ok", "pdf"), ("CSV", "ok", "csv"), ("CSV", "cancel", None),
+])
+def test_ask_inventory_format_returns_chosen_format(screen, monkeypatch, choice, button, expected):
+    def fake_exec(dialog):
+        dialog.format_combo.setCurrentText(choice)
+        getattr(dialog, f"{button}_btn").click()
+        return dialog.result()
+    monkeypatch.setattr(InventoryFormatDialog, "exec", fake_exec)
     assert screen.detail_panel._ask_inventory_format() == expected
+
+
+def test_inventory_format_dialog_defaults_to_pdf(qtbot):
+    dialog = InventoryFormatDialog()
+    qtbot.addWidget(dialog)
+    assert dialog.format_combo.currentData() == "pdf"
+    assert dialog.file_format is None  # nothing chosen until OK
 
 
 # ── CSV import ───────────────────────────────────────────────────────────
@@ -705,8 +717,8 @@ def test_export_then_import_round_trip_restores_catalog(screen, monkeypatch, tmp
 # ── Print barcodes (PDF label sheet) ─────────────────────────────────────
 
 def _patch_print_barcodes(monkeypatch, save_path, labels_per_page=24, fill=None):
-    """Stub the dialog's exec() to (optionally) fill fields and click a
-    layout button, the save dialog to return `save_path`, and opening the PDF.
+    """Stub the dialog's exec() to (optionally) fill fields, select a layout
+    and press OK, the save dialog to return `save_path`, and opening the PDF.
     Returns (opened urls, seen dialogs, captured build_label_sheet_pdf kwargs)."""
     import app.ui.inventory_screen as inv
     opened, dialogs, built = [], [], []
@@ -717,7 +729,8 @@ def _patch_print_barcodes(monkeypatch, save_path, labels_per_page=24, fill=None)
             return False
         for field, value in (fill or {}).items():
             getattr(dialog, field).setText(value)
-        dialog._choose(labels_per_page)
+        dialog.layout_combo.setCurrentIndex(dialog.layout_combo.findData(labels_per_page))
+        dialog.ok_btn.click()
         return dialog.labels_per_page is not None
 
     real_build = inv.build_label_sheet_pdf
@@ -791,6 +804,41 @@ def test_print_barcodes_empty_barcode_blocks_layout_choice(screen, monkeypatch, 
     assert not dialogs[0].error_label.isHidden()
     assert not out_path.exists()
     assert opened == []
+
+
+def test_label_sheet_layout_combo_starts_empty_and_lists_all_layouts(qtbot):
+    from app.core.label_sheet_service import LABEL_LAYOUTS
+    dialog = LabelSheetDialog("Labelled", "2060000000019")
+    qtbot.addWidget(dialog)
+
+    combo = dialog.layout_combo
+    assert combo.currentIndex() == -1  # placeholder, no preselection
+    assert [combo.itemData(i) for i in range(combo.count())] == list(LABEL_LAYOUTS)
+
+
+def test_label_sheet_choosing_layout_waits_for_ok(qtbot):
+    dialog = LabelSheetDialog("Labelled", "2060000000019")
+    qtbot.addWidget(dialog)
+    combo = dialog.layout_combo
+
+    combo.setCurrentIndex(1)
+    assert dialog.labels_per_page is None  # nothing confirmed until OK
+    assert dialog.result() == 0
+
+    dialog.ok_btn.click()
+    assert dialog.labels_per_page == combo.itemData(1)
+    assert dialog.result() == LabelSheetDialog.DialogCode.Accepted
+
+
+def test_label_sheet_ok_without_layout_shows_error(qtbot):
+    dialog = LabelSheetDialog("Labelled", "2060000000019")
+    qtbot.addWidget(dialog)
+
+    dialog.ok_btn.click()
+
+    assert dialog.labels_per_page is None
+    assert not dialog.error_label.isHidden()
+    assert dialog.result() == 0
 
 
 def test_print_barcodes_cancelled_dialog_writes_nothing(screen, monkeypatch, tmp_path):

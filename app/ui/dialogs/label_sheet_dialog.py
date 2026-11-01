@@ -2,11 +2,14 @@
 Label Sheet Dialog
 Used from the Inventory screen to fill in what goes on the barcode labels
 (name, manufacturer, lot number, expiry date, barcode) and pick how many
-labels fit on the A4 sheet before the PDF is generated.
+labels fit on the A4 sheet (a dropdown, empty until chosen) before the PDF is
+generated. OK confirms.
 """
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QGridLayout, QFormLayout, QLabel, QLineEdit
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QComboBox,
+)
 from app.core.label_sheet_service import LABEL_LAYOUTS
-from app.constants import DIALOG_BUTTON_HEIGHT, LABEL_SHEET_DIALOG_WIDTH, LABEL_SHEET_FIELD_HEIGHT, SPACING_XS
+from app.constants import LABEL_SHEET_DIALOG_WIDTH, LABEL_SHEET_FIELD_HEIGHT
 from app.utils.utils import FunctionButton
 
 
@@ -37,33 +40,43 @@ class LabelSheetDialog(QDialog):
         ):
             field.setMinimumHeight(LABEL_SHEET_FIELD_HEIGHT)
             form.addRow(label, field)
+
+        # No preselection, so OK can't print a sheet nobody chose.
+        self.layout_combo = QComboBox()
+        self.layout_combo.setPlaceholderText("Choose…")
+        for count, (cols, rows) in LABEL_LAYOUTS.items():
+            self.layout_combo.addItem(f"{count}  ({cols} × {rows})", count)
+        self.layout_combo.setCurrentIndex(-1)
+        self.layout_combo.setMinimumHeight(LABEL_SHEET_FIELD_HEIGHT)
+        form.addRow("Labels per page:", self.layout_combo)
         layout.addLayout(form)
 
         self.error_label = QLabel("")
         self.error_label.hide()
         layout.addWidget(self.error_label)
+        self.layout_combo.currentIndexChanged.connect(self.error_label.hide)
 
-        layout.addWidget(QLabel("Labels per page:"))
-        grid = QGridLayout()
-        grid.setSpacing(SPACING_XS)
-        for i, count in enumerate(LABEL_LAYOUTS):
-            cols, rows = LABEL_LAYOUTS[count]
-            btn = FunctionButton(f"{count}\n({cols} × {rows})", "secFunc")
-            btn.setMinimumHeight(DIALOG_BUTTON_HEIGHT)
-            btn.clicked.connect(lambda _, n=count: self._choose(n))
-            grid.addWidget(btn, i // 2, i % 2)
-        layout.addLayout(grid)
+        btn_row = QHBoxLayout()
+        self.cancel_btn = FunctionButton("Cancel", "cancelBtn")
+        self.cancel_btn.clicked.connect(self.reject)
+        self.ok_btn = FunctionButton("OK", "okBtn")
+        self.ok_btn.clicked.connect(self.on_ok)
+        btn_row.addWidget(self.cancel_btn, 1)
+        btn_row.addWidget(self.ok_btn, 1)
+        layout.addLayout(btn_row)
 
-        cancel_btn = FunctionButton("Cancel", "cancelBtn")
-        cancel_btn.setMinimumHeight(DIALOG_BUTTON_HEIGHT)
-        cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(cancel_btn)
+    def _show_error(self, text: str):
+        self.error_label.setText(text)
+        self.error_label.show()
 
-    def _choose(self, count: int):
+    def on_ok(self):
         if not self.barcode.text().strip():
-            self.error_label.setText("A barcode is required.")
-            self.error_label.show()
+            self._show_error("A barcode is required.")
             self.barcode.setFocus()
+            return
+        count = self.layout_combo.currentData()  # None while the placeholder shows
+        if count not in LABEL_LAYOUTS:
+            self._show_error("Choose how many labels per page.")
             return
         self.labels_per_page = count
         self.accept()
