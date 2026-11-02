@@ -58,6 +58,10 @@ def main():
     # instead of crashing the app.
     install_excepthook()
 
+    # Barcode scans (^<code^>) are caught app-wide, before any widget sees them
+    from app.utils.scanner import install_scan_interceptor
+    install_scan_interceptor(app)
+
     # Load global stylesheet
     with open(BUNDLE_DIR / "resources" / "styles" / "main.qss", "r", encoding="utf-8") as f:
         app.setStyleSheet(f.read())

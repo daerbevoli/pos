@@ -42,17 +42,9 @@ class SelectionKeepingTable(QTableWidget):
 
 
 class TicketTable(SelectionKeepingTable):
-    """The scanner should be programmed to wrap every scan in SCAN_PREFIX /
-    SCAN_SUFFIX (e.g. '^<12345678^>'), a sequence no one would type
-    manually. That lets us tell a scan apart from typed digits with
-    certainty instead of guessing from length.
-
-    Keys arrive one event at a time, but an event's text may hold more than
-    one character (e.g. a dead '^' key combined with the next one), so the
-    markers are matched character by character across events."""
-
-    SCAN_PREFIX = "^<"
-    SCAN_SUFFIX = "^>"
+    """Scanned barcodes arrive through `barcode_scanned`, emitted by the
+    app-wide ScanInterceptor (app/utils/scanner.py) which strips the
+    scanner's ^< / ^> markers before any key reaches this widget."""
 
     backspace_pressed = pyqtSignal()
     text_entered = pyqtSignal(str)
@@ -61,52 +53,12 @@ class TicketTable(SelectionKeepingTable):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._scanning = False
-        self._scan_buffer = ""
-        self._prefix_matched = ""  # leading part of SCAN_PREFIX seen so far
         self.setItemDelegate(_NoFocusRectDelegate(self))
-
-    def _feed_scan_chars(self, text: str) -> bool:
-        """Runs `text` through the prefix/suffix matcher. Returns True if the
-        event was consumed by scan handling (prefix in progress or inside a
-        scan), False if it should be handled as normal input."""
-        consumed = False
-        for ch in text:
-            if self._scanning:
-                consumed = True
-                self._scan_buffer += ch
-                if self._scan_buffer.endswith(self.SCAN_SUFFIX):
-                    code = self._scan_buffer[:-len(self.SCAN_SUFFIX)]
-                    self._scanning = False
-                    self._scan_buffer = ""
-                    self.barcode_scanned.emit(code)
-                continue
-
-            candidate = self._prefix_matched + ch
-            if self.SCAN_PREFIX.startswith(candidate):
-                consumed = True
-                if candidate == self.SCAN_PREFIX:
-                    self._prefix_matched = ""
-                    self._scanning = True
-                    self._scan_buffer = ""
-                else:
-                    self._prefix_matched = candidate
-            else:
-                # Not a scan after all: drop the partial prefix (marker
-                # characters are never valid manual input anyway).
-                self._prefix_matched = ""
-                if self.SCAN_PREFIX.startswith(ch):
-                    consumed = True
-                    self._prefix_matched = ch
-        return consumed
 
     def keyPressEvent(self, event):
         key = event.key()
         text = event.text()
         mods = event.modifiers()
-
-        if text and self._feed_scan_chars(text):
-            return
 
         if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self.backspace_pressed.emit()

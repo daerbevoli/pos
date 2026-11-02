@@ -806,6 +806,16 @@ class ArticleDetailPanel(QFrame):
         self.overlay.show_message(message, kind=kind)
 
 
+    def handle_barcode_scan(self, code: str) -> bool:
+        """Called by the app-wide ScanInterceptor for a scan made while focus
+        is anywhere inside this panel. In new/edit mode the scan replaces the
+        article's barcode, whichever field the cursor is in; in display mode
+        it's left to the normal handling (search box lookup)."""
+        if self._mode not in ("new", "edit"):
+            return False
+        self.barcode.setText(code)
+        return True
+
     def _generate_barcode(self):
         if self._mode == "display":
             return
@@ -1118,6 +1128,11 @@ class InventoryScreen(QWidget):
                 self._move_selection(-1 if event.key() == Qt.Key.Key_Up else 1)
                 return True
         return super().eventFilter(obj, event)
+
+    def handle_barcode_scan(self, code: str) -> bool:
+        # While an article is being created/edited, a scan anywhere on this
+        # screen (form fields, search box, ...) goes into its barcode field.
+        return self.detail_panel.handle_barcode_scan(code)
 
     def _on_barcode_scan(self):
         if self.detail_panel._mode != "display":

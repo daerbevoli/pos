@@ -981,3 +981,34 @@ def test_deactivate_pressed_while_editing_does_nothing(screen, monkeypatch):
 def test_modify_pressed_without_selection_does_nothing(screen):
     screen.detail_panel.btn_modify.click()
     assert screen.detail_panel._mode == "display"
+
+
+def test_scan_in_new_mode_overwrites_barcode_from_any_field(screen, qtbot):
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QKeyEvent
+    from PyQt6.QtWidgets import QApplication
+    from app.utils.scanner import ScanInterceptor
+
+    interceptor = ScanInterceptor()
+    QApplication.instance().installEventFilter(interceptor)
+    try:
+        screen.show()
+        qtbot.waitExposed(screen)
+        screen.activateWindow()
+        panel = screen.detail_panel
+        panel._start_new()
+        panel.barcode.setText("1111111111111")
+        panel.name.setText("Cola")
+        panel.name.setFocus()
+        qtbot.waitUntil(lambda: QApplication.focusWidget() is panel.name)
+        for ch in "^<5410000000012^>":
+            QApplication.sendEvent(panel.name, QKeyEvent(
+                QEvent.Type.KeyPress, Qt.Key.Key_unknown, Qt.KeyboardModifier.NoModifier, ch))
+        assert panel.barcode.text() == "5410000000012"
+        assert panel.name.text() == "Cola"
+    finally:
+        QApplication.instance().removeEventFilter(interceptor)
+
+
+def test_handle_barcode_scan_ignored_in_display_mode(screen):
+    assert screen.handle_barcode_scan("5410000000012") is False
