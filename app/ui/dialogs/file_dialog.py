@@ -1,6 +1,14 @@
 from pathlib import Path
 
-from PyQt6.QtWidgets import QLineEdit, QPushButton, QHBoxLayout, QFileDialog, QDialog, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from app.constants import DIALOG_BUTTON_HEIGHT
 from app.utils.utils import FunctionButton
