@@ -314,7 +314,7 @@ class SalesService:
         sale.payment_method = payment_method
         sale.amount_tendered = amount_tendered
         sale.change_given = (round(amount_tendered - cart.total, 2)
-                             if payment_method in ("cash", "card") and amount_tendered is not None else None)
+                             if payment_method in ("cash", "card", "mixed") and amount_tendered is not None else None)
         sale.cart_snapshot = cart.to_snapshot()
         sale.payment_breakdown = json.dumps(payment_breakdown) if payment_breakdown else None
 

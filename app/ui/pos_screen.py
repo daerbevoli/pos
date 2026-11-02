@@ -1146,13 +1146,6 @@ class POSScreen(QWidget):
             return
 
         prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
-        if prior_payments and any(p.method != method for p in prior_payments):
-            self._show_overlay(
-                f"Already paying by {prior_payments[0].method.title()} — finish with that method "
-                "or clear the cart to restart.",
-                kind="error",
-            )
-            return
 
         total     = self.cart.total
         remaining = self.cart.remaining_due
@@ -1163,6 +1156,15 @@ class POSScreen(QWidget):
         # reopened ticket was reversed) — it settles the ticket at 0.00.
         if tendered < 0 or (tendered == 0 and remaining > 0.005):
             self._show_overlay("Enter an amount first", kind="error")
+            return
+
+        # Only cash can be overpaid (and give change): a card or other
+        # non-cash leg covers at most what's still due.
+        if method != "cash" and tendered > max(remaining, 0.0) + 0.005:
+            self._show_overlay(
+                f"{method.title()} can't exceed the amount due ({max(remaining, 0.0):.2f})",
+                kind="error",
+            )
             return
 
         if tendered + 0.005 < remaining:
@@ -1180,9 +1182,7 @@ class POSScreen(QWidget):
 
         # Enough to cover what's left — fold every method's contribution into
         # one breakdown row per method, for persistence and the receipt.
-        # (prior_payments is guaranteed single-method by the guard above.)
         total_tendered = round(sum(p.amount for p in prior_payments) + tendered, 2)
-        final_method = method
 
         breakdown = [{"method": p.method, "amount": p.amount} for p in prior_payments]
         existing_final = next((b for b in breakdown if b["method"] == method), None)
@@ -1190,6 +1190,9 @@ class POSScreen(QWidget):
             existing_final["amount"] = round(existing_final["amount"] + tendered, 2)
         else:
             breakdown.append({"method": method, "amount": round(tendered, 2)})
+        # Several methods -> "mixed"; the breakdown holds the per-method split,
+        # and any change on a mixed sale is cash (only cash can be overpaid).
+        final_method = method if len(breakdown) == 1 else "mixed"
 
         self.cart.entries = [e for e in self.cart.entries if not isinstance(e, PaymentEntry)]
         if not self._save_and_freeze(breakdown, total_tendered, final_method):

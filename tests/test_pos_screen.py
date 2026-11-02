@@ -611,7 +611,7 @@ def test_second_partial_payment_merges_same_method(screen):
     assert payments[0].amount == 10.0
 
 
-def test_switching_payment_method_mid_payment_is_blocked(screen):
+def test_mixed_payment_completes_sale_with_mixed_method(screen):
     pid, barcode, _ = _add_product(barcode="pay6", price=20.0)
     _scan(screen, barcode)
 
@@ -619,23 +619,49 @@ def test_switching_payment_method_mid_payment_is_blocked(screen):
     screen._open_payment("cash")  # partial cash
 
     screen.cart_input.setText("15")
-    screen._open_payment("card")  # blocked -> only cash/card, no mixing
+    screen._open_payment("card")  # rest via card -> settles
 
-    assert screen.sale_finished is False
-    assert screen._current_sale_id is None
-    assert not screen.overlay.isHidden()
-    payments = [e for e in screen.cart.entries if isinstance(e, PaymentEntry)]
-    assert len(payments) == 1
-    assert payments[0].method == "cash"
-    assert payments[0].amount == 5.0
-
-    # Finishing with the same method (cash) still works.
-    screen.cart_input.setText("15")
-    screen._open_payment("cash")
     assert screen.sale_finished is True
     with get_session() as session:
         sale = session.query(Sale).filter_by(id=screen._current_sale_id).first()
-    assert sale.payment_method == "cash"
+    assert sale.payment_method == "mixed"
+    assert sale.change_given == 0.0
+    breakdown = {leg["method"]: leg["amount"] for leg in screen._frozen_breakdown}
+    assert breakdown == {"cash": 5.0, "card": 15.0}
+
+
+def test_mixed_payment_gives_change_from_cash(screen):
+    pid, barcode, _ = _add_product(barcode="pay6b", price=20.0)
+    _scan(screen, barcode)
+
+    screen.cart_input.setText("15")
+    screen._open_payment("card")  # partial card
+
+    screen.cart_input.setText("10")
+    screen._open_payment("cash")  # 10 cash for the last 5 -> 5 change
+
+    assert screen.sale_finished is True
+    assert screen._frozen_change == 5.0
+    with get_session() as session:
+        sale = session.query(Sale).filter_by(id=screen._current_sale_id).first()
+    assert sale.payment_method == "mixed"
+    assert sale.change_given == 5.0
+
+
+def test_card_cannot_exceed_amount_due(screen):
+    pid, barcode, _ = _add_product(barcode="pay6c", price=20.0)
+    _scan(screen, barcode)
+
+    screen.cart_input.setText("5")
+    screen._open_payment("cash")  # 15 left
+
+    screen.cart_input.setText("20")
+    screen._open_payment("card")  # more than due -> refused
+
+    assert screen.sale_finished is False
+    assert not screen.overlay.isHidden()
+    payments = [e for e in screen.cart.entries if isinstance(e, PaymentEntry)]
+    assert [(p.method, p.amount) for p in payments] == [("cash", 5.0)]
 
 
 def test_payment_guard_blocks_cart_mutation_mid_payment(screen):

@@ -185,7 +185,8 @@ class Cart:
         applied: right after an item (skipping earlier discount rows) it
         comes off that item; right after a SubtotalMarker it's spread over
         that section's items in proportion to their amounts, the last item
-        taking the rounding remainder; with nothing before it, over the cart."""
+        taking the rounding remainder (a section holding only discounts
+        stands for the one before it); with nothing before it, over the cart."""
         items = [e for e in self.entries if isinstance(e, CartItem)]
         net = {id(item): item.line_total for item in items}
         resolved = []
@@ -196,7 +197,9 @@ class Cart:
                 section.append(entry)
                 target = [entry]
             elif isinstance(entry, SubtotalMarker):
-                target, section = section, []
+                # A block holding only discounts re-targets the block
+                # before it, as subtotals() re-totals it.
+                target, section = section or target, []
             elif isinstance(entry, DiscountEntry):
                 if entry.allocations:
                     allocations = [a for a in entry.allocations if id(a.item) in net]
@@ -226,7 +229,9 @@ class Cart:
                 section.append(entry)
                 target = [entry]
             elif isinstance(entry, SubtotalMarker):
-                target, section = section, []
+                # A block holding only discounts re-targets the block
+                # before it, as subtotals() re-totals it.
+                target, section = section or target, []
         return [item for item in target if not (item.is_reversal or item.has_reversal)]
 
     def discount_base(self) -> float | None:

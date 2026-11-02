@@ -3,7 +3,7 @@ import pytest
 from PyQt6.QtCore import QDate
 
 from app.ui.reports_screen import ReportsScreen
-from app.core.report_service import _payment_breakdown, _amount_for_method, _discounts_and_mistakes
+from app.core.report_service import _payment_breakdown, _amount_for_method, _discounts_and_mistakes, _sum_payment_breakdowns
 from app.core.product_service import ProductService
 from app.core.cart import Cart, CartItem, DiscountEntry
 from app.core.sales_service import SalesService
@@ -43,10 +43,11 @@ def _finalize_sale(product, quantity=1, payment_method="cash", payment_breakdown
 # ── Helper functions ─────────────────────────────────────────────────────
 
 class _FakeSale:
-    def __init__(self, payment_breakdown=None, payment_method="cash", final_amount=0.0):
+    def __init__(self, payment_breakdown=None, payment_method="cash", final_amount=0.0, change_given=None):
         self.payment_breakdown = payment_breakdown
         self.payment_method = payment_method
         self.final_amount = final_amount
+        self.change_given = change_given
 
 
 def test_payment_breakdown_parses_json():
@@ -72,6 +73,17 @@ def test_amount_for_method_sums_matching_legs():
     ]))
     assert _amount_for_method(sale, "cash") == 7.0
     assert _amount_for_method(sale, "card") == 3.0
+
+
+def test_mixed_sale_change_comes_out_of_cash():
+    import json
+    # 20.00 ticket: 15 card + 10 cash tendered, 5 change handed back in cash.
+    sale = _FakeSale(payment_breakdown=json.dumps([
+        {"method": "card", "amount": 15.0}, {"method": "cash", "amount": 10.0},
+    ]), payment_method="mixed", final_amount=20.0, change_given=5.0)
+    assert {leg["method"]: leg["amount"] for leg in _sum_payment_breakdowns([sale])} == {"card": 15.0, "cash": 5.0}
+    assert _amount_for_method(sale, "cash") == 5.0
+    assert _amount_for_method(sale, "card") == 15.0
 
 
 class _SnapshotSale:

@@ -464,6 +464,37 @@ def test_subtotals_discount_after_a_subtotal_stays_with_its_block():
     assert cart.subtotals() == [(1, 10.0), (1, 9.0), (1, 5.0)]
 
 
+def test_discount_after_a_discount_only_subtotal_targets_the_block_before():
+    """item 100 -> subtotal -> 10% -> subtotal (90) -> 10%: the second
+    discount comes off the same item's remaining 90, not "nothing"."""
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=100.0))
+    cart.add_subtotal()
+    cart.apply_percent_discount(10)
+    cart.add_subtotal()
+    second = cart.apply_percent_discount(10)
+    assert second is not None
+    assert second.amount == 9.0
+    assert cart.total == 81.0
+    cart.add_subtotal()
+    assert cart.subtotals() == [(1, 100.0), (1, 90.0), (1, 81.0)]
+
+
+def test_chained_discount_only_subtotals_keep_the_whole_block():
+    cart = Cart()
+    cart.add_product(_FakeProduct(id=1, price=60.0))
+    cart.add_product(_FakeProduct(id=2, price=40.0))
+    cart.add_subtotal()
+    cart.apply_amount_discount(10.0)
+    cart.add_subtotal()
+    cart.apply_amount_discount(10.0)
+    cart.add_subtotal()
+    cart.apply_percent_discount(50)
+    assert cart.total == 40.0
+    nets = {line.item.product_id: line.net for line in cart.net_lines()}
+    assert nets == {1: 24.0, 2: 16.0}
+
+
 def test_subtotals_include_item_and_promo_discounts_above_them():
     cart = Cart()
     cart.add_product(_FakeProduct(id=1, price=10.0, promo=_FakePromo(discount_value=10.0)))

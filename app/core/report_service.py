@@ -55,10 +55,16 @@ def _change_to_deduct(source) -> float:
     return change if change > 0 else 0.0
 
 
+def _change_method(source) -> str:
+    """The method the change was handed back in: the sale's own method, or
+    cash for a mixed payment (only cash can be overpaid on a mixed sale)."""
+    return "cash" if source.payment_method == "mixed" else source.payment_method
+
+
 def _sum_payment_breakdowns(sources) -> list[dict]:
     """Per-method totals over sales (or invoices — same payment fields) of
-    what was actually taken in: the change goes back out of the method the
-    sale was settled with (the POS allows only one method per sale)."""
+    what was actually taken in: the change goes back out of the method it
+    was handed back in (see _change_method)."""
     payment_totals: dict[str, float] = {}
     for source in sources:
         for leg in _payment_breakdown(source):
@@ -66,7 +72,8 @@ def _sum_payment_breakdowns(sources) -> list[dict]:
             payment_totals[method] = payment_totals.get(method, 0.0) + leg.get("amount", 0.0)
         change = _change_to_deduct(source)
         if change:
-            payment_totals[source.payment_method] = payment_totals.get(source.payment_method, 0.0) - change
+            method = _change_method(source)
+            payment_totals[method] = payment_totals.get(method, 0.0) - change
     return [
         {"method": method, "amount": round(amount, 2)}
         for method, amount in payment_totals.items()
@@ -75,7 +82,7 @@ def _sum_payment_breakdowns(sources) -> list[dict]:
 
 def _amount_for_method(sale, method: str) -> float:
     amount = sum(leg.get("amount", 0.0) for leg in _payment_breakdown(sale) if leg.get("method") == method)
-    if method == sale.payment_method:
+    if method == _change_method(sale):
         amount -= _change_to_deduct(sale)
     return amount
 
