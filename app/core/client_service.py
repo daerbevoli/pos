@@ -7,7 +7,10 @@ import logging
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.constants.countries import BELGIUM, COUNTRY_NAMES
+from app.core.csv_import import import_rows
 from app.models.models import Client
+from app.utils.validators import is_valid_vat
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,45 @@ class ClientService:
     @staticmethod
     def get_by_id(session: Session, client_id: int) -> Client | None:
         return session.query(Client).filter_by(id=client_id).first()
+
+    # ── CSV import ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def import_rows(session: Session, rows: list[dict]) -> tuple[int, int]:
+        """Adds the clients of a CSV import (see read_csv_rows()); returns
+        (added, skipped)."""
+        return import_rows(session, rows, lambda row: ClientService._from_import_row(session, row), "Client")
+
+    @staticmethod
+    def _from_import_row(session: Session, row: dict) -> Client | None:
+        """A new Client from one import row, or None to skip it: no name, no
+        street, no or an invalid VAT number, or that VAT number is already a
+        client (already imported; a shared email is fine)."""
+        vat = row.get("vat")
+        street = (row.get("street") or "").strip()
+        zip_code = (row.get("zip") or row.get("zip_code") or "").strip()
+        city = (row.get("city") or "").strip()
+        if not street and not zip_code and not city and row.get("address"):
+            # Old export format (one free-text address column) — best effort.
+            street = row.get("address")
+        country = (row.get("country") or "").strip().upper()
+        if country not in COUNTRY_NAMES:
+            country = BELGIUM
+        if not vat or not row.get("name") or not street or not is_valid_vat(vat, country):
+            return None
+        if session.query(Client).filter_by(vatNumber=vat).first() is not None:
+            return None
+        return Client(
+            name=row.get("name"),
+            vatNumber=vat,
+            street=street,
+            zip_code=zip_code,
+            city=city,
+            country=country,
+            phone=(row.get("phone") or "").lstrip("'") or None,
+            email=row.get("email") or None,
+            is_active=True,
+        )
 
     @staticmethod
     def get_by_name(session: Session, name: str) -> Client | None:

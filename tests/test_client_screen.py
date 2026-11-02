@@ -462,16 +462,16 @@ def test_import_csv_bad_encoding_shows_error_and_imports_nothing(screen, monkeyp
 
 
 def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path):
-    import app.ui.client_screen as client_screen_module
+    import app.models.models as models_module
 
-    real_init = client_screen_module.Client.__init__
+    real_init = models_module.Client.__init__
 
     def flaky_init(self, *args, **kwargs):
         if kwargs.get("vatNumber") == "BE0456789034":  # "Bad Row"
             raise RuntimeError("boom")
         real_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(client_screen_module.Client, "__init__", flaky_init)
+    monkeypatch.setattr(models_module.Client, "__init__", flaky_init)
 
     csv_path = tmp_path / "clients.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

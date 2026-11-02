@@ -49,11 +49,11 @@ from app.core.database import get_session
 from app.core.inventory_report_service import InventoryReportService
 from app.core.label_service import LabelPrinterService
 from app.core.label_sheet_service import build_label_sheet_pdf
-from app.core.product_service import STOCK_MAX, STOCK_MIN, ProductService, clamp_stock
+from app.core.product_service import STOCK_MAX, STOCK_MIN, ProductService
 from app.core.receipt_service import PrinterError
-from app.models.models import Product
 
 # from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
+from app.ui.csv_import import run_csv_import
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
@@ -727,94 +727,9 @@ class ArticleDetailPanel(QFrame):
         self._show_overlay(f"Exported {len(products)} article(s).")
 
     def _on_import(self):
-        path = ""
         file_dialog = FileDialog(parent=self)
-        if file_dialog.exec():
-            path = file_dialog.path
-        if not path:
-            return
-        if not path.endswith((".csv", ".txt")):
-            self._show_overlay("Only csv and txt files allowed to import", kind="error")
-            return
-        try:
-            with open(path, "r", newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-        except UnicodeDecodeError:
-            self._show_overlay(
-                "This file isn't valid UTF-8 text. Re-save it as UTF-8 CSV and try again.",
-                kind="error"
-            )
-            return
-        except (OSError, csv.Error) as e:
-            self._show_overlay(f"Couldn't read file: {e}", kind="error")
-            return
-
-        self._load_categories()
-        category_id_by_name = {name: cid for name, cid in self._categories}
-
-        added = 0
-        skipped = 0
-        with get_session() as session:
-            for row in rows:
-                try:
-                    name = (row.get("name") or "").strip()
-                    barcode = (row.get("barcode") or "").strip() or None
-                    if not name:
-                        skipped += 1
-                        continue
-
-                    existing = session.query(Product).filter_by(barcode=barcode).first() if barcode else None
-                    if existing:
-                        skipped += 1
-                        continue
-
-                    try:
-                        price = float(row.get("price") or 0)
-                    except ValueError:
-                        price = 0.0
-                    is_open_price = (row.get("is_open_price") or "").strip().lower() in ("1", "true", "yes")
-                    if is_open_price or price <= 0:
-                        # Same rule as the edit form: no price means open price.
-                        is_open_price, price = True, 0.0
-                    try:
-                        tax = int(float(row.get("tax") or 0))
-                    except (ValueError, OverflowError):
-                        tax = 0
-                    try:
-                        stock_quantity = clamp_stock(float(row.get("stock_quantity") or 0))
-                    except ValueError:
-                        stock_quantity = 0.0
-                    try:
-                        min_stock_level = float(row.get("min_stock_level") or 5)
-                    except ValueError:
-                        min_stock_level = 5.0
-
-                    # A savepoint per row: a bad row undoes only itself, not
-                    # the rows already imported in this transaction.
-                    with session.begin_nested():
-                        session.add(Product(
-                            barcode=barcode,
-                            name=name,
-                            price=price,
-                            is_open_price=is_open_price,
-                            tax=tax,
-                            unit=(row.get("unit") or "pcs").strip(),
-                            stock_quantity=stock_quantity,
-                            min_stock_level=min_stock_level,
-                            category_id=category_id_by_name.get((row.get("category") or "").strip()),
-                            is_active=True,
-                        ))
-                        session.flush()
-                    added += 1
-                except Exception as e:
-                    skipped += 1
-                    logger.warning("Product import: skipped %r: %s", row.get("name"), e)
-
-            session.commit()
-
-        logger.info("Product import from %s: %d added, %d skipped", path, added, skipped)
-        self.parent_screen.refresh()
-        self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
+        if file_dialog.exec() and file_dialog.path:
+            run_csv_import(self, file_dialog.path, ProductService.import_rows, "Product")
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)

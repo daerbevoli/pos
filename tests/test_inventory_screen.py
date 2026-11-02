@@ -560,16 +560,16 @@ def test_import_adds_new_articles_and_skips_barcode_duplicates(screen, monkeypat
 
 def test_import_failing_row_keeps_rows_imported_before_it(screen, monkeypatch, tmp_path):
     """A row that fails on insert must not undo the rows already imported."""
-    import app.ui.inventory_screen as inventory_screen_module
+    import app.models.models as models_module
 
-    real_init = inventory_screen_module.Product.__init__
+    real_init = models_module.Product.__init__
 
     def flaky_init(self, *args, **kwargs):
         if kwargs.get("name") == "Clash":
             raise RuntimeError("boom")
         real_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(inventory_screen_module.Product, "__init__", flaky_init)
+    monkeypatch.setattr(models_module.Product, "__init__", flaky_init)
 
     csv_path = tmp_path / "articles.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

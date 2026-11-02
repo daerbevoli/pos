@@ -1695,3 +1695,113 @@ def test_reopening_a_browsed_receipt_after_an_invoice_stays_a_domestic_receipt(s
     screen._open_payment("cash")
     with get_session() as session:
         assert session.get(Sale, receipt_id).invoice is None
+
+
+# ── Cart table rendering: every row type ────────────────────────────────
+
+def _rendered(screen):
+    """(texts, background, bold, divider) per drawn row, as the customer display gets them."""
+    return [(r["texts"], r["background"], r["bold"], r["divider"]) for r in screen._display_rows()]
+
+
+def _line(name, qty, price, unit="pcs", **kw):
+    return CartItem(product_id=1, product_name=name, product_barcode="", unit_price=price,
+                    quantity=qty, tax_rate=21, unit=unit, **kw)
+
+
+def test_cart_rows_render_every_entry_type(screen):
+    from app.constants.colors import (
+        COLOR_ROW_DIVIDER, COLOR_ROW_PAYMENT, COLOR_ROW_PENDING, COLOR_ROW_SUMMARY,
+    )
+    screen.sale_finished = False
+    screen._set_frozen_style(False)
+    screen.cart.entries = [
+        _line("Cola", 2, 5.0),
+        _line("Apples", 1.25, 3.0, unit="kg"),
+        _line("Pears", None, 2.0, unit="kg"),             # weighed, awaiting its weight
+        _line("Misc", 1, 0.0, is_open_price=True),        # open price, awaiting its price
+        _line("Gift", 1, 7.5, is_open_price=True),
+        _line("Ham", -0.5, 10.0, unit="kg"),              # weighed refund line
+    ]
+    screen.cart.add_subtotal()
+    screen.cart.apply_percent_discount(10)
+    screen._refresh_cart(select_last=True)
+
+    assert screen.ticket_total_lbl.text() == "Total  14.63"
+    item_rows = [
+        (["2", "Cola", "5.00", "10.00"], None, False, False),
+        (["1", "Apples  ·  1.25kg", "3.00/kg", "3.75"], None, False, False),
+        (["1", "Pears  ·  ?", "2.00/kg", "?"], COLOR_ROW_PENDING, False, False),
+        (["1", "Misc", "?", "?"], COLOR_ROW_PENDING, False, False),
+        (["1", "Gift", "7.50", "7.50"], None, False, False),
+        (["-1", "Ham  ·  0.5kg", "10.00/kg", "-5.00"], None, False, False),
+        (["3", "SUBTOTAL", "", "16.25"], COLOR_ROW_SUMMARY, True, False),
+        (["", "MANUAL DISCOUNT 10%", "", "-1.62"], COLOR_ROW_SUMMARY, True, False),
+    ]
+    assert _rendered(screen) == item_rows
+    assert screen._row_to_entry == list(range(8))
+    assert screen.cart_table.currentRow() == 7
+
+    # Partial payments: a divider above the first, one row each, any method name.
+    screen.cart.entries.append(PaymentEntry(method="cash", amount=5.0))
+    screen.cart.entries.append(PaymentEntry(method="voucher", amount=1.0))
+    screen._refresh_cart(select_last=True)
+    assert screen.ticket_total_lbl.text() == "Remaining  8.63"
+    assert _rendered(screen) == item_rows + [
+        (["", "", "", ""], COLOR_ROW_DIVIDER, False, True),
+        (["", "PAID  Cash", "", "-5.00"], COLOR_ROW_PAYMENT, True, False),
+        (["", "PAID  Voucher", "", "-1.00"], COLOR_ROW_PAYMENT, True, False),
+    ]
+    assert screen._row_to_entry == [0, 1, 2, 3, 4, 5, 6, 7, None, 8, 9]
+    assert screen.cart_table.currentRow() == 10
+
+    # Without select_last, the selected line stays selected across a redraw.
+    screen._select_cart_row(1)
+    screen._refresh_cart()
+    assert screen.cart_table.currentRow() == 1
+
+
+def test_cart_rows_of_a_paid_ticket_show_breakdown_and_change(screen):
+    from app.constants.colors import COLOR_ROW_DIVIDER_FROZEN, COLOR_ROW_FROZEN
+    _, barcode, _ = _add_product(barcode="rows1", price=20.0)
+    _scan(screen, barcode)
+    screen.cart_input.setText("5")
+    screen._open_payment("cash")
+    screen.cart_input.setText("10")
+    screen._open_payment("card")
+    screen.cart_input.setText("10")
+    screen._open_payment("cash")  # 5 change
+
+    assert _rendered(screen) == [
+        (["1", "Item", "20.00", "20.00"], None, False, False),
+        (["", "", "", ""], COLOR_ROW_DIVIDER_FROZEN, False, True),
+        (["", "Cash", "", "15.00"], COLOR_ROW_FROZEN, True, False),
+        (["", "Card", "", "10.00"], COLOR_ROW_FROZEN, True, False),
+        (["", "Change", "", "-5.00"], COLOR_ROW_FROZEN, True, False),
+    ]
+    assert screen._row_to_entry == [0, None, None, None, None]
+    assert screen.cart_table.currentRow() == 4
+    assert screen.ticket_total_lbl.text() == ""
+
+
+def test_empty_cart_renders_no_rows(screen):
+    screen.sale_finished = False
+    screen._set_frozen_style(False)
+    screen.cart.entries = []
+    screen._refresh_cart()
+    assert _rendered(screen) == []
+    assert screen.ticket_total_lbl.text() == "Total  0.00"
+
+
+def test_refund_with_a_positive_total_is_refused(screen):
+    """A refund pays money out: a ticket in RF mode that adds up to a
+    positive amount isn't one, and must not be saved."""
+    screen.set_rf_cn(True)
+    screen.sale_finished = False
+    screen.cart.entries = [_line("Cola", 1, 5.0)]
+
+    screen._open_payment("cash")
+
+    assert screen.sale_finished is False
+    assert screen._current_sale_id is None
+    assert screen.overlay.message_label.text() == "Nothing to refund"

@@ -7,6 +7,7 @@ import logging
 from sqlalchemy import func
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
+from app.core.csv_import import import_rows
 from app.models.models import (
     Category,
     Product,
@@ -27,6 +28,15 @@ STOCK_MAX = 999999
 
 def clamp_stock(quantity: float) -> float:
     return max(STOCK_MIN, min(STOCK_MAX, quantity))
+
+
+def _number(text: str | None, default: float) -> float:
+    """A CSV cell as a number; `default` when it's empty or unreadable."""
+    try:
+        value = float(text or default)
+    except ValueError:
+        return default
+    return value if value == value and abs(value) != float("inf") else default
 
 
 class ProductService:
@@ -269,6 +279,44 @@ class ProductService:
     #     )
 
     # ── Categories ────────────────────────────────────────────────────────────
+
+    # ── CSV import ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def import_rows(session: Session, rows: list[dict]) -> tuple[int, int]:
+        """Adds the articles of a CSV import (see read_csv_rows()); returns
+        (added, skipped)."""
+        category_ids = {c.name: c.id for c in ProductService.get_all_categories(session)}
+        return import_rows(session, rows,
+                           lambda row: ProductService._from_import_row(session, row, category_ids), "Product")
+
+    @staticmethod
+    def _from_import_row(session: Session, row: dict, category_ids: dict[str, int]) -> Product | None:
+        """A new Product from one import row, or None to skip it: no name, or
+        its barcode is already an article. Unreadable numbers fall back to
+        the defaults; no price means open price, as on the edit form."""
+        name = (row.get("name") or "").strip()
+        barcode = (row.get("barcode") or "").strip() or None
+        if not name:
+            return None
+        if barcode and session.query(Product).filter_by(barcode=barcode).first() is not None:
+            return None
+        price = _number(row.get("price"), 0.0)
+        is_open_price = (row.get("is_open_price") or "").strip().lower() in ("1", "true", "yes")
+        if is_open_price or price <= 0:
+            is_open_price, price = True, 0.0
+        return Product(
+            barcode=barcode,
+            name=name,
+            price=price,
+            is_open_price=is_open_price,
+            tax=int(_number(row.get("tax"), 0)),
+            unit=(row.get("unit") or "pcs").strip(),
+            stock_quantity=clamp_stock(_number(row.get("stock_quantity"), 0.0)),
+            min_stock_level=_number(row.get("min_stock_level"), 5.0),
+            category_id=category_ids.get((row.get("category") or "").strip()),
+            is_active=True,
+        )
 
     @staticmethod
     def get_all_categories(session: Session) -> list[Category]:

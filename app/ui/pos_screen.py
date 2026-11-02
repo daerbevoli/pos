@@ -53,7 +53,14 @@ from app.constants import (
     SPACING_XS,
 )
 from app.constants.countries import BELGIUM
-from app.core.cart import Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker
+from app.core.cart import (
+    WEIGHT_UNITS,
+    Cart,
+    CartItem,
+    DiscountEntry,
+    PaymentEntry,
+    SubtotalMarker,
+)
 from app.core.client_service import ClientService
 from app.core.database import get_session
 from app.core.erp_service import ErpService
@@ -75,8 +82,6 @@ from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
 
 logger = logging.getLogger(__name__)
 
-WEIGHT_UNITS = {"kg", "g", "ml", "l"}
-
 TABS = 5  # number of V-tabs, slots 1..TABS; MainWindow builds one tab button per slot
 
 # Marks the cells of a divider row, so _display_rows() can tell it apart
@@ -91,6 +96,22 @@ def _cart_font(bold: bool) -> QFont:
     font.setPixelSize(FONT_SIZE_CART)
     font.setBold(bold)
     return font
+
+
+def _item_cells(item: CartItem) -> list[str]:
+    """An item row's four column texts: quantity, name, unit price, line
+    total, with "?" where the line still awaits its weight or price."""
+    pending = item.pending
+    total = "?" if pending else f"{item.line_total:.2f}"
+    if item.unit in WEIGHT_UNITS:
+        # A weighed line counts as one article (-1 on a refund); its weight
+        # goes next to the name.
+        quantity = "1" if pending or item.quantity >= 0 else "-1"
+        weight = "?" if pending else f"{abs(item.quantity):g}{item.unit}"
+        return [quantity, f"{item.product_name}  ·  {weight}", f"{item.unit_price:.2f}/{item.unit}", total]
+    if item.is_open_price:
+        return [f"{item.quantity:g}", item.product_name, "?" if pending else f"{item.unit_price:.2f}", total]
+    return ["?" if pending else f"{item.quantity:g}", item.product_name, f"{item.unit_price:.2f}", total]
 
 
 class _TabState:
@@ -889,19 +910,20 @@ class POSScreen(QWidget):
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
-    def _insert_subtotal_row(self, total: float, count: float):
+    def _add_row(self, texts: list[str], *, bold: bool, color: tuple[int, int, int] | None,
+                 entry_index: int | None):
+        """Appends one 4-column cart row. `color` None leaves the background
+        plain; `entry_index` is the cart entry the row stands for (None for
+        rows that aren't one, e.g. a paid ticket's breakdown)."""
         row = self.cart_table.rowCount()
         self.cart_table.insertRow(row)
-        cells = [
-            QTableWidgetItem(f"{count:g}"),
-            QTableWidgetItem("SUBTOTAL"),
-            QTableWidgetItem(""),
-            QTableWidgetItem(f"{total:.2f}"),
-        ]
-        font = _cart_font(bold=True)
-        for col, cell in enumerate(cells):
+        self._row_to_entry.append(entry_index)
+        font = _cart_font(bold=bold)
+        for col, text in enumerate(texts):
+            cell = QTableWidgetItem(text)
             cell.setFont(font)
-            cell.setBackground(self._row_brush(COLOR_ROW_SUMMARY))
+            if color is not None:
+                cell.setBackground(self._row_brush(color))
             self.cart_table.setItem(row, col, cell)
         self.cart_table.setRowHeight(row, CART_ROW_HEIGHT)
 
@@ -956,138 +978,69 @@ class POSScreen(QWidget):
             self.cart_table.scrollTo(model.index(row, 0))
 
     def _refresh_cart(self, select_last=False):
+        """Redraws the cart table from self.cart, then everything that follows it."""
         prev_idx = self._get_selected_entry_index()
         self.cart_table.setRowCount(0)
         self._row_to_entry: list[int | None] = []
+        self._draw_entries()
+        if self.sale_finished and self._frozen_breakdown:
+            self._draw_final_payments()
+        self._restore_selection(prev_idx, select_last)
+        self._update_totals()
 
+    def _draw_entries(self):
+        """One row per cart entry, in receipt order, with a divider above the
+        first partial payment."""
         subtotals = iter(self.cart.subtotals())
-        payment_divider_shown = False
-        font_bold = _cart_font(bold=True)
-        font_item = _cart_font(bold=False)
+        divider_shown = False
         for i, entry in enumerate(self.cart.entries):
             if isinstance(entry, CartItem):
-                r = self.cart_table.rowCount()
-                self.cart_table.insertRow(r)
-                self._row_to_entry.append(i)
-                pending = entry.pending
-                is_weight = entry.unit in WEIGHT_UNITS
-                if is_weight:
-                    qty_text = "1" if pending else ("-1" if entry.quantity < 0 else "1")
-                    weight_text = "?" if pending else f"{abs(entry.quantity):g}{entry.unit}"
-                    name_text = f"{entry.product_name}  ·  {weight_text}"
-                    price_text = f"{entry.unit_price:.2f}/{entry.unit}"
-                elif entry.is_open_price:
-                    qty_text = f"{entry.quantity:g}"
-                    name_text = entry.product_name
-                    price_text = "?" if pending else f"{entry.unit_price:.2f}"
-                else:
-                    qty_text = "?" if pending else f"{entry.quantity:g}"
-                    name_text = entry.product_name
-                    price_text = f"{entry.unit_price:.2f}"
-                for col, text in enumerate([
-                    qty_text,
-                    name_text,
-                    price_text,
-                    "?" if pending else f"{entry.line_total:.2f}",
-                ]):
-                    cell = QTableWidgetItem(text)
-                    cell.setFont(font_item)
-                    if pending:
-                        cell.setBackground(self._row_brush(COLOR_ROW_PENDING))
-                    self.cart_table.setItem(r, col, cell)
-                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
-
+                self._add_row(_item_cells(entry), bold=False,
+                              color=COLOR_ROW_PENDING if entry.pending else None, entry_index=i)
             elif isinstance(entry, DiscountEntry):
-                r = self.cart_table.rowCount()
-                self.cart_table.insertRow(r)
-                self._row_to_entry.append(i)
-                cells = [
-                    QTableWidgetItem(""),
-                    QTableWidgetItem(f"{entry.label}"),
-                    QTableWidgetItem(""),
-                    QTableWidgetItem(f"{entry.line_total:.2f}"),
-                ]
-                for c, cell in enumerate(cells):
-                    cell.setFont(font_bold)
-                    cell.setBackground(self._row_brush(COLOR_ROW_SUMMARY))
-                    self.cart_table.setItem(r, c, cell)
-                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
-
+                self._add_row(["", entry.label, "", f"{entry.line_total:.2f}"],
+                              bold=True, color=COLOR_ROW_SUMMARY, entry_index=i)
             elif isinstance(entry, SubtotalMarker):
                 count, total = next(subtotals)
-                self._insert_subtotal_row(total, count)
-                self._row_to_entry.append(i)
-
+                self._add_row([f"{count:g}", "SUBTOTAL", "", f"{total:.2f}"],
+                              bold=True, color=COLOR_ROW_SUMMARY, entry_index=i)
             elif isinstance(entry, PaymentEntry):
-                if not payment_divider_shown:
+                if not divider_shown:
                     self._insert_divider_row()
-                    payment_divider_shown = True
-                r = self.cart_table.rowCount()
-                self.cart_table.insertRow(r)
-                self._row_to_entry.append(i)
-                method_label = {"cash": "Cash", "card": "Card"}.get(entry.method, entry.method.title())
-                cells = [
-                    QTableWidgetItem(""),
-                    QTableWidgetItem(f"PAID  {method_label}"),
-                    QTableWidgetItem(""),
-                    QTableWidgetItem(f"-{entry.amount:.2f}"),
-                ]
-                for c, cell in enumerate(cells):
-                    cell.setFont(font_bold)
-                    cell.setBackground(self._row_brush(COLOR_ROW_PAYMENT))
-                    self.cart_table.setItem(r, c, cell)
-                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
+                    divider_shown = True
+                self._add_row(["", f"PAID  {entry.method.title()}", "", f"-{entry.amount:.2f}"],
+                              bold=True, color=COLOR_ROW_PAYMENT, entry_index=i)
 
-        # ── Payment rows (frozen state) ──────────────────────────────────
-        if self.sale_finished and self._frozen_breakdown:
-            font_pay = _cart_font(bold=True)
-            self._insert_divider_row()
-            for leg in self._frozen_breakdown:
-                r = self.cart_table.rowCount()
-                self.cart_table.insertRow(r)
-                self._row_to_entry.append(None)
-                method_label = {"cash": "Cash", "card": "Card"}.get(leg["method"], leg["method"].title())
-                leg_str = f"{leg['amount']:.2f}"
-                for ci, text in enumerate(["", method_label, "", leg_str]):
-                    cell = QTableWidgetItem(text)
-                    cell.setFont(font_pay)
-                    cell.setBackground(self._row_brush(COLOR_ROW_PAYMENT))
-                    self.cart_table.setItem(r, ci, cell)
-                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
-            if self._frozen_change > 0:
-                r = self.cart_table.rowCount()
-                self.cart_table.insertRow(r)
-                self._row_to_entry.append(None)
-                change_str = f"-{self._frozen_change:.2f}"
-                for ci, text in enumerate(["", "Change", "", change_str]):
-                    cell = QTableWidgetItem(text)
-                    cell.setFont(font_pay)
-                    cell.setBackground(self._row_brush(COLOR_ROW_CHANGE))
-                    self.cart_table.setItem(r, ci, cell)
-                self.cart_table.setRowHeight(r, CART_ROW_HEIGHT)
+    def _draw_final_payments(self):
+        """A paid ticket's per-method breakdown and its change, under a divider."""
+        self._insert_divider_row()
+        for leg in self._frozen_breakdown:
+            self._add_row(["", leg["method"].title(), "", f"{leg['amount']:.2f}"],
+                          bold=True, color=COLOR_ROW_PAYMENT, entry_index=None)
+        if self._frozen_change > 0:
+            self._add_row(["", "Change", "", f"-{self._frozen_change:.2f}"],
+                          bold=True, color=COLOR_ROW_CHANGE, entry_index=None)
 
-        # ── Row selection ────────────────────────────────────────────────
-        if select_last or not self.cart.entries or self.sale_finished:
-            row_to_select = self.cart_table.rowCount() - 1
-        elif prev_idx is not None and prev_idx in self._row_to_entry:
-            row_to_select = self._row_to_entry.index(prev_idx)
-        else:
-            row_to_select = self.cart_table.rowCount() - 1
-        self._select_cart_row(row_to_select)
+    def _restore_selection(self, prev_idx: int | None, select_last: bool):
+        """Selects the line that was selected before the redraw, or the last
+        row after an addition, on an empty cart or on a paid ticket."""
+        keep_previous = (not select_last and self.cart.entries and not self.sale_finished
+                         and prev_idx is not None and prev_idx in self._row_to_entry)
+        row = self._row_to_entry.index(prev_idx) if keep_previous else self.cart_table.rowCount() - 1
+        self._select_cart_row(row)
         self.cart_table.viewport().update()
 
-        # ── Tab button label ─────────────────────────────────────────────
+    def _update_totals(self):
+        """What follows the cart: the V-tab amount, the Total/Remaining label,
+        the customer display and the open-ticket autosave."""
         remaining = self.cart.remaining_due
-        amount = f"{remaining:.2f}" if self.cart.entries and not self.sale_finished else ""
-        self.tab_updated.emit(self._active_tab, amount)
-
-        # ── Running total (always visible, independent of frozen state) ──
+        open_ticket = bool(self.cart.entries) and not self.sale_finished
+        self.tab_updated.emit(self._active_tab, f"{remaining:.2f}" if open_ticket else "")
         if self.sale_finished:
             self.ticket_total_lbl.setText("")
         else:
             label = "Remaining" if self.cart.paid_total > 0 else "Total"
             self.ticket_total_lbl.setText(f"{label}  {remaining:.2f}")
-
         self.emit_display()
         self._autosave_open_ticket()
 
@@ -1138,79 +1091,91 @@ class POSScreen(QWidget):
     # ── Payment ───────────────────────────────────────────────────────────
 
     def _open_payment(self, method: str):
+        """The Cash/Card buttons. A refund is paid out in one go; otherwise the
+        typed amount (or, with none typed, what's still due) is tendered:
+        short of what's due it stays on the ticket as a PAID row, enough
+        settles and saves the sale."""
+        if not self._ready_for_payment():
+            return
+        if self.cart.is_refund:
+            self._pay_out_refund(method)
+            return
+        remaining = self.cart.remaining_due
+        tendered = self._read_tender(method, remaining)
+        if tendered is None:
+            return
+        if tendered + 0.005 < remaining:
+            self._take_partial_payment(method, tendered)
+        else:
+            self._settle(method, tendered)
+
+    def _ready_for_payment(self) -> bool:
+        """False, with the reason on screen, if the ticket can't be paid yet."""
         if self.sale_finished:
             self._show_overlay("No sale")
-            return
+            return False
         if not any(isinstance(e, CartItem) for e in self.cart.entries):
             self._show_overlay("Add items before payment", kind="error")
-            return
+            return False
         if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
             self._show_overlay("Fill in the amount for pending items first", kind="error")
+            return False
+        return True
+
+    def _pay_out_refund(self, method: str):
+        """A refund is paid out in full by the chosen method in one go — no
+        tendering, partial payments or change."""
+        payout = self.cart.total
+        # A refund pays money out: a positive total isn't one, and a new
+        # refund of 0.00 has nothing to pay out. (A reopened refund may
+        # settle at 0.00: that cancels it.)
+        if payout > 0 or (payout == 0 and self._current_sale_id is None):
+            self._show_overlay("Nothing to refund", kind="error")
             return
+        if self._save_and_freeze([{"method": method, "amount": payout}], payout, method):
+            self.cart_input.clear()
 
-        if self.cart.is_refund:
-            if self.cart.total > 0:
-                # A refund pays money out; a positive total isn't a refund.
-                self._show_overlay("Nothing to refund", kind="error")
-                return
-            if self.cart.total == 0 and self._current_sale_id is None:
-                # A new refund of 0.00 has nothing to pay out. (A reopened
-                # refund may settle at 0.00: that cancels it.)
-                self._show_overlay("Nothing to refund", kind="error")
-                return
-            # A refund is paid out in full by the chosen method in one go —
-            # no tendering, partial payments or change.
-            payout = self.cart.total
-            if self._save_and_freeze([{"method": method, "amount": payout}], payout, method):
-                self.cart_input.clear()
-            return
-
-        prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
-
-        remaining = self.cart.remaining_due
-        typed     = self._read_amount_input()
-        tendered  = round(max(remaining, 0.0) if typed is None else typed, 2)
-
+    def _read_tender(self, method: str, remaining: float) -> float | None:
+        """The amount tendered by `method`: what's typed, or with nothing
+        typed exactly what's still due. None, with the reason on screen, if
+        it can't be taken."""
+        typed = self._read_amount_input()
+        due = max(remaining, 0.0)
+        tendered = round(due if typed is None else typed, 2)
         # A zero tender is fine when nothing is due (e.g. every line of a
         # reopened ticket was reversed) — it settles the ticket at 0.00.
         if tendered < 0 or (tendered == 0 and remaining > 0.005):
             self._show_overlay("Enter an amount first", kind="error")
-            return
-
+            return None
         # Only cash can be overpaid (and give change): a card or other
         # non-cash leg covers at most what's still due.
-        if method != "cash" and tendered > max(remaining, 0.0) + 0.005:
-            self._show_overlay(
-                f"{method.title()} can't exceed the amount due ({max(remaining, 0.0):.2f})",
-                kind="error",
-            )
-            return
+        if method != "cash" and tendered > due + 0.005:
+            self._show_overlay(f"{method.title()} can't exceed the amount due ({due:.2f})", kind="error")
+            return None
+        return tendered
 
-        if tendered + 0.005 < remaining:
-            # Underpayment: merge into this method's running partial tender
-            # (one row per method, not one row per tap of Cash/Card).
-            existing = next((e for e in self.cart.entries if isinstance(e, PaymentEntry) and e.method == method), None)
-            if existing is not None:
-                existing.amount = round(existing.amount + tendered, 2)
-            else:
-                self.cart.entries.append(PaymentEntry(method=method, amount=tendered))
-            self.cart_input.clear()
-            self._refresh_cart(select_last=True)
-            self.cart_table.setFocus()
-            return
-
-        # Enough to cover what's left — fold every method's contribution into
-        # one breakdown row per method, for persistence and the receipt.
-        total_tendered = round(sum(p.amount for p in prior_payments) + tendered, 2)
-
-        breakdown = [{"method": p.method, "amount": p.amount} for p in prior_payments]
-        existing_final = next((b for b in breakdown if b["method"] == method), None)
-        if existing_final is not None:
-            existing_final["amount"] = round(existing_final["amount"] + tendered, 2)
+    def _take_partial_payment(self, method: str, tendered: float):
+        """Adds a tender short of what's due to this method's PAID row (one
+        row per method, not one per tap of Cash/Card)."""
+        existing = next((e for e in self.cart.entries if isinstance(e, PaymentEntry) and e.method == method), None)
+        if existing is not None:
+            existing.amount = round(existing.amount + tendered, 2)
         else:
-            breakdown.append({"method": method, "amount": round(tendered, 2)})
-        # Several methods -> "mixed"; the breakdown holds the per-method split,
-        # and any change on a mixed sale is cash (only cash can be overpaid).
+            self.cart.entries.append(PaymentEntry(method=method, amount=tendered))
+        self.cart_input.clear()
+        self._refresh_cart(select_last=True)
+        self.cart_table.setFocus()
+
+    def _settle(self, method: str, tendered: float):
+        """The last tender covers what's left: folds every method's tenders
+        into one breakdown row per method and saves the sale. Several methods
+        make it "mixed" (any change on it is cash: only cash can be overpaid)."""
+        prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
+        amounts: dict[str, float] = {}
+        for m, amount in [(p.method, p.amount) for p in prior_payments] + [(method, tendered)]:
+            amounts[m] = round(amounts.get(m, 0.0) + amount, 2)
+        breakdown = [{"method": m, "amount": amount} for m, amount in amounts.items()]
+        total_tendered = round(sum(p.amount for p in prior_payments) + tendered, 2)
         final_method = method if len(breakdown) == 1 else "mixed"
 
         self.cart.entries = [e for e in self.cart.entries if not isinstance(e, PaymentEntry)]

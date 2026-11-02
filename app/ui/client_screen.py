@@ -41,7 +41,7 @@ from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.core.client_listing_service import ClientListingService
 from app.core.client_service import ClientService
 from app.core.database import get_session
-from app.models.models import Client
+from app.ui.csv_import import run_csv_import
 from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.widgets.form_fields import FieldRow
@@ -553,79 +553,9 @@ class ClientDetailPanel(QFrame):
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_import(self):
-        path = ""
         file_dialog = FileDialog(parent=self)
-        if file_dialog.exec():
-            path = file_dialog.path
-        if not path:
-            return
-        if not path.endswith((".csv", ".txt")):
-            self._show_overlay("Only csv and txt files allowed to import", kind="error")
-            return
-        try:
-            with open(path, "r", newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-        except UnicodeDecodeError:
-            self._show_overlay(
-                "This file isn't valid UTF-8 text. Re-save it as UTF-8 CSV and try again.",
-                kind="error",
-            )
-            return
-        except (OSError, csv.Error) as e:
-            self._show_overlay(f"Couldn't read file: {e}", kind="error")
-            return
-
-        clients_added = 0
-        clients_skipped = 0
-        with (get_session() as session):
-            for row in rows:
-                try:
-                    vat = row.get("vat")
-                    email = row.get("email") or None
-                    # Already imported = same VAT number. A shared email is fine.
-                    existing = session.query(Client).filter_by(vatNumber=vat).first() if vat else None
-                    street = (row.get("street") or row.get("Street") or "").strip()
-                    zip_code = (row.get("zip") or row.get("Zip") or row.get("zip_code") or "").strip()
-                    city = (row.get("city") or row.get("City") or "").strip()
-                    if not street and not zip_code and not city and row.get("address"):
-                        # Old export format (one free-text address column) — best effort.
-                        street = row.get("address")
-                    country = (row.get("country") or "").strip().upper()
-                    if country not in COUNTRY_NAMES:
-                        country = BELGIUM
-                    if (
-                        not vat or existing or not row.get("name") or not street
-                        or not is_valid_vat(vat, country)
-                    ):
-                        clients_skipped += 1
-                        continue
-
-                    phone = (row.get("phone") or "").lstrip("'") or None
-                    # A savepoint per row: a bad row undoes only itself, not
-                    # the rows already imported in this transaction.
-                    with session.begin_nested():
-                        session.add(Client(
-                            name=row.get("name"),
-                            vatNumber=vat,
-                            street=street,
-                            zip_code=zip_code,
-                            city=city,
-                            country=country,
-                            phone=phone,
-                            email=email,
-                            is_active=True,
-                        ))
-                        session.flush()
-                    clients_added += 1
-                except Exception as e:
-                    clients_skipped += 1
-                    logger.warning("Client import: skipped %r: %s", row.get("name"), e)
-
-            session.commit()
-
-        logger.info("Client import from %s: %d added, %d skipped", path, clients_added, clients_skipped)
-        self.parent_screen.refresh()
-        self._show_overlay(f"Import complete: {clients_added} added, {clients_skipped} skipped.")
+        if file_dialog.exec() and file_dialog.path:
+            run_csv_import(self, file_dialog.path, ClientService.import_rows, "Client")
 
 
     def _show_overlay(self, message: str, kind: str = "info"):

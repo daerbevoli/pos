@@ -16,7 +16,7 @@ from datetime import datetime
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from app.core.cart import Cart, CartItem, DiscountEntry, SubtotalMarker
+from app.core.cart import WEIGHT_UNITS, Cart, CartItem, DiscountEntry, SubtotalMarker
 from app.core.settings_service import SettingsService
 from app.models.models import Invoice, Sale, ZReport
 from app.utils.clock import format_local
@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 LINE_WIDTH = 48  # 80mm paper at font A (12x24 dots -> 576px / 12)
 DRAWER_PIN = 2  # 2 = connector pin 2 (common default), 5 = connector pin 5
 LOGO_MAX_WIDTH_PX = 576  # 80mm paper at 203dpi
-
-WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
 QTY_COL = 5
 NAME_COL = 23
