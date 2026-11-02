@@ -10,17 +10,30 @@ ProductService.create_promo()/update_promo()/set_promo_items().
 """
 from datetime import date
 
+from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QMessageBox, QDateEdit, QCheckBox,
-    QComboBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QDoubleSpinBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, QDate
 
+from app.constants import DIALOG_BUTTON_HEIGHT, PROMO_DIALOG_MIN_SIZE
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.constants import DIALOG_BUTTON_HEIGHT, PROMO_DIALOG_MIN_SIZE
 from app.utils.utils import FunctionButton
 
 # Column indices for the products table.
@@ -296,8 +309,7 @@ class PromoDialog(QDialog):
         spin: QDoubleSpinBox = self.table.cellWidget(row, COL_VALUE)
         spin.blockSignals(True)
         self._configure_value_spin(spin, item)
-        if item["discount_value"] > spin.maximum():
-            item["discount_value"] = spin.maximum()
+        item["discount_value"] = min(item["discount_value"], spin.maximum())
         spin.setValue(item["discount_value"])
         spin.blockSignals(False)
         self._update_new_price(row, item)

@@ -9,24 +9,25 @@ itself, mirroring the inventory screen's article editing.
 import csv
 import logging
 
+from PyQt6.QtCore import QEvent, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QDesktopServices, QKeySequence
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
-    QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog,
     QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QUrl
-from PyQt6.QtGui import QColor, QKeySequence, QDesktopServices
 
-from app.core.client_service import ClientService
-from app.core.client_listing_service import ClientListingService
-from app.models.models import Client
-from app.core.database import get_session
-from app.ui.widgets.form_fields import FieldRow
-from app.ui.dialogs.file_dialog import FileDialog
-from app.ui.dialogs.client_listing_dialog import ClientListingDialog
-from app.utils.utils import TapToDismissOverlay, FunctionButton, SelectionKeepingTable
-from app.utils.validators import is_valid_vat
-from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.constants import (
     COLOR_ROW_INACTIVE_BG,
     COLOR_ROW_INACTIVE_TEXT,
@@ -36,6 +37,17 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.constants.countries import BELGIUM, COUNTRY_NAMES
+from app.core.client_listing_service import ClientListingService
+from app.core.client_service import ClientService
+from app.core.database import get_session
+from app.models.models import Client
+from app.ui.dialogs.client_listing_dialog import ClientListingDialog
+from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.widgets.form_fields import FieldRow
+from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
+from app.utils.validators import is_valid_vat
+
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
 logger = logging.getLogger(__name__)
 
@@ -752,13 +764,6 @@ class ClientScreen(QWidget):
                 self.detail_panel.show_client(client)
             else:
                 self.detail_panel._clear()
-
-    def _add_client(self):
-        self.detail_panel._start_new()
-
-    def _edit_client(self, client_id: int):
-        self.detail_panel.current_client_id = client_id
-        self.detail_panel._start_edit()
 
     def _deactivate_client(self, client_id: int):
         with get_session() as session:

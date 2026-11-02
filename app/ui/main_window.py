@@ -3,34 +3,42 @@ Main Window
 Persistent V-tab bar — each tab independently tracks its own screen —
 with the error badge and a clock / salesperson box at its right end.
 """
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QStackedWidget, QFrame, QButtonGroup
-)
-from PyQt6.QtCore import Qt, QTimer
-from datetime import datetime
 import logging
+from datetime import datetime
 
-from app.constants.sizes import MAIN_WINDOW_SIZE
-from app.core.backup_service import KIND_DAILY, BackupService
-from app.core.backup_worker import BackupWorker
-from app.core.erp_worker import InvoiceSendWorker
-from app.core.settings_service import SettingsService
-from app.ui.client_screen import ClientScreen
-from app.ui.customer_display import CustomerDisplay
-from app.ui.pos_screen import POSScreen, TABS
-from app.ui.inventory_screen import InventoryScreen
-from app.ui.reports_screen import ReportsScreen
-from app.ui.settings_screen import SettingsScreen
-from app.core.database import get_session
-from app.utils.error_handling import pause_logging
-from app.utils.utils import TicketTab
-from app.ui.widgets.error_badge import ErrorBadge
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
 from app.constants import (
     SPACING_XS,
     TAB_BAR_MAX_HEIGHT,
     TAB_BAR_MIN_HEIGHT,
 )
+from app.constants.sizes import MAIN_WINDOW_SIZE
+from app.core.backup_service import KIND_DAILY, BackupService
+from app.core.backup_worker import BackupWorker
+from app.core.database import get_session
+from app.core.erp_worker import InvoiceSendWorker
+from app.core.settings_service import SettingsService
+from app.ui.client_screen import ClientScreen
+from app.ui.customer_display import CustomerDisplay
+from app.ui.inventory_screen import InventoryScreen
+from app.ui.pos_screen import TABS, POSScreen
+from app.ui.reports_screen import ReportsScreen
+from app.ui.settings_screen import SettingsScreen
+from app.ui.widgets.error_badge import ErrorBadge
+from app.utils.error_handling import pause_logging
+from app.utils.utils import TicketTab
 
 MAX_VTABS = TABS  # one source of truth: POSScreen keeps a state slot per V-tab
 

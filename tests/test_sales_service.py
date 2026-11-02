@@ -601,6 +601,46 @@ def test_generate_invoice_data_sends_frozen_client_country(db_session):
     assert generate_invoice_data(invoice)["to"]["country"] == "NL"
 
 
+def test_generate_invoice_data_sends_credit_note_as_out_refund_with_positive_lines(db_session):
+    """Odoo refuses negative lines on a credit note: it's sent as an
+    out_refund with positive quantities and amounts."""
+    from app.core.client_service import ClientService
+    from app.core.sales_service import generate_invoice_data
+    client = ClientService.create(db_session, name="Acme", vatNumber="V1", street="1 Main St",
+                                  zip_code="1000", city="Brussels")
+    product = _make_product(db_session)
+    cart = _cart_with(_item_for(product, quantity=-2))
+    cart.is_refund = True
+    invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
+
+    data = generate_invoice_data(invoice)
+    assert data["move_type"] == "out_refund"
+    assert [line.quantity for line in data["items"]] == [2]
+    assert all(line.line_total_excl_tax > 0 for line in data["items"])
+
+
+def test_update_sale_moves_invoice_to_another_client(db_session):
+    """Reopening an unsent invoice and picking a different client re-addresses
+    the same invoice (same number) to the new client."""
+    from app.core.client_service import ClientService
+    first = ClientService.create(db_session, name="First", vatNumber="V1", street="1 Main St",
+                                 zip_code="1000", city="Brussels")
+    second = ClientService.create(db_session, name="Second", vatNumber="V2", street="2 Side St",
+                                  zip_code="2000", city="Antwerpen")
+    product = _make_product(db_session)
+    cart = _cart_with(_item_for(product))
+    invoice = SalesService.finalize_invoice(db_session, cart, client_id=first.id)
+    number = invoice.invoice_number
+
+    updated = SalesService.update_sale(db_session, invoice.sale_id, cart, client_id=second.id)
+
+    assert updated.invoice.invoice_number == number
+    assert updated.invoice.client_id == second.id
+    assert updated.invoice.client_name == "Second"
+    assert updated.invoice.client_vat_number == "V2"
+    assert updated.invoice.client_city == "Antwerpen"
+
+
 # ── invoice_lines ────────────────────────────────────────────────────────
 
 def _line(name, quantity, **flags):
@@ -846,8 +886,8 @@ def test_report_payment_totals_dont_deduct_change_twice_without_breakdown(db_ses
     assert totals["payment_breakdown"] == [{"method": "cash", "amount": 1.25}]
 
 
-def test_amount_for_method_takes_off_change(db_session):
-    from app.core.report_service import _amount_for_method
+def test_payment_totals_take_off_change(db_session):
+    from app.core.report_service import _sum_payment_breakdowns
     product = _make_product(db_session, price=1.25)
     sale = SalesService.finalize_sale(
         db_session, _cart_with(_item_for(product, quantity=1)),
@@ -855,8 +895,7 @@ def test_amount_for_method_takes_off_change(db_session):
         payment_breakdown=[{"method": "cash", "amount": 2.0}],
     )
 
-    assert _amount_for_method(sale, "cash") == 1.25
-    assert _amount_for_method(sale, "card") == 0.0
+    assert _sum_payment_breakdowns([sale]) == [{"method": "cash", "amount": 1.25}]
 
 
 def test_invoice_payment_totals_take_off_change_after_z_report(db_session):

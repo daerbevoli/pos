@@ -9,12 +9,19 @@ the ticket is open, dark ("frozen") once it is paid/finished.
 Fed by POSScreen.display_changed; opens full screen on a second monitor
 when one is connected, otherwise as a normal window toggled from Settings.
 """
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-    QTableWidgetItem, QHeaderView, QStackedWidget, QAbstractItemView
-)
-from PyQt6.QtGui import QFont, QBrush, QColor, QGuiApplication
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QBrush, QColor, QFont, QGuiApplication
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.constants import (
     CART_INFO_BAR_HEIGHT,

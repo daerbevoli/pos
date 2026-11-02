@@ -6,11 +6,18 @@ file_format for the caller to pass to ClientListingService.
 """
 from datetime import date
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
-    QDateEdit, QComboBox, QMessageBox,
-)
 from PyQt6.QtCore import QDate
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from app.constants import DIALOG_BUTTON_HEIGHT
 from app.utils.utils import FunctionButton

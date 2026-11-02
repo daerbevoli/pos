@@ -7,12 +7,12 @@ PC's local time only for display, printing and calendar-day logic — a
 Local time is the operating system's timezone (with its DST rules), the same
 clock the cashier sees in the taskbar.
 """
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 
 
 def utc_now() -> datetime:
     """Now, as an aware UTC datetime — the value to store."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def to_local(dt: datetime) -> datetime:
@@ -31,7 +31,7 @@ def format_local(dt: datetime | None, fmt: str, empty: str = "") -> str:
 def local_day_start(day: date) -> datetime:
     """Local midnight at the start of `day`, as an aware UTC datetime."""
     # A naive datetime's astimezone() reads it as local time.
-    return datetime.combine(day, time.min).astimezone(timezone.utc)
+    return datetime.combine(day, time.min).astimezone(UTC)
 
 
 def local_days_range(start: date, end: date) -> tuple[datetime, datetime]:

@@ -21,7 +21,10 @@ from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QDialog, QLabel, QMessageBox, QProgressBar, QVBoxLayout
 
 from app.constants import (
-    COLOR_LOG_ERROR, DIALOG_BUTTON_HEIGHT, Z_PROGRESS_BAR_HEIGHT, Z_PROGRESS_DIALOG_WIDTH,
+    COLOR_LOG_ERROR,
+    DIALOG_BUTTON_HEIGHT,
+    Z_PROGRESS_BAR_HEIGHT,
+    Z_PROGRESS_DIALOG_WIDTH,
 )
 from app.core.admin import check_admin_code
 from app.core.backup_service import KIND_POST_Z, KIND_PRE_Z, BackupService

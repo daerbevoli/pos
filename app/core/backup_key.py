@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-import app.core.database as database
+from app.core import database
 
 logger = logging.getLogger(__name__)
 

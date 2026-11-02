@@ -2,10 +2,16 @@ import logging
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QPushButton, QSizePolicy, QWidget, QVBoxLayout, QFrame, QLabel, QTableWidget,
-    QStyle, QStyledItemDelegate,
+    QFrame,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from sqlalchemy.orm import Session
 
 from app.constants import (
     FUNCTION_BUTTON_HEIGHT,
@@ -15,7 +21,6 @@ from app.constants import (
     SPACING_MD,
     VTAB_BUTTON_HEIGHT,
 )
-from app.core.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 

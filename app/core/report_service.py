@@ -80,13 +80,6 @@ def _sum_payment_breakdowns(sources) -> list[dict]:
     ]
 
 
-def _amount_for_method(sale, method: str) -> float:
-    amount = sum(leg.get("amount", 0.0) for leg in _payment_breakdown(sale) if leg.get("method") == method)
-    if method == _change_method(sale):
-        amount -= _change_to_deduct(sale)
-    return amount
-
-
 def _vat_breakdown(lines) -> dict:
     """{"0"/"6"/"21": {"base", "tax", "total"}} from (tax_rate, tax_amount,
     line_total) tuples; an unknown rate is counted under 0%."""

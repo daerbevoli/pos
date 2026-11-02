@@ -6,10 +6,17 @@ labels fit on the A4 sheet (a dropdown, empty until chosen) before the PDF is
 generated. OK confirms.
 """
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QComboBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QVBoxLayout,
 )
-from app.core.label_sheet_service import LABEL_LAYOUTS
+
 from app.constants import LABEL_SHEET_DIALOG_WIDTH, LABEL_SHEET_FIELD_HEIGHT
+from app.core.label_sheet_service import LABEL_LAYOUTS
 from app.utils.utils import FunctionButton
 
 

@@ -3,10 +3,19 @@ Product & Inventory Service
 All business logic for managing products and stock.
 """
 import logging
-from typing import Optional
+
 from sqlalchemy import func
-from sqlalchemy.orm import Session, InstrumentedAttribute
-from app.models.models import Product, Category, StockMovement, Shortcut, ShortcutItem, Promo, PromoItem
+from sqlalchemy.orm import InstrumentedAttribute, Session
+
+from app.models.models import (
+    Category,
+    Product,
+    Promo,
+    PromoItem,
+    Shortcut,
+    ShortcutItem,
+    StockMovement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +222,7 @@ class ProductService:
         movement_type: str,
         reference: str = None,
         notes: str = None
-    ) -> Optional[StockMovement]:
+    ) -> StockMovement | None:
         """change_stock() plus a StockMovement row, for the rare manual
         changes worth a history (purchase, waste, adjustment) — not for till
         sales. Also only flushed, never committed."""
@@ -486,10 +495,6 @@ class ProductService:
         session.refresh(sc)
         logger.info("Shortcut created: %s %r", sc.id, sc.name)
         return sc
-
-    @staticmethod
-    def get_shortcut(session: Session, shortcut_id: int) -> Shortcut | None:
-        return session.query(Shortcut).filter_by(id=shortcut_id).first()
 
     @staticmethod
     def get_shortcut_product_ids(session: Session, shortcut_id: int) -> list[int]:

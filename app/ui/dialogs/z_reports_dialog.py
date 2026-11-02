@@ -7,8 +7,14 @@ it can't pass for a second closing; nothing here changes any data.
 import logging
 
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QDialog, QHBoxLayout, QHeaderView, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout,
+    QAbstractItemView,
+    QDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
 
 from app.constants import DIALOG_BUTTON_HEIGHT, Z_REPORTS_DIALOG_MIN_SIZE

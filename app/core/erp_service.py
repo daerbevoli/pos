@@ -1,7 +1,9 @@
 import logging
 import time
 from typing import Any
+
 import requests
+
 from app.core.sales_service import InvoiceLine
 
 logger = logging.getLogger(__name__)
@@ -251,7 +253,7 @@ class ErpService:
         move_type = invoice_data.get("move_type", "out_invoice")
 
         if not inv_num or not inv_date:
-            raise Exception(f"Missing crucial invoice data")
+            raise Exception("Missing crucial invoice data")
 
         # Get partner and journal id
         partner_id, partner_email = self.get_or_create_partner(receiver)

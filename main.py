@@ -5,14 +5,16 @@ import logging
 import platform
 import sys
 from pathlib import Path
+
 from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
+
 from app.__version__ import __version__
 from app.core.database import DB_PATH, get_session, init_db
 from app.core.settings_service import SettingsService
 from app.ui.main_window import MainWindow
-from app.utils.error_handling import setup_logging, install_excepthook
+from app.utils.error_handling import install_excepthook, setup_logging
 
 logger = logging.getLogger("pos")
 

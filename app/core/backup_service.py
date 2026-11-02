@@ -60,9 +60,8 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy.orm import Session
 
-import app.core.database as database
 from app.__version__ import __version__
-from app.core import backup_key
+from app.core import backup_key, database
 from app.core.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -322,11 +321,6 @@ class BackupService:
             infos.append(BackupInfo(path, created_at, m["kind"], size))
         infos.sort(key=lambda i: (i.created_at, i.path.name), reverse=True)
         return infos
-
-    @staticmethod
-    def latest_backup(directory) -> BackupInfo | None:
-        backups = BackupService.list_backups(directory)
-        return backups[0] if backups else None
 
     @staticmethod
     def daily_backup_due(directory, now: datetime = None) -> bool:

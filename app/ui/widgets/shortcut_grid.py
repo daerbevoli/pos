@@ -5,13 +5,13 @@ slots filled from whichever shortcut is selected, rows 3-4 are the shortcut
 selector buttons. Tapping a filled slot emits product_pressed(product_id) —
 what that means is up to the host screen.
 """
-from PyQt6.QtWidgets import QGridLayout, QWidget
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QGridLayout, QWidget
 
+from app.constants import SPACING_XS
 from app.core.database import get_session
 from app.core.product_service import ProductService
 from app.utils.utils import CategoryButton
-from app.constants import SPACING_XS
 
 
 class ShortcutGrid(QWidget):

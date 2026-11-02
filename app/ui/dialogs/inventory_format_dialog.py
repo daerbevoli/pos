@@ -4,7 +4,15 @@ Picks the output format (PDF or CSV) for the inventory printout, the same way
 ClientListingDialog does for the client listing. Nothing is generated here —
 on OK the dialog exposes file_format for the caller.
 """
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QComboBox
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from app.constants import INVENTORY_FORMAT_DIALOG_WIDTH
 from app.utils.utils import FunctionButton

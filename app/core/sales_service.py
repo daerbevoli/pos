@@ -6,14 +6,22 @@ and sales/invoice lookups. The ticket itself lives in app.core.cart.
 """
 import json
 import logging
-from datetime import date, timedelta
 from dataclasses import dataclass
+from datetime import date, timedelta
+
 from sqlalchemy.orm import Session
 
 from app.constants.countries import BELGIUM
 from app.core.cart import Cart, CartItem, DiscountEntry
-from app.models.models import Sale, SaleItem, Invoice, Client, OpenTicket, NumberSequence
 from app.core.product_service import ProductService
+from app.models.models import (
+    Client,
+    Invoice,
+    NumberSequence,
+    OpenTicket,
+    Sale,
+    SaleItem,
+)
 from app.utils.clock import local_days_range, to_local, utc_now
 
 logger = logging.getLogger(__name__)

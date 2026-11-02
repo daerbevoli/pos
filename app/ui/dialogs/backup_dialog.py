@@ -9,17 +9,34 @@ BackupWorker so the dialog stays responsive while it's written.
 import logging
 import sys
 
-from PyQt6.QtCore import Qt, QProcess
+from PyQt6.QtCore import QProcess, Qt
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QAbstractItemView, QFormLayout, QInputDialog,
+    QAbstractItemView,
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
 
 from app.constants import BACKUP_DIALOG_MIN_SIZE, COLOR_LOG_ERROR, DIALOG_BUTTON_HEIGHT
 from app.core.backup_service import (
-    BACKUP_SETTING_EXTRA_DIR, KIND_MANUAL, MIN_PASSWORD_LENGTH, BackupError,
-    BackupPasswordError, BackupService,
+    BACKUP_SETTING_EXTRA_DIR,
+    KIND_MANUAL,
+    MIN_PASSWORD_LENGTH,
+    BackupError,
+    BackupPasswordError,
+    BackupService,
 )
 from app.core.backup_worker import BackupWorker
 from app.core.database import get_session

@@ -5,15 +5,21 @@ shown in its slots. Search the product catalogue on the left, build the
 shortcut's list on the right. Nothing is written to the DB here — on OK the
 dialog exposes `sc_name` and `product_ids` for the caller to persist.
 """
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QMessageBox
-)
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+)
 
+from app.constants import DIALOG_BUTTON_HEIGHT, SHORTCUT_DIALOG_MIN_SIZE
 from app.core.database import get_session
 from app.core.product_service import ProductService
-from app.constants import DIALOG_BUTTON_HEIGHT, SHORTCUT_DIALOG_MIN_SIZE
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 

@@ -27,6 +27,7 @@ def _usb_backend():
 def _usb_enumerate():
     # Lists attached devices (none on a build server); never opens one.
     import usb.core
+
     from app.core.receipt_service import _get_backend
     list(usb.core.find(find_all=True, backend=_get_backend()))
 
@@ -57,8 +58,8 @@ def _backup_crypto():
 
 
 def _erp_http():
-    import requests  # noqa: F401
     import certifi  # noqa: F401  (CA bundle requests uses for HTTPS)
+    import requests
     if not os.path.exists(requests.certs.where()):
         raise RuntimeError("CA certificate bundle missing")
 

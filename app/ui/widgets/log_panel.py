@@ -4,12 +4,22 @@ Shows everything sent to Python's `logging` since startup, same lines as pos.log
 """
 import logging
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit, QApplication
 from PyQt6.QtGui import QColor, QFontDatabase, QTextCharFormat, QTextCursor
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QPlainTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.constants import (
-    COLOR_LOG_DEBUG, COLOR_LOG_ERROR, COLOR_LOG_WARNING,
-    LOG_PANEL_MAX_LINES, SETTINGS_BUTTON_HEIGHT, SPACING_XS,
+    COLOR_LOG_DEBUG,
+    COLOR_LOG_ERROR,
+    COLOR_LOG_WARNING,
+    LOG_PANEL_MAX_LINES,
+    SETTINGS_BUTTON_HEIGHT,
+    SPACING_XS,
 )
 from app.utils.error_handling import qt_log_handler
 from app.utils.utils import FunctionButton

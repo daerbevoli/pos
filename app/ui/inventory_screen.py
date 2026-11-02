@@ -12,29 +12,30 @@ POS shortcut grid instead; tapping a product there shows it in the panel.
 import csv
 import logging
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QComboBox, QFrame, QCheckBox,
-    QDoubleSpinBox, QAbstractSpinBox, QStackedWidget, QFileDialog, QDialog
-)
-from PyQt6.QtCore import Qt, QEvent, QLocale, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QEvent, QLocale, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices
+from PyQt6.QtWidgets import (
+    QAbstractSpinBox,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from app.core.database import get_session
-from app.core.label_service import LabelPrinterService
-from app.core.inventory_report_service import InventoryReportService
-from app.core.label_sheet_service import build_label_sheet_pdf
-from app.core.product_service import ProductService, STOCK_MIN, STOCK_MAX, clamp_stock
-from app.core.receipt_service import PrinterError
-from app.models.models import Product
-from app.ui.widgets.form_fields import PickerDisplay, FieldRow
-from app.ui.widgets.shortcut_grid import ShortcutGrid
-# from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
-from app.ui.dialogs.file_dialog import FileDialog
-from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
-from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
-from app.utils.utils import TapToDismissOverlay, FunctionButton, SelectionKeepingTable
 from app.constants import (
     COLOR_ROW_INACTIVE_BG,
     COLOR_ROW_INACTIVE_TEXT,
@@ -44,6 +45,21 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.core.database import get_session
+from app.core.inventory_report_service import InventoryReportService
+from app.core.label_service import LabelPrinterService
+from app.core.label_sheet_service import build_label_sheet_pdf
+from app.core.product_service import STOCK_MAX, STOCK_MIN, ProductService, clamp_stock
+from app.core.receipt_service import PrinterError
+from app.models.models import Product
+
+# from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
+from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
+from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
+from app.ui.widgets.form_fields import FieldRow, PickerDisplay
+from app.ui.widgets.shortcut_grid import ShortcutGrid
+from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
 
 # Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
 logger = logging.getLogger(__name__)
@@ -301,9 +317,7 @@ class ArticleDetailPanel(QFrame):
             # Backspace) replaces it outright, instead of editing in place.
             # Deferred one tick — a mouse click's own cursor placement lands
             # right after FocusIn and would otherwise collapse the selection.
-            if isinstance(obj, QLineEdit) and self._mode in ("new", "edit"):
-                QTimer.singleShot(0, obj.selectAll)
-            elif isinstance(obj, QDoubleSpinBox) and self._mode in ("new", "edit"):
+            if isinstance(obj, QLineEdit) and self._mode in ("new", "edit") or isinstance(obj, QDoubleSpinBox) and self._mode in ("new", "edit"):
                 QTimer.singleShot(0, obj.selectAll)
 
         elif event.type() == QEvent.Type.KeyPress:
@@ -1050,13 +1064,6 @@ class InventoryScreen(QWidget):
                 self.detail_panel.show_product(product)
             else:
                 self.detail_panel._clear()
-
-    def _add_product(self):
-        self.detail_panel._start_new()
-
-    def _edit_product(self, product_id: int):
-        self.detail_panel.current_product_id = product_id
-        self.detail_panel._start_edit()
 
     # Commented out for now along with ProductService.adjust_stock (never wired to a button).
     # def _adjust_stock(self, product_id: int):

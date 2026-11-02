@@ -6,6 +6,7 @@ import logging
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
 from app.models.models import Client
 
 logger = logging.getLogger(__name__)

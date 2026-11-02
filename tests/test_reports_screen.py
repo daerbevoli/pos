@@ -3,7 +3,7 @@ import pytest
 from PyQt6.QtCore import QDate
 
 from app.ui.reports_screen import ReportsScreen
-from app.core.report_service import _payment_breakdown, _amount_for_method, _discounts_and_mistakes, _sum_payment_breakdowns
+from app.core.report_service import _payment_breakdown, _discounts_and_mistakes, _sum_payment_breakdowns
 from app.core.product_service import ProductService
 from app.core.cart import Cart, CartItem, DiscountEntry
 from app.core.sales_service import SalesService
@@ -66,13 +66,16 @@ def test_payment_breakdown_falls_back_on_bad_json():
     assert _payment_breakdown(sale) == [{"method": "cash", "amount": 10.0}]
 
 
-def test_amount_for_method_sums_matching_legs():
+def _by_method(sale):
+    return {leg["method"]: leg["amount"] for leg in _sum_payment_breakdowns([sale])}
+
+
+def test_payment_totals_sum_matching_legs():
     import json
     sale = _FakeSale(payment_breakdown=json.dumps([
         {"method": "cash", "amount": 5.0}, {"method": "card", "amount": 3.0}, {"method": "cash", "amount": 2.0},
     ]))
-    assert _amount_for_method(sale, "cash") == 7.0
-    assert _amount_for_method(sale, "card") == 3.0
+    assert _by_method(sale) == {"cash": 7.0, "card": 3.0}
 
 
 def test_mixed_sale_change_comes_out_of_cash():
@@ -81,9 +84,7 @@ def test_mixed_sale_change_comes_out_of_cash():
     sale = _FakeSale(payment_breakdown=json.dumps([
         {"method": "card", "amount": 15.0}, {"method": "cash", "amount": 10.0},
     ]), payment_method="mixed", final_amount=20.0, change_given=5.0)
-    assert {leg["method"]: leg["amount"] for leg in _sum_payment_breakdowns([sale])} == {"card": 15.0, "cash": 5.0}
-    assert _amount_for_method(sale, "cash") == 5.0
-    assert _amount_for_method(sale, "card") == 15.0
+    assert _by_method(sale) == {"card": 15.0, "cash": 5.0}
 
 
 class _SnapshotSale:
@@ -449,6 +450,29 @@ def test_invoice_orphaned_by_an_earlier_z_report_does_not_block(patched_db):
     with get_session() as session:
         assert XZReportService.unsent_invoice_numbers(session) == []
 
+
+
+def test_second_z_report_covers_only_the_sales_since_the_first(patched_db):
+    """The everyday case: the next Z report starts where the last one ended
+    and counts only the sales rung up since."""
+    from app.core.report_service import XZReportService
+    with get_session() as session:
+        product = _make_product(session, price=10.0)
+    _finalize_sale(product)
+    _finalize_sale(product)
+    with get_session() as session:
+        first = XZReportService.close_z_report(session)
+        first_number, first_created = first.report_number, first.created_at
+
+    _finalize_sale(product, quantity=3)
+    with get_session() as session:
+        second = XZReportService.close_z_report(session)
+
+        assert (first_number, second.report_number) == ("Z-0001", "Z-0002")
+        assert second.period_start == first_created
+        assert second.period_end >= second.period_start
+        assert second.transaction_count == 1
+        assert second.final_amount == 30.0
 
 
 def test_close_z_report_stores_discounts_and_mistakes(patched_db):

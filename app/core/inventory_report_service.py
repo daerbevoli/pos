@@ -22,8 +22,8 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
 
-from app.core.product_service import ProductService
 from app.core.cart import calc_tax
+from app.core.product_service import ProductService
 
 logger = logging.getLogger(__name__)
 

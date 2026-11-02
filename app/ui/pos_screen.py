@@ -8,31 +8,34 @@ driven externally by MainWindow via set_active_tab().
 import datetime
 import json
 import logging
+from datetime import date
 from functools import partial
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QHeaderView, QMessageBox, QSizePolicy, QStackedWidget
+from PyQt6.QtCore import (
+    QItemSelection,
+    QItemSelectionModel,
+    QRegularExpression,
+    Qt,
+    QTimer,
+    pyqtSignal,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRegularExpression, QItemSelectionModel, QItemSelection
-from PyQt6.QtGui import QFont, QBrush, QColor, QRegularExpressionValidator
+from PyQt6.QtGui import QBrush, QColor, QFont, QRegularExpressionValidator
+from PyQt6.QtWidgets import (
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from app.core.erp_service import ErpService
-from app.core.database import get_session
-from app.core.product_service import ProductService
-from app.core.client_service import ClientService
-from app.core.cart import Cart, CartItem, SubtotalMarker, DiscountEntry, PaymentEntry
-from app.core.sales_service import SalesService, generate_invoice_data, save_open_ticket, \
-    clear_open_ticket, load_open_tickets
-from app.constants.countries import BELGIUM
-from app.models.models import Sale
-from app.core.settings_service import SettingsService, get_erp_data
-from app.core.receipt_service import PrinterError, ReceiptService
-from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
-from app.ui.widgets.shortcut_grid import ShortcutGrid
-from app.core.erp_worker import InvoiceSendWorker
-from app.utils.clock import format_local
 from app.constants import (
     CART_INFO_BAR_HEIGHT,
     CART_ROW_HEIGHT,
@@ -49,9 +52,26 @@ from app.constants import (
     SPACING_SM,
     SPACING_XS,
 )
-
-
-from datetime import date
+from app.constants.countries import BELGIUM
+from app.core.cart import Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker
+from app.core.client_service import ClientService
+from app.core.database import get_session
+from app.core.erp_service import ErpService
+from app.core.erp_worker import InvoiceSendWorker
+from app.core.product_service import ProductService
+from app.core.receipt_service import PrinterError, ReceiptService
+from app.core.sales_service import (
+    SalesService,
+    clear_open_ticket,
+    generate_invoice_data,
+    load_open_tickets,
+    save_open_ticket,
+)
+from app.core.settings_service import SettingsService, get_erp_data
+from app.models.models import Sale
+from app.ui.widgets.shortcut_grid import ShortcutGrid
+from app.utils.clock import format_local
+from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
 
 logger = logging.getLogger(__name__)
 
@@ -1147,7 +1167,6 @@ class POSScreen(QWidget):
 
         prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
 
-        total     = self.cart.total
         remaining = self.cart.remaining_due
         typed     = self._read_amount_input()
         tendered  = round(max(remaining, 0.0) if typed is None else typed, 2)
@@ -1538,13 +1557,6 @@ class POSScreen(QWidget):
         if row < 0 or not row_map or row >= len(row_map):
             return None
         return row_map[row]
-
-    def _get_selected_product_id(self):
-        idx = self._get_selected_entry_index()
-        if idx is None:
-            return None
-        entry = self.cart.entries[idx]
-        return entry.product_id if isinstance(entry, CartItem) else None
 
     def _increase_product(self):
         if self._guard_payment_in_progress():

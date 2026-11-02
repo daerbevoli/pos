@@ -7,27 +7,48 @@ Reports Screen
 import json
 from datetime import date, timedelta
 
+from PyQt6.QtCore import QDate, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QDateEdit, QGroupBox, QGridLayout, QSizePolicy, QButtonGroup, QMessageBox, QComboBox,
+    QButtonGroup,
+    QComboBox,
+    QDateEdit,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QDate, pyqtSignal
 
-from app.core.database import get_session
-from app.core.sales_service import SalesService
-from app.core.receipt_service import ReceiptService, PrinterError
-from app.core.report_service import (
-    XZReportService, invoice_category_breakdown, invoice_payment_breakdown, invoice_vat_breakdown, till_sales,
+from app.constants import (
+    REPORT_ROW_HEIGHT,
+    REPORTS_BUTTON_HEIGHT,
+    SPACING_LG,
+    SPACING_MD,
+    SPACING_SM,
 )
+from app.core.database import get_session
+from app.core.receipt_service import PrinterError, ReceiptService
+from app.core.report_service import (
+    XZReportService,
+    invoice_category_breakdown,
+    invoice_payment_breakdown,
+    invoice_vat_breakdown,
+    till_sales,
+)
+from app.core.sales_service import SalesService
 from app.models.models import Invoice, Sale
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
 from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 from app.utils.clock import format_local
 from app.utils.utils import FunctionButton, TapToDismissOverlay
-from app.constants import REPORTS_BUTTON_HEIGHT, REPORT_ROW_HEIGHT, SPACING_SM, SPACING_MD, SPACING_LG
-
 
 # Range dropdown entries, in order (the index is the combo box index).
 RANGE_TODAY, RANGE_THIS_WEEK, RANGE_THIS_MONTH, RANGE_LAST_MONTH, RANGE_MANUAL = range(5)
@@ -278,7 +299,6 @@ class ReportsScreen(QWidget):
 
     def _open_z_reports(self):
         ZReportsDialog(parent=self).exec()
-        pass
 
     def showEvent(self, event):
         super().showEvent(event)

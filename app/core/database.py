@@ -5,11 +5,13 @@ Handles SQLite connection, table creation, and provides session access.
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import NamedTuple
+
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
-from app.models.models import Base, Settings, Category
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.models.models import Base, Category, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +162,7 @@ def _convert_timestamps_to_utc(conn):
             f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL").fetchall()
         for rowid, value in rows:
             # A naive datetime's astimezone() reads it as local time.
-            utc = datetime.fromisoformat(value).astimezone(timezone.utc)
+            utc = datetime.fromisoformat(value).astimezone(UTC)
             conn.exec_driver_sql(
                 f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
                 (utc.strftime(_SQLITE_DATETIME_FORMAT), rowid))

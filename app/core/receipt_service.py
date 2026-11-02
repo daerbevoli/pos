@@ -68,8 +68,8 @@ def _get_backend():
     if _backend is not None:
         return _backend
 
-    import usb.core
     import usb.backend.libusb1
+    import usb.core
 
     if sys.platform == "win32":
         library = _bundled_libusb_dll()
@@ -101,8 +101,8 @@ def _parse_id(raw: str, label: str) -> int:
 def _open(vendor_id: str, product_id: str):
     """Open a connection to the configured USB printer. Raises PrinterError on failure."""
     _get_backend()
-    import usb.core
     import usb.backend.libusb1
+    import usb.core
     from escpos.exceptions import Error as EscposError
     from escpos.printer import Usb
 

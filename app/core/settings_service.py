@@ -5,7 +5,8 @@ Read and write application settings stored in the DB.
 import logging
 from typing import Any
 
-from sqlalchemy.orm import Session, InstrumentedAttribute
+from sqlalchemy.orm import InstrumentedAttribute, Session
+
 from app.models.models import Settings
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,6 @@ class SettingsService:
     def get_all(session: Session) -> dict:
         rows = session.query(Settings).all()
         return {r.key: r.value for r in rows}
-
-def get_store_data(session: Session):
-    settings = SettingsService.get_all(session)
-    return {
-        "name": settings.get("store_name"),
-        "address": settings.get("store_address"),
-        "vat": settings.get("store_vat"),
-        "phone": settings.get("store_phone"),
-        "email": settings.get("store_email")
-    }
 
 def get_erp_data(session: Session):
     settings = SettingsService.get_all(session)

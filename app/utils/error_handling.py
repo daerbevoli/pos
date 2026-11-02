@@ -2,9 +2,9 @@
 Global error handling: logs unhandled exceptions to a rotating log file
 and shows a dialog instead of letting the app crash silently.
 """
-import sys
 import logging
 import logging.handlers
+import sys
 from collections import deque
 from pathlib import Path
 

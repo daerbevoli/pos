@@ -1,5 +1,10 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLineEdit, QLabel, QHBoxLayout, QMessageBox, QPushButton, QGridLayout
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
 from app.constants import DIALOG_BUTTON_HEIGHT

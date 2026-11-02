@@ -2,12 +2,24 @@
 Database Models
 All tables are defined here using SQLAlchemy ORM.
 """
-from datetime import date, timezone
+from datetime import UTC, date
+
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean,
-    DateTime, Date, ForeignKey, Text, Enum, Index, text, UniqueConstraint
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
 )
-from sqlalchemy.orm import relationship, backref, DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, backref, relationship
 from sqlalchemy.types import TypeDecorator
 
 from app.constants.countries import BELGIUM
@@ -28,10 +40,10 @@ class UTCDateTime(TypeDecorator):
             return None
         if value.tzinfo is None:
             raise ValueError(f"Naive datetime {value!r}: store a timezone-aware one (utc_now())")
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.astimezone(UTC).replace(tzinfo=None)
 
     def process_result_value(self, value, dialect):
-        return None if value is None else value.replace(tzinfo=timezone.utc)
+        return None if value is None else value.replace(tzinfo=UTC)
 
 
 class Base(DeclarativeBase):

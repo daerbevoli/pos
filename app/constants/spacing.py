@@ -11,10 +11,10 @@ MARGIN_NONE = (0, 0, 0, 0)  # tap-to-dismiss overlay (full-screen, no margins)
 MARGIN_SETTINGS = (10, 10, 10, 10)  # settings screen edge; kept tight so the General tab fits the 768px window
 
 __all__ = [
-    "SPACING_XS",
-    "SPACING_SM",
-    "SPACING_MD",
-    "SPACING_LG",
     "MARGIN_NONE",
     "MARGIN_SETTINGS",
+    "SPACING_LG",
+    "SPACING_MD",
+    "SPACING_SM",
+    "SPACING_XS",
 ]

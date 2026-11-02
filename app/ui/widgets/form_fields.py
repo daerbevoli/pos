@@ -1,8 +1,8 @@
 """
 Shared form-field widgets used by inline/dialog product & article editing.
 """
-from PyQt6.QtWidgets import QLabel, QFrame, QHBoxLayout
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
 from app.constants import FORM_FIELD_HEIGHT, FORM_LABEL_WIDTH, SPACING_XS
 
