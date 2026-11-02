@@ -140,6 +140,31 @@ pos/
 | Label printer (USB, Zebra-compatible) | Configure Vendor/Product ID in Settings. Prints ZPL labels (name, EAN-13 barcode, price) directly over USB via `pyusb` |
 | Cash drawer | Triggered via the receipt printer port |
 
+### Printer setup on Windows (Zadig / WinUSB)
+
+Vendor/Product IDs belong to the printer model, not the PC, so the same printer has the same IDs everywhere. What has to be redone on **every new Windows PC** is the driver: Windows binds its own `usbprint` driver, which libusb/pyusb can't talk to.
+
+1. **Swap the driver to WinUSB** (once per printer, per PC)
+   - Download and run [Zadig](https://zadig.akeo.ie).
+   - **Options → List All Devices**, then pick the receipt printer in the dropdown. If it's a composite device, pick **Interface 0**.
+   - Set the target driver to **WinUSB** and click **Replace Driver**.
+   - Repeat for the label printer, then unplug and replug both.
+   - Windows may tie the driver to the USB port, so if a printer moves to another port, run Zadig again.
+2. **Find the IDs** (if they aren't known yet)
+   - Device Manager → printer → Properties → Details → *Hardware Ids*, e.g. `USB\VID_04B8&PID_0202`, or in PowerShell:
+     ```powershell
+     Get-PnpDevice -PresentOnly | Where-Object InstanceId -like 'USB\VID_*' | Select FriendlyName, InstanceId
+     ```
+3. **Enter them in Settings** as hex with `0x`: `VID_04B8` → `0x04b8`, `PID_0202` → `0x0202`. Save, then use the test print buttons.
+
+**Troubleshooting** (details in `logs/` next to the DB):
+- *"not found"*: wrong IDs, or the printer isn't connected.
+- *"Could not connect…"* / access errors: the Zadig step is missing.
+- Printer settings live in the DB (`%APPDATA%\SuperPOS`), so a fresh install starts with empty fields. Restoring a backup brings the IDs back but not the WinUSB driver.
+- The receipt printer's USB endpoints are hardcoded (`in_ep=0x81, out_ep=0x01` in `app/core/receipt_service.py`). A different receipt printer model may need other values. The label printer detects its endpoint automatically.
+
+On Linux, no driver swap is needed (it uses the system `libusb-1.0`), but the user needs permission to access the USB device (e.g. a udev rule).
+
 ---
 
 ## Roadmap (future versions)
