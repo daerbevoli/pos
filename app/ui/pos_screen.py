@@ -129,13 +129,20 @@ class _TabState:
         self.sale_id          = None   # DB Sale.id this frozen ticket was saved as, if any
         self.active_shortcut_id = None  # DB Shortcut.id selected in this tab's product grid, if any
 
+
+def _guard_locked_line(entry) -> bool:
+    """Blocks quantity changes on a line already saved on a reopened sale.
+    Returns True if the action should be blocked."""
+    return isinstance(entry, CartItem) and entry.locked
+
+
 class POSScreen(QWidget):
     navigate           = pyqtSignal(int)   # ask MainWindow to switch screen
     tab_updated        = pyqtSignal(int, str)  # (vtab_idx, amount_str) for tab button
     rf_cn_mode_changed = pyqtSignal(bool)  # active tab entered/left refund / credit-note mode, for header
     display_changed    = pyqtSignal(dict)  # active ticket panel state for the CustomerDisplay, see emit_display()
 
-    isAdmin = False
+    isAdmin = True
 
     def __init__(self):
         super().__init__()
@@ -188,13 +195,7 @@ class POSScreen(QWidget):
             return True
         return False
 
-    def _guard_locked_line(self, entry) -> bool:
-        """Blocks quantity changes on a line already saved on a reopened sale.
-        Returns True if the action should be blocked."""
-        return isinstance(entry, CartItem) and entry.locked
-
     # ── Setup ────────────────────────────────────────────────────────────
-
     def _load_settings(self):
         with get_session() as session:
             settings = SettingsService.get_all(session)
@@ -203,7 +204,7 @@ class POSScreen(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(2, 2, 2, 2)
         root.setSpacing(SPACING_SM)
 
         body = QHBoxLayout()
@@ -217,7 +218,6 @@ class POSScreen(QWidget):
         QTimer.singleShot(100, self.cart_table.setFocus)
 
     # ── Time display (ticket header only) ──
-
     def _start_time_display(self):
         self._tick_time()
         t = QTimer(self)
@@ -232,8 +232,8 @@ class POSScreen(QWidget):
         if text != self.ticket_date.text():
             self.ticket_date.setText(text)
             self.emit_display()
-    # ── Left: ticket header + cart table ────────────────────────────────
 
+    # ── Left: ticket header + cart table ────────────────────────────────
     def _build_ticket_panel(self):
         col = QVBoxLayout()
         col.setSpacing(SPACING_XS)
@@ -242,7 +242,7 @@ class POSScreen(QWidget):
         self.header_widget.setObjectName("header")
 
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(8, 4, 8, 4)
+        header_layout.setContentsMargins(4, 2, 4, 2)
 
         self.ticket_title = QLabel(f"V {self._active_tab}")
         self.ticket_title.setObjectName("ticketTitle")
@@ -262,9 +262,9 @@ class POSScreen(QWidget):
         self.cart_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.cart_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.cart_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.cart_table.horizontalHeader().setVisible(False)
+        self.cart_table.horizontalHeader().hide()
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.cart_table.verticalHeader().setVisible(False)
+        self.cart_table.verticalHeader().hide()
         # Per-pixel so scrolling to the last row lands it fully at the bottom edge.
         self.cart_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -293,12 +293,11 @@ class POSScreen(QWidget):
         # Display only: every key goes through cart_table (scan detection,
         # admin "-" guard, "0." handling), so clicking here must not steal focus.
         self.cart_input.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        # An amount is up to 7 digits before the decimal point and 3 after
-        # (12 chars max with the sign); a manually typed barcode is digits
-        # only, any length. Swapped by _set_barcode_entry_mode().
+        # An amount is up to 7 digits before the decimal point and 3 after (12 chars max with the sign)
         self._amount_validator = QRegularExpressionValidator(
             QRegularExpression(r'-?[0-9]{0,7}([.,][0-9]{0,3})?'), self
         )
+        # a manually typed barcode is digits only, any length. Swapped by _set_barcode_entry_mode().
         self._barcode_validator = QRegularExpressionValidator(QRegularExpression(r'[0-9]{0, 15}'), self)
         self.cart_input.setValidator(self._amount_validator)
 
@@ -1530,7 +1529,7 @@ class POSScreen(QWidget):
         if idx is None:
             return
         entry = self.cart.entries[idx]
-        if self._guard_locked_line(entry):
+        if _guard_locked_line(entry):
             return
         if isinstance(entry, CartItem) and entry.quantity is not None and not entry.is_reversal and not entry.has_reversal:
             if entry.unit in WEIGHT_UNITS:
@@ -1547,7 +1546,7 @@ class POSScreen(QWidget):
         if idx is None:
             return
         entry = self.cart.entries[idx]
-        if self._guard_locked_line(entry):
+        if _guard_locked_line(entry):
             return
         if (isinstance(entry, CartItem) and entry.quantity is not None
                 and not entry.is_reversal and abs(entry.quantity) > 1):

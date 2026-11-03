@@ -40,8 +40,8 @@ from app.constants import (
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.core.client_listing_service import ClientListingService
 from app.core.client_service import ClientService
+from app.core.csv_import import read_csv_rows, ImportFileError
 from app.core.database import get_session
-from app.ui.csv_import import run_csv_import
 from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.widgets.form_fields import FieldRow
@@ -555,7 +555,16 @@ class ClientDetailPanel(QFrame):
     def _on_import(self):
         file_dialog = FileDialog(parent=self)
         if file_dialog.exec() and file_dialog.path:
-            run_csv_import(self, file_dialog.path, ClientService.import_rows, "Client")
+            try:
+                rows = read_csv_rows(file_dialog.path)
+            except ImportFileError as e:
+                self._show_overlay(str(e), kind="error")
+                return
+            with get_session() as session:
+                added, skipped = ClientService.import_rows(session, rows)
+            logger.info("%s import from %s: %d added, %d skipped", "Client", file_dialog.path, added, skipped)
+            self.parent_screen.refresh()
+            self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
 
 
     def _show_overlay(self, message: str, kind: str = "info"):

@@ -45,6 +45,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.core.csv_import import read_csv_rows, ImportFileError
 from app.core.database import get_session
 from app.core.inventory_report_service import InventoryReportService
 from app.core.label_service import LabelPrinterService
@@ -53,7 +54,6 @@ from app.core.product_service import STOCK_MAX, STOCK_MIN, ProductService
 from app.core.receipt_service import PrinterError
 
 # from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
-from app.ui.csv_import import run_csv_import
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
@@ -729,7 +729,17 @@ class ArticleDetailPanel(QFrame):
     def _on_import(self):
         file_dialog = FileDialog(parent=self)
         if file_dialog.exec() and file_dialog.path:
-            run_csv_import(self, file_dialog.path, ProductService.import_rows, "Product")
+            try:
+                rows = read_csv_rows(file_dialog.path)
+            except ImportFileError as e:
+                self._show_overlay(str(e), kind="error")
+                return
+            with get_session() as session:
+                added, skipped = ProductService.import_rows(session, rows)
+            logger.info("%s import from %s: %d added, %d skipped", "Product", file_dialog.path, added, skipped)
+            self.parent_screen.refresh()
+            self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
+
 
     def _show_overlay(self, message: str, kind: str = "info"):
         self.overlay.show_message(message, kind=kind)
