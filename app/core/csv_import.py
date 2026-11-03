@@ -38,13 +38,16 @@ def read_csv_rows(path: str) -> list[dict[str, str]]:
 
 
 def import_rows(session: Session, rows: list[dict], build_row: Callable[[dict], object | None],
-                what: str) -> tuple[int, int]:
+                what: str, progress: Callable[[float], None] | None = None) -> tuple[int, int]:
     """Adds build_row(row) for every row and commits; returns (added,
     skipped). build_row returns None to skip a row. Each row gets its own
     savepoint: a row that fails undoes only itself, not the rows already
-    imported."""
+    imported. progress(0..1), if given, is called about once per percent."""
     added = skipped = 0
-    for row in rows:
+    step = max(1, len(rows) // 100)
+    for i, row in enumerate(rows, start=1):
+        if progress is not None and i % step == 0:
+            progress(i / len(rows))
         try:
             record = build_row(row)
             if record is None:

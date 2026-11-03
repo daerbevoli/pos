@@ -40,17 +40,19 @@ from app.constants import (
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.core.client_listing_service import ClientListingService
 from app.core.client_service import ClientService
-from app.core.csv_import import read_csv_rows, ImportFileError
+from app.core.csv_import import ImportFileError, read_csv_rows
 from app.core.database import get_session
 from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
 from app.ui.widgets.form_fields import FieldRow
 from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
 from app.utils.validators import is_valid_vat
 
-# Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
 logger = logging.getLogger(__name__)
 
+# Export column order; the import reads columns by header name, so an
+# exported CSV re-imports cleanly.
 CLIENT_CSV_FIELDS = ["name", "vat", "street", "zip", "city", "country", "phone", "email", "active"]
 
 
@@ -560,11 +562,13 @@ class ClientDetailPanel(QFrame):
             except ImportFileError as e:
                 self._show_overlay(str(e), kind="error")
                 return
-            with get_session() as session:
-                added, skipped = ClientService.import_rows(session, rows)
-            logger.info("%s import from %s: %d added, %d skipped", "Client", file_dialog.path, added, skipped)
+            dialog = ImportProgressDialog("clients", ClientService.import_rows, rows, parent=self)
+            dialog.exec()
+            if dialog.added is None:  # failed: the popup said why, nothing changed
+                return
+            logger.info("Client import from %s: %d added, %d skipped",
+                        file_dialog.path, dialog.added, dialog.skipped)
             self.parent_screen.refresh()
-            self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
 
 
     def _show_overlay(self, message: str, kind: str = "info"):

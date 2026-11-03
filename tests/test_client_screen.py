@@ -17,7 +17,7 @@ from app.core.database import get_session
 
 
 @pytest.fixture
-def screen(qtbot, patched_db):
+def screen(qtbot, patched_db, import_dialog_inline):
     s = ClientScreen()
     qtbot.addWidget(s)
     return s
@@ -515,7 +515,7 @@ def test_import_csv_clashing_row_keeps_rows_imported_before_it(screen, monkeypat
     with get_session() as session:
         vats = sorted(c.vatNumber for c in ClientService.get_all(session))
     assert vats == ["BE0234567873", "BE0567890161"]
-    assert "2 added, 1 skipped" in screen.detail_panel.overlay.message_label.text()
+    assert screen.detail_panel.overlay.isHidden()  # the import popup showed the outcome
 
 
 # ── Buttons stay pressable; handlers check the conditions ───────────────

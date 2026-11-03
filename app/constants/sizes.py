@@ -55,8 +55,8 @@ LABEL_SHEET_DIALOG_WIDTH = 480         # label sheet (print barcodes) dialog —
 LABEL_SHEET_FIELD_HEIGHT = 24          # label sheet dialog name/manufacturer/lot/expiry/barcode inputs — min height
 BACKUP_DIALOG_MIN_SIZE = (760, 500)    # backup dialog — min (width, height)
 Z_REPORTS_DIALOG_MIN_SIZE = (700, 460) # Z reports (reprint) dialog — min (width, height)
-Z_PROGRESS_DIALOG_WIDTH = 480          # Z report progress popup (backup → close → backup → print) — min width
-Z_PROGRESS_BAR_HEIGHT = 32             # its progress bar
+PROGRESS_DIALOG_WIDTH = 480            # progress popups (Z report, CSV import) — min width
+PROGRESS_BAR_HEIGHT = 32               # their progress bar
 
 # ── Tap-to-dismiss overlay (app/utils/utils.py) ──────────────────────────
 OVERLAY_CARD_MIN_WIDTH = 360           # message card shown over a screen (e.g. "Enter an amount first") — min width
@@ -88,6 +88,8 @@ __all__ = [
                                        "PAYMENT_CONFIRM_BUTTON_HEIGHT",
                                        "PAYMENT_DIALOG_WIDTH",
                                        "PAYMENT_METHOD_BUTTON_HEIGHT",
+                                       "PROGRESS_BAR_HEIGHT",
+                                       "PROGRESS_DIALOG_WIDTH",
                                        "PROMO_DIALOG_MIN_SIZE",
                                        "REPORTS_BUTTON_HEIGHT",
                                        "REPORT_ROW_HEIGHT",
@@ -97,7 +99,5 @@ __all__ = [
                                        "TAB_BAR_MAX_HEIGHT",
                                        "TAB_BAR_MIN_HEIGHT",
                                        "VTAB_BUTTON_HEIGHT",
-                                       "Z_PROGRESS_BAR_HEIGHT",
-                                       "Z_PROGRESS_DIALOG_WIDTH",
                                        "Z_REPORTS_DIALOG_MIN_SIZE",
 ]

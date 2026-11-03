@@ -3,11 +3,13 @@ Product & Inventory Service
 All business logic for managing products and stock.
 """
 import logging
+import math
+from collections.abc import Callable
 
 from sqlalchemy import func
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
-from app.core.csv_import import import_rows
+from app.core import csv_import
 from app.models.models import (
     Category,
     Product,
@@ -36,7 +38,7 @@ def _number(text: str | None, default: float) -> float:
         value = float(text or default)
     except ValueError:
         return default
-    return value if value == value and abs(value) != float("inf") else default
+    return value if math.isfinite(value) else default
 
 
 class ProductService:
@@ -278,17 +280,16 @@ class ProductService:
     #         .all()
     #     )
 
-    # ── Categories ────────────────────────────────────────────────────────────
-
     # ── CSV import ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def import_rows(session: Session, rows: list[dict]) -> tuple[int, int]:
+    def import_rows(session: Session, rows: list[dict],
+                    progress: Callable[[float], None] | None = None) -> tuple[int, int]:
         """Adds the articles of a CSV import (see read_csv_rows()); returns
-        (added, skipped)."""
+        (added, skipped). progress: see csv_import.import_rows()."""
         category_ids = {c.name: c.id for c in ProductService.get_all_categories(session)}
-        return import_rows(session, rows,
-                           lambda row: ProductService._from_import_row(session, row, category_ids), "Product")
+        return csv_import.import_rows(session, rows,
+                                      lambda row: ProductService._from_import_row(session, row, category_ids), "Product", progress)
 
     @staticmethod
     def _from_import_row(session: Session, row: dict, category_ids: dict[str, int]) -> Product | None:
@@ -299,7 +300,7 @@ class ProductService:
         barcode = (row.get("barcode") or "").strip() or None
         if not name:
             return None
-        if barcode and session.query(Product).filter_by(barcode=barcode).first() is not None:
+        if barcode and ProductService.get_by_barcode(session, barcode, include_inactive=True) is not None:
             return None
         price = _number(row.get("price"), 0.0)
         is_open_price = (row.get("is_open_price") or "").strip().lower() in ("1", "true", "yes")
@@ -317,6 +318,8 @@ class ProductService:
             category_id=category_ids.get((row.get("category") or "").strip()),
             is_active=True,
         )
+
+    # ── Categories ────────────────────────────────────────────────────────────
 
     @staticmethod
     def get_all_categories(session: Session) -> list[Category]:

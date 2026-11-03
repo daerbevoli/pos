@@ -16,7 +16,7 @@ from app.models.models import Product
 
 
 @pytest.fixture
-def screen(qtbot, patched_db):
+def screen(qtbot, patched_db, import_dialog_inline):
     s = InventoryScreen()
     qtbot.addWidget(s)
     return s

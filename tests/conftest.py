@@ -102,3 +102,16 @@ def brussels_tz():
         else:
             os.environ["TZ"] = old
         time.tzset()
+
+
+@pytest.fixture
+def import_dialog_inline(qtbot, monkeypatch):
+    """ImportProgressDialog.exec() runs the import and returns once it's
+    done, instead of blocking the test in the dialog's modal loop."""
+    from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
+
+    def exec_inline(self):
+        with qtbot.waitSignal(self.run_finished, timeout=10000):
+            self.start()
+        return 1
+    monkeypatch.setattr(ImportProgressDialog, "exec", exec_inline)

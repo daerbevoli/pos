@@ -17,14 +17,14 @@ if the backup before fails.
 """
 import logging
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QDialog, QLabel, QMessageBox, QProgressBar, QVBoxLayout
 
 from app.constants import (
     COLOR_LOG_ERROR,
     DIALOG_BUTTON_HEIGHT,
-    Z_PROGRESS_BAR_HEIGHT,
-    Z_PROGRESS_DIALOG_WIDTH,
+    PROGRESS_BAR_HEIGHT,
+    PROGRESS_DIALOG_WIDTH,
 )
 from app.core.admin import check_admin_code
 from app.core.backup_service import KIND_POST_Z, KIND_PRE_Z, BackupService
@@ -33,6 +33,7 @@ from app.core.receipt_service import ReceiptService
 from app.core.report_service import XZReportService
 from app.models.models import ZReport
 from app.ui.dialogs.numpad_dialog import NumpadDialog
+from app.ui.dialogs.step_worker import StepWorker
 from app.utils.utils import FunctionButton
 
 logger = logging.getLogger(__name__)
@@ -42,27 +43,6 @@ STEP_PRE_BACKUP = ("Backing up today's sales…", 0, 40)
 STEP_CLOSE = ("Closing the Z report…", 40, 50)
 STEP_POST_BACKUP = ("Backing up the Z report…", 50, 90)
 STEP_PRINT = ("Printing the Z report…", 90, 100)
-
-
-class _StepWorker(QThread):
-    """Runs `fn(progress)` off the UI thread; `progress(0..1)` and the
-    outcome come back as signals, queued onto the UI thread."""
-
-    progress = pyqtSignal(float)
-    done = pyqtSignal(object)    # fn's return value
-    failed = pyqtSignal(object)  # the exception it raised
-
-    def __init__(self, fn, parent=None):
-        super().__init__(parent)
-        self._fn = fn
-
-    def run(self):
-        try:
-            result = self._fn(self.progress.emit)
-        except Exception as e:  # handed to the dialog, which decides
-            self.failed.emit(e)
-        else:
-            self.done.emit(result)
 
 
 def _close_z_report(progress) -> tuple[int, str]:
@@ -86,7 +66,7 @@ class ZReportProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Z Report")
         self.setModal(True)
-        self.setMinimumWidth(Z_PROGRESS_DIALOG_WIDTH)
+        self.setMinimumWidth(PROGRESS_DIALOG_WIDTH)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
 
         self.z_id = None
@@ -103,7 +83,7 @@ class ZReportProgressDialog(QDialog):
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
-        self.bar.setFixedHeight(Z_PROGRESS_BAR_HEIGHT)
+        self.bar.setFixedHeight(PROGRESS_BAR_HEIGHT)
         root.addWidget(self.bar)
         self.details = QLabel()
         self.details.setWordWrap(True)
@@ -139,7 +119,7 @@ class ZReportProgressDialog(QDialog):
         self._step = step
         self.step_label.setText(label)
         self.bar.setValue(start)
-        self._worker = _StepWorker(fn, self)
+        self._worker = StepWorker(fn, self)
         self._worker.progress.connect(lambda f: self.bar.setValue(round(start + f * (end - start))))
         self._worker.done.connect(on_done)
         self._worker.failed.connect(on_failed)

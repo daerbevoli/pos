@@ -106,7 +106,7 @@ def _item_cells(item: CartItem) -> list[str]:
     if item.unit in WEIGHT_UNITS:
         # A weighed line counts as one article (-1 on a refund); its weight
         # goes next to the name.
-        quantity = "1" if pending or item.quantity >= 0 else "-1"
+        quantity = "1" if pending else f"{item.article_count:g}"
         weight = "?" if pending else f"{abs(item.quantity):g}{item.unit}"
         return [quantity, f"{item.product_name}  ·  {weight}", f"{item.unit_price:.2f}/{item.unit}", total]
     if item.is_open_price:
@@ -918,11 +918,12 @@ class POSScreen(QWidget):
         self.cart_table.insertRow(row)
         self._row_to_entry.append(entry_index)
         font = _cart_font(bold=bold)
+        brush = self._row_brush(color) if color is not None else None
         for col, text in enumerate(texts):
             cell = QTableWidgetItem(text)
             cell.setFont(font)
-            if color is not None:
-                cell.setBackground(self._row_brush(color))
+            if brush is not None:
+                cell.setBackground(brush)
             self.cart_table.setItem(row, col, cell)
         self.cart_table.setRowHeight(row, CART_ROW_HEIGHT)
 
@@ -1023,7 +1024,7 @@ class POSScreen(QWidget):
     def _restore_selection(self, prev_idx: int | None, select_last: bool):
         """Selects the line that was selected before the redraw, or the last
         row after an addition, on an empty cart or on a paid ticket."""
-        keep_previous = (not select_last and self.cart.entries and not self.sale_finished
+        keep_previous = (not select_last and not self.sale_finished
                          and prev_idx is not None and prev_idx in self._row_to_entry)
         row = self._row_to_entry.index(prev_idx) if keep_previous else self.cart_table.rowCount() - 1
         self._select_cart_row(row)
@@ -1171,10 +1172,11 @@ class POSScreen(QWidget):
         make it "mixed" (any change on it is cash: only cash can be overpaid)."""
         prior_payments = [e for e in self.cart.entries if isinstance(e, PaymentEntry)]
         amounts: dict[str, float] = {}
-        for m, amount in [(p.method, p.amount) for p in prior_payments] + [(method, tendered)]:
-            amounts[m] = round(amounts.get(m, 0.0) + amount, 2)
+        for p in prior_payments:
+            amounts[p.method] = round(amounts.get(p.method, 0.0) + p.amount, 2)
+        amounts[method] = round(amounts.get(method, 0.0) + tendered, 2)
         breakdown = [{"method": m, "amount": amount} for m, amount in amounts.items()]
-        total_tendered = round(sum(p.amount for p in prior_payments) + tendered, 2)
+        total_tendered = round(sum(amounts.values()), 2)
         final_method = method if len(breakdown) == 1 else "mixed"
 
         self.cart.entries = [e for e in self.cart.entries if not isinstance(e, PaymentEntry)]

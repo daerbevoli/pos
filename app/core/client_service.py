@@ -3,12 +3,13 @@ Client & Inventory Service
 All business logic for managing Clients and stock.
 """
 import logging
+from collections.abc import Callable
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
-from app.core.csv_import import import_rows
+from app.core import csv_import
 from app.models.models import Client
 from app.utils.validators import is_valid_vat
 
@@ -39,10 +40,11 @@ class ClientService:
     # ── CSV import ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def import_rows(session: Session, rows: list[dict]) -> tuple[int, int]:
+    def import_rows(session: Session, rows: list[dict],
+                    progress: Callable[[float], None] | None = None) -> tuple[int, int]:
         """Adds the clients of a CSV import (see read_csv_rows()); returns
-        (added, skipped)."""
-        return import_rows(session, rows, lambda row: ClientService._from_import_row(session, row), "Client")
+        (added, skipped). progress: see csv_import.import_rows()."""
+        return csv_import.import_rows(session, rows, lambda row: ClientService._from_import_row(session, row), "Client", progress)
 
     @staticmethod
     def _from_import_row(session: Session, row: dict) -> Client | None:

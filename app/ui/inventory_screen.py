@@ -45,7 +45,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
-from app.core.csv_import import read_csv_rows, ImportFileError
+from app.core.csv_import import ImportFileError, read_csv_rows
 from app.core.database import get_session
 from app.core.inventory_report_service import InventoryReportService
 from app.core.label_service import LabelPrinterService
@@ -55,15 +55,17 @@ from app.core.receipt_service import PrinterError
 
 # from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
 from app.ui.dialogs.file_dialog import FileDialog
+from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
 from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.ui.widgets.form_fields import FieldRow, PickerDisplay
 from app.ui.widgets.shortcut_grid import ShortcutGrid
 from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
 
-# Column order shared by _on_export/_on_import so a re-imported CSV round-trips cleanly.
 logger = logging.getLogger(__name__)
 
+# Export column order; the import reads columns by header name, so an
+# exported CSV re-imports cleanly.
 ARTICLE_CSV_FIELDS = ["barcode", "name", "price", "is_open_price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
 
 
@@ -734,11 +736,13 @@ class ArticleDetailPanel(QFrame):
             except ImportFileError as e:
                 self._show_overlay(str(e), kind="error")
                 return
-            with get_session() as session:
-                added, skipped = ProductService.import_rows(session, rows)
-            logger.info("%s import from %s: %d added, %d skipped", "Product", file_dialog.path, added, skipped)
+            dialog = ImportProgressDialog("articles", ProductService.import_rows, rows, parent=self)
+            dialog.exec()
+            if dialog.added is None:  # failed: the popup said why, nothing changed
+                return
+            logger.info("Product import from %s: %d added, %d skipped",
+                        file_dialog.path, dialog.added, dialog.skipped)
             self.parent_screen.refresh()
-            self._show_overlay(f"Import complete: {added} added, {skipped} skipped.")
 
 
     def _show_overlay(self, message: str, kind: str = "info"):
