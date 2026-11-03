@@ -29,8 +29,9 @@ ImportFn = Callable[..., tuple[int, int]]  # (session, rows, progress=...) -> (a
 
 class ImportProgressDialog(QDialog):
     """Use exec(); afterward `added`/`skipped` are the outcome, or None if
-    the import failed (then nothing was imported: rows are committed only
-    at the end)."""
+    the import failed (rows imported before the error are still saved:
+    import_rows() saves each row as it goes). Delete it (deleteLater())
+    once read: it holds the whole file's rows."""
 
     run_finished = pyqtSignal()
 
@@ -92,8 +93,10 @@ class ImportProgressDialog(QDialog):
         self._finish(f"Import complete: {self.added} added, {self.skipped} skipped.")
 
     def _on_failed(self, error: Exception):
-        logger.error("Import of %s failed: %s", self._what, error)
-        self._finish(f"Import failed: {error}\nNothing was imported.", failed=True)
+        # The exception was caught on the worker thread: pass it on for its traceback.
+        logger.error("Import of %s failed: %s", self._what, error, exc_info=error)
+        self._finish(f"Import failed: {error}\n{self._what.capitalize()} imported before the error "
+                     "are kept; importing the file again skips them.", failed=True)
 
     def _finish(self, message: str, failed: bool = False):
         self.is_running = False

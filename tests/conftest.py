@@ -107,11 +107,15 @@ def brussels_tz():
 @pytest.fixture
 def import_dialog_inline(qtbot, monkeypatch):
     """ImportProgressDialog.exec() runs the import and returns once it's
-    done, instead of blocking the test in the dialog's modal loop."""
+    done, instead of blocking the test in the dialog's modal loop. Returns
+    the list of outcome texts the import popups showed, in order."""
     from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
+    shown = []
 
     def exec_inline(self):
         with qtbot.waitSignal(self.run_finished, timeout=10000):
             self.start()
+        shown.append(self.step_label.text())
         return 1
     monkeypatch.setattr(ImportProgressDialog, "exec", exec_inline)
+    return shown

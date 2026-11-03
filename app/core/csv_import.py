@@ -39,26 +39,31 @@ def read_csv_rows(path: str) -> list[dict[str, str]]:
 
 def import_rows(session: Session, rows: list[dict], build_row: Callable[[dict], object | None],
                 what: str, progress: Callable[[float], None] | None = None) -> tuple[int, int]:
-    """Adds build_row(row) for every row and commits; returns (added,
-    skipped). build_row returns None to skip a row. Each row gets its own
-    savepoint: a row that fails undoes only itself, not the rows already
-    imported. progress(0..1), if given, is called about once per percent."""
+    """Adds build_row(row) for every row; returns (added, skipped). build_row
+    returns None to skip a row. Each row gets its own savepoint: a row that
+    fails undoes only itself. progress(0..1), if given, is called about once
+    per percent and at the end.
+
+    Each row is saved as soon as it's added: under pysqlite's default
+    transaction handling (see database.py) releasing a savepoint opened
+    outside a transaction commits it. So SQLite's write lock is only held
+    per row, and if the import stops partway the rows before are kept."""
     added = skipped = 0
     step = max(1, len(rows) // 100)
     for i, row in enumerate(rows, start=1):
-        if progress is not None and i % step == 0:
-            progress(i / len(rows))
         try:
             record = build_row(row)
             if record is None:
                 skipped += 1
-                continue
-            with session.begin_nested():
-                session.add(record)
-                session.flush()
-            added += 1
+            else:
+                with session.begin_nested():
+                    session.add(record)
+                    session.flush()
+                added += 1
         except Exception as e:  # noqa: BLE001 — one bad row must not stop the import
             skipped += 1
             logger.warning("%s import: skipped %r: %s", what, row.get("name"), e)
+        if progress is not None and (i % step == 0 or i == len(rows)):
+            progress(i / len(rows))
     session.commit()
     return added, skipped

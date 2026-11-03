@@ -57,3 +57,15 @@ def test_product_import_falls_back_on_unreadable_numbers(db_session):
     product = db_session.query(Product).filter_by(name="Odd").one()
     assert (product.price, product.is_open_price, product.tax, product.stock_quantity, product.min_stock_level) == \
         (0.0, True, 0, 0.0, 5.0)
+
+
+
+def test_import_rows_reports_progress_up_to_the_end(db_session):
+    progress = []
+    rows = [{"name": f"A{i}", "barcode": f"B{i}"} for i in range(299)]
+
+    added, skipped = ProductService.import_rows(db_session, rows, progress=progress.append)
+
+    assert (added, skipped) == (299, 0)
+    assert progress == sorted(progress)
+    assert progress[-1] == 1.0  # 299 rows: steps of 2 would otherwise stop at 298/299

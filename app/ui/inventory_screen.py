@@ -738,11 +738,11 @@ class ArticleDetailPanel(QFrame):
                 return
             dialog = ImportProgressDialog("articles", ProductService.import_rows, rows, parent=self)
             dialog.exec()
-            if dialog.added is None:  # failed: the popup said why, nothing changed
-                return
-            logger.info("Product import from %s: %d added, %d skipped",
-                        file_dialog.path, dialog.added, dialog.skipped)
-            self.parent_screen.refresh()
+            added, skipped = dialog.added, dialog.skipped
+            dialog.deleteLater()  # it holds the whole file's rows
+            if added is not None:  # else it failed: the popup said why
+                logger.info("Product import from %s: %d added, %d skipped", file_dialog.path, added, skipped)
+            self.parent_screen.refresh()  # also after a failure: rows before it are saved
 
 
     def _show_overlay(self, message: str, kind: str = "info"):

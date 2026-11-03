@@ -494,7 +494,8 @@ def test_import_csv_row_error_does_not_abort_batch(screen, monkeypatch, tmp_path
     assert "Bad Row" not in names
 
 
-def test_import_csv_clashing_row_keeps_rows_imported_before_it(screen, monkeypatch, tmp_path):
+def test_import_csv_clashing_row_keeps_rows_imported_before_it(screen, monkeypatch, tmp_path,
+                                                               import_dialog_inline):
     """A row hitting a unique index (same name, other VAT) must only undo
     itself, not every row imported before it in the same transaction."""
     csv_path = tmp_path / "clients.csv"
@@ -515,7 +516,8 @@ def test_import_csv_clashing_row_keeps_rows_imported_before_it(screen, monkeypat
     with get_session() as session:
         vats = sorted(c.vatNumber for c in ClientService.get_all(session))
     assert vats == ["BE0234567873", "BE0567890161"]
-    assert screen.detail_panel.overlay.isHidden()  # the import popup showed the outcome
+    assert import_dialog_inline == ["Import complete: 2 added, 1 skipped."]  # shown in the popup
+    assert screen.detail_panel.overlay.isHidden()  # ...and not again on the screen
 
 
 # ── Buttons stay pressable; handlers check the conditions ───────────────

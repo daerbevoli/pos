@@ -41,6 +41,7 @@ def test_failed_import_reports_it_and_leaves_counts_unset(qtbot, patched_db):
 
     assert d.added is None and d.skipped is None
     assert "database is locked" in d.step_label.text()
+    assert "imported before the error are kept" in d.step_label.text()
     assert not d.btn_close.isHidden()
 
 
@@ -54,3 +55,4 @@ def test_cannot_be_dismissed_while_running(qtbot, patched_db):
     d.is_running = False
     d.reject()
     assert not d.isVisible()
+
