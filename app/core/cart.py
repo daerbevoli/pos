@@ -309,15 +309,20 @@ class Cart:
     def remove_entry(self, entry: ReceiptEntry) -> str | None:
         """What the Error key does to a selected row: "reversed" for a line
         already saved on a reopened sale (see reverse()), "removed" for
-        anything else, None if nothing changed (a line reversed already).
+        anything else, None if nothing changed (a line reversed already, or
+        a discount on a reversed line — see _covers_reversal()).
         A promo or VOID discount row stands for the line it belongs to; a
         subtotal takes the discount rows right under it along."""
         self._pin_allocations()
         if isinstance(entry, SubtotalMarker):
+            if any(_covers_reversal(d) for d in self._discounts_under(entry)):
+                return None
             self._delete_subtotal(entry)
             return "removed"
         if isinstance(entry, DiscountEntry) and (entry.is_promo or entry.is_void) and entry.allocations:
             entry = entry.allocations[0].item
+        elif isinstance(entry, DiscountEntry) and _covers_reversal(entry):
+            return None
         if (isinstance(entry, CartItem) and entry.locked and entry.quantity is not None
                 and not entry.is_reversal):
             if entry.has_reversal:
@@ -331,15 +336,22 @@ class Cart:
         self._delete(entry)
         return "removed"
 
+    def _discounts_under(self, marker: SubtotalMarker) -> list["DiscountEntry"]:
+        """The discount rows directly under a subtotal, which go with it."""
+        start = next(i for i, e in enumerate(self.entries) if e is marker) + 1
+        under = []
+        for entry in self.entries[start:]:
+            if not isinstance(entry, DiscountEntry):
+                break
+            under.append(entry)
+        return under
+
     def _delete_subtotal(self, marker: SubtotalMarker):
         """Drops a subtotal and the discount rows directly under it: left
         behind, they'd read as coming off the last item rather than the
         block they were given on."""
         start = next(i for i, e in enumerate(self.entries) if e is marker)
-        end = start + 1
-        while end < len(self.entries) and isinstance(self.entries[end], DiscountEntry):
-            end += 1
-        del self.entries[start:end]
+        del self.entries[start:start + 1 + len(self._discounts_under(marker))]
 
     def _delete(self, entry: ReceiptEntry):
         """Drops one entry (by identity: identical lines compare equal). A
@@ -545,6 +557,11 @@ class Cart:
                 })
             elif isinstance(entry, SubtotalMarker):
                 data.append({"type": "subtotal"})
+            elif isinstance(entry, PaymentEntry):
+                # Only an open ticket holds these (the crash-recovery copy):
+                # money already taken must come back with it. A paid sale's
+                # snapshot has none — they're folded into its payment breakdown.
+                data.append({"type": "payment", "method": entry.method, "amount": entry.amount})
         return json.dumps(data)
 
     @classmethod
@@ -592,6 +609,8 @@ class Cart:
                     allocation_links.append((discount, raw["allocations"]))
             elif kind == "subtotal":
                 entries.append(SubtotalMarker())
+            elif kind == "payment":
+                entries.append(PaymentEntry(method=raw["method"], amount=raw["amount"]))
         _relink_reversals(items, reversal_links)
         _relink_allocations(items, allocation_links)
         cart = cls(entries=entries)
@@ -612,6 +631,16 @@ def _relabel(discount: DiscountEntry):
     label stays true as is."""
     if discount.label.startswith(_MANUAL_PREFIX) and not discount.label.endswith("%"):
         discount.label = _amount_label(discount.amount)
+
+
+def _covers_reversal(discount: DiscountEntry) -> bool:
+    """A manual discount on a line that has since been reversed. Its share of
+    that line was given back by a VOID row on the reversal (Cart.reverse()),
+    so removing the discount would leave the VOID giving back money that was
+    never taken off: it stays, like the reversal itself. Removing the
+    reversal first (which takes its VOID rows along) frees it again."""
+    return (not discount.is_promo and not discount.is_void
+            and any(a.item.has_reversal for a in discount.allocations))
 
 
 def _split(amount: float, recipients: list[CartItem], net: dict[int, float]) -> list[Allocation]:

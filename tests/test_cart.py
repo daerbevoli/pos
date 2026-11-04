@@ -886,3 +886,16 @@ def test_legacy_identical_lines_each_get_their_own_reversal():
     x1, x2, y1, y2 = Cart.from_snapshot(json.dumps(data)).entries
     assert (y1.reversal_of, y2.reversal_of) == (x1, x2)
     assert y1.reversal_of is x1 and y2.reversal_of is x2
+
+
+def test_snapshot_round_trip_keeps_partial_payments():
+    """An open ticket's crash-recovery copy must remember money already taken."""
+    cart = Cart()
+    cart.add_product(_FakeProduct(1, price=30.0))
+    cart.entries.append(PaymentEntry(method="cash", amount=20.0))
+
+    restored = Cart.from_snapshot(cart.to_snapshot())
+
+    assert restored.paid_total == 20.0
+    assert restored.remaining_due == 10.0
+    assert isinstance(restored.entries[-1], PaymentEntry) and restored.entries[-1].method == "cash"

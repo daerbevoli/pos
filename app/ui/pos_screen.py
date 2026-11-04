@@ -844,6 +844,8 @@ class POSScreen(QWidget):
         # A line already saved on the reopened sale gets a reversal appended
         # (it can't just leave the record); anything else is deleted — see
         # Cart.remove_entry().
+        # None: refused, nothing changed — a line already reversed, or a
+        # discount on a reversed line (its VOID row depends on it).
         action = self.cart.remove_entry(entry)
         if action is not None:
             self._refresh_cart(select_last=action == "reversed")

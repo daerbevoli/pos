@@ -95,10 +95,15 @@ def _random_ticket(seed: int) -> Cart:
             reversible = [e for e in cart.entries if isinstance(e, CartItem) and e.locked
                           and not e.is_reversal and not e.has_reversal]
             removable = [e for e in cart.entries if isinstance(e, CartItem) and not e.locked]
+            # The Error key on a discount or subtotal row, e.g. one that was
+            # already on the saved sale.
+            markers = [e for e in cart.entries if isinstance(e, (DiscountEntry, SubtotalMarker))]
             if roll < 0.45 and reversible:
                 cart.reverse(rng.choice(reversible))
             elif roll < 0.6 and removable:
                 cart.remove_entry(rng.choice(removable))
+            elif roll < 0.75 and markers:
+                cart.remove_entry(rng.choice(markers))
             else:
                 random_step()
     return cart
@@ -445,3 +450,42 @@ def test_invoice_lines_add_up_to_the_till_total():
         till_excl = round(sum(line.net_excl for line in cart.net_lines()), 2)
         assert invoice_excl == till_excl, (
             f"seed {seed}: invoice {invoice_excl} != till {till_excl} (excl. VAT)\n{_describe(cart)}")
+
+
+def test_a_discount_on_a_reversed_line_cant_be_removed():
+    """Its share was given back by a VOID row; removing it would leave the
+    VOID paying back a discount that's gone (an empty ticket at 1.00)."""
+    cart = Cart()
+    cart.add_product(_product(1, 10.0))
+    discount = cart.apply_percent_discount(10)
+    cart.entries[0].locked = True
+    cart.reverse(cart.entries[0])
+
+    assert cart.remove_entry(discount) is None
+    assert cart.total == 0.0
+
+
+def test_a_subtotal_whose_discount_covers_a_reversed_line_cant_be_removed():
+    cart = Cart()
+    cart.add_product(_product(1, 10.0))
+    cart.add_product(_product(2, 10.0))
+    cart.add_subtotal()
+    cart.apply_amount_discount(4.0)
+    cart.entries[0].locked = True
+    cart.reverse(cart.entries[0])
+    marker = next(e for e in cart.entries if isinstance(e, SubtotalMarker))
+
+    assert cart.remove_entry(marker) is None
+    assert cart.total == 8.0
+
+
+def test_removing_the_reversal_frees_its_discount_again():
+    cart = Cart()
+    cart.add_product(_product(1, 10.0))
+    discount = cart.apply_percent_discount(10)
+    cart.entries[0].locked = True
+    reversal = cart.reverse(cart.entries[0])
+
+    assert cart.remove_entry(reversal) == "removed"
+    assert cart.remove_entry(discount) == "removed"
+    assert cart.total == 10.0
