@@ -47,7 +47,7 @@ from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
 from app.ui.widgets.form_fields import FieldRow
 from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
-from app.utils.validators import is_valid_vat
+from app.utils.validators import is_valid_vat, normalize_vat
 
 logger = logging.getLogger(__name__)
 
@@ -316,17 +316,24 @@ class ClientDetailPanel(QFrame):
         self._apply_country_to_vat(self.country.currentData())
 
     def _on_vat_text_changed(self, text: str):
-        """Safety net for edits _vat_guard_blocks can't see (e.g. a
-        context-menu paste or drag-and-drop): if the prefix is gone,
-        put it back without discarding whatever text is there."""
-        if self._mode not in ("new", "edit") or not self._vat_prefix:
+        """Keeps the VAT number to letters and digits, upper case (see
+        normalize_vat(): "BE 0123.456.789" pastes as "BE0123456789"), and
+        is the safety net for edits _vat_guard_blocks can't see (e.g. a
+        context-menu paste or drag-and-drop): if the prefix is gone, it's
+        put back without discarding whatever text is there."""
+        if self._mode not in ("new", "edit"):
             return
-        if text.startswith(self._vat_prefix):
+        cursor = self.vatNumber.cursorPosition()
+        corrected = normalize_vat(text)
+        cursor = len(normalize_vat(text[:cursor]))
+        if self._vat_prefix and not corrected.startswith(self._vat_prefix):
+            corrected = self._vat_prefix + corrected
+            cursor = len(corrected)
+        if corrected == text:
             return
-        corrected = self._vat_prefix + text
         self.vatNumber.blockSignals(True)
         self.vatNumber.setText(corrected)
-        self.vatNumber.setCursorPosition(len(corrected))
+        self.vatNumber.setCursorPosition(cursor)
         self.vatNumber.blockSignals(False)
 
     def _populate_fields(self, client):
@@ -419,7 +426,7 @@ class ClientDetailPanel(QFrame):
             "zip_code": self.zip_code.text().strip(),
             "city": self.city.text().strip(),
             "country": self.country.currentData(),
-            "vatNumber": self.vatNumber.text().strip(),
+            "vatNumber": normalize_vat(self.vatNumber.text()),
             "phone": self.phone.text().strip() or None,
             "email": self.email.text().strip() or None,
         }

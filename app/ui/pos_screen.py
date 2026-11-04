@@ -82,6 +82,13 @@ from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
 
 logger = logging.getLogger(__name__)
 
+# How invoices go out (see ErpService.send_invoice()). Peppol off is for
+# development only — TURN IT ON FOR DEPLOYMENT: then Peppol is mandatory
+# (a client not on Peppol gets nothing and needs manual sending) and email
+# is added for clients with an address.
+INVOICE_USE_PEPPOL = False
+INVOICE_USE_EMAIL = True
+
 TABS = 5  # number of V-tabs, slots 1..TABS; MainWindow builds one tab button per slot
 
 # Marks the cells of a divider row, so _display_rows() can tell it apart
@@ -1487,13 +1494,15 @@ class POSScreen(QWidget):
         # cashier keeps working — InvoiceSendWorker logs the outcome.
         self._invoice_send_in_progress = True
         self._invoice_worker = InvoiceSendWorker(ErpService(**erp_config), invoice_data,
-                                                 use_peppol=False, use_email=True)
+                                                 use_peppol=INVOICE_USE_PEPPOL, use_email=INVOICE_USE_EMAIL)
         # Bind the sale now: the cashier may switch tab/ticket before the
         # worker finishes, and it's this sale that must be locked.
         self._invoice_worker.succeeded.connect(
             partial(self._on_invoice_send_succeeded, self._current_sale_id)
         )
-        self._invoice_worker.failed.connect(self._on_invoice_send_failed)
+        self._invoice_worker.failed.connect(
+            partial(self._on_invoice_send_failed, invoice_data["inv_num"])
+        )
         self._invoice_worker.finished.connect(self._invoice_worker.deleteLater)
         self._invoice_worker.start()
 
@@ -1505,9 +1514,12 @@ class POSScreen(QWidget):
         except ValueError as e:
             logger.error("Invoice %s sent, but sale %s could not be locked: %s", inv_num, sale_id, e)
 
-    def _on_invoice_send_failed(self, message: str):
+    def _on_invoice_send_failed(self, inv_num: str, message: str):
+        """The one ERROR line of a failed send: it lights the error badge,
+        which is how the cashier learns of it (the send runs in the
+        background, so there's no overlay). Not locked: Send can retry."""
         self._invoice_send_in_progress = False
-        logger.error("Invoice failed to send with error: %s", message)
+        logger.error("Invoice %s NOT sent: %s", inv_num, message)
 
     def _open_drawer(self):
         with get_session() as session:

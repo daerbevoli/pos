@@ -31,7 +31,7 @@ class FakeErp:
 @pytest.fixture
 def run_worker(qtbot):
     def _run(erp):
-        worker = InvoiceSendWorker(erp, INVOICE_DATA, False, True)
+        worker = InvoiceSendWorker(erp, INVOICE_DATA, True, True)
         succeeded, failed = [], []
         worker.succeeded.connect(lambda *args: succeeded.append(args))
         worker.failed.connect(failed.append)
@@ -86,10 +86,21 @@ def test_wait_for_all_waits_for_a_running_send(qtbot):
             release.wait(5)
             return 1, True
 
-    worker = InvoiceSendWorker(SlowErp(), {"inv_num": "I-1"}, use_peppol=False, use_email=True)
+    worker = InvoiceSendWorker(SlowErp(), {"inv_num": "I-1"}, use_peppol=True, use_email=True)
     worker.start()
     threading.Timer(0.2, release.set).start()
 
     InvoiceSendWorker.wait_for_all()
 
     assert not worker.isRunning()
+
+
+def test_failure_is_logged_as_a_warning_only(run_worker, caplog):
+    """The UI slot on `failed` logs the single ERROR (the error badge); the
+    worker's own lines mustn't count a second and third error."""
+    import logging
+    with caplog.at_level(logging.WARNING):
+        run_worker(FakeErp(error=Exception("HTTP 500")))
+        run_worker(FakeErp(send_result=(False, "Partner has no email address")))
+
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []

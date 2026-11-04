@@ -180,3 +180,16 @@ def test_find_clash_ignores_the_client_being_edited_and_inactive_ones(db_session
 
     assert ClientService.find_clash(db_session, _data(name="Acme"), exclude_id=acme.id) is None
     assert ClientService.find_clash(db_session, _data(name="Old", vatNumber="VAT-OLD")) is None
+
+
+def test_vat_number_is_stored_as_letters_and_digits_only(db_session):
+    client = ClientService.create(db_session, **_data(vatNumber="be 0477.472.701"))
+    assert client.vatNumber == "BE0477472701"
+
+    ClientService.update(db_session, client.id, vatNumber="BE-0477 472 701")
+    assert client.vatNumber == "BE0477472701"
+
+
+def test_a_vat_number_typed_with_dots_still_clashes(db_session):
+    ClientService.create(db_session, **_data(name="Acme", vatNumber="BE0477472701"))
+    assert ClientService.find_clash(db_session, _data(vatNumber="BE 0477.472.701")) == "VAT number already used by Acme"

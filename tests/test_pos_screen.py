@@ -1632,7 +1632,7 @@ def test_send_invoice_ignored_while_previous_send_in_progress(screen, monkeypatc
 
 def test_send_invoice_result_clears_in_progress(screen):
     screen._invoice_send_in_progress = True
-    screen._on_invoice_send_failed("boom")
+    screen._on_invoice_send_failed("I-0001", "boom")
     assert screen._invoice_send_in_progress is False
 
 
@@ -1805,3 +1805,13 @@ def test_refund_with_a_positive_total_is_refused(screen):
     assert screen.sale_finished is False
     assert screen._current_sale_id is None
     assert screen.overlay.message_label.text() == "Nothing to refund"
+
+
+def test_failed_invoice_send_is_one_error_naming_the_invoice(screen, caplog):
+    """That one ERROR line is what lights the error badge for the cashier."""
+    import logging
+    with caplog.at_level(logging.WARNING):
+        screen._on_invoice_send_failed("I-041126-007", "Partner has no email address")
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert [r.getMessage() for r in errors] == ["Invoice I-041126-007 NOT sent: Partner has no email address"]

@@ -64,15 +64,15 @@ class InvoiceSendWorker(QThread):
             if already_sent:
                 sent, message = True, "Invoice was already sent from the ERP"
             else:
-                sent, message = self.erp.send_invoice(
-                    invoice_id, self.use_peppol, self.use_email
-                )
+                sent, message = self.erp.send_invoice(invoice_id, self.use_peppol, self.use_email)
         except Exception as e:
-            logger.exception("Invoice %s: ERP create/post/send raised", inv_num)
+            # A warning with the traceback: the slot on `failed` logs the
+            # one ERROR the cashier sees (error badge), naming the invoice.
+            logger.warning("Invoice %s: ERP create/post/send raised", inv_num, exc_info=True)
             self.failed.emit(str(e))
             return
         if not sent:
-            logger.error("Invoice %s: ERP did not send it: %s", inv_num, message)
+            logger.warning("Invoice %s: ERP did not send it: %s", inv_num, message)
             self.failed.emit(message)
             return
         logger.info("Invoice %s sent (ERP id %s): %s", inv_num, invoice_id, message)

@@ -187,7 +187,7 @@ def test_load_report_shows_invoiced_client_name_as_issued_even_after_rename(scre
     with get_session() as session:
         product = _make_product(session)
     with get_session() as session:
-        client = ClientService.create(session, name="Original Name", vatNumber="V-ORIG", street="1 Main St", zip_code="1000", city="Brussels")
+        client = ClientService.create(session, name="Original Name", vatNumber="VORIG", street="1 Main St", zip_code="1000", city="Brussels")
         client_id = client.id
     _finalize_sale(product, client_id=client_id)
 
@@ -197,7 +197,7 @@ def test_load_report_shows_invoiced_client_name_as_issued_even_after_rename(scre
     screen._load_report()
 
     assert screen.sales_table.item(0, 2).text() == "Original Name"
-    assert screen.sales_table.item(0, 3).text() == "V-ORIG"
+    assert screen.sales_table.item(0, 3).text() == "VORIG"
 
 
 def test_vat_breakdown_by_rate(screen):

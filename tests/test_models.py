@@ -274,7 +274,7 @@ def test_invoice_requires_client(db_session):
 def test_invoice_snapshot_survives_client_mutation(db_session):
     """The whole point of the snapshot: once written, it must not change
     even if the live client it was copied from is later edited."""
-    client = Client(name="Original Name", vatNumber="V-ORIG", street="Old Street", zip_code="1000", city="Old City")
+    client = Client(name="Original Name", vatNumber="VORIG", street="Old Street", zip_code="1000", city="Old City")
     sale = Sale(sale_number="S-SNAP2", total_amount=10.0, final_amount=10.0)
     db_session.add_all([client, sale])
     db_session.commit()
@@ -295,7 +295,7 @@ def test_invoice_snapshot_survives_client_mutation(db_session):
     db_session.refresh(invoice)
 
     assert invoice.client_name == "Original Name"
-    assert invoice.client_vat_number == "V-ORIG"
+    assert invoice.client_vat_number == "VORIG"
     assert invoice.client_street == "Old Street"
     assert invoice.client_zip == "1000"
     assert invoice.client_city == "Old City"

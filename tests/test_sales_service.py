@@ -332,7 +332,7 @@ def test_finalize_invoice_unknown_client_id_raises(db_session):
 
 def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
     from app.core.client_service import ClientService
-    client = ClientService.create(db_session, name="Original Name", vatNumber="V-ORIG", street="1 Main St", zip_code="1000", city="Brussels")
+    client = ClientService.create(db_session, name="Original Name", vatNumber="VORIG", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
 
     invoice = SalesService.finalize_invoice(
@@ -343,7 +343,7 @@ def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
     db_session.refresh(invoice)
 
     assert invoice.client_name == "Original Name"
-    assert invoice.client_vat_number == "V-ORIG"
+    assert invoice.client_vat_number == "VORIG"
 
 
 # ── Invoice send/lock lifecycle ──────────────────────────────────────────

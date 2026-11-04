@@ -8,6 +8,13 @@ user finds out in the client dialog instead of at invoice-send time.
 import re
 
 
+def normalize_vat(vat: str | None) -> str:
+    """A VAT number as the POS stores it: letters and digits only, upper
+    case ("be 0123.456.789" -> "BE0123456789"). Odoo compacts VAT numbers
+    the same way, so the ERP's partner lookup (an exact match) finds it."""
+    return re.sub(r"[^A-Za-z0-9]", "", vat or "").upper()
+
+
 def is_valid_belgian_vat(vat: str) -> bool:
     """BE VAT: 'BE' + 9 or 10 digits, with a mod-97 check on the last two
     digits against the first eight."""

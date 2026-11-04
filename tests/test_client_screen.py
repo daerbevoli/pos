@@ -239,6 +239,19 @@ def test_new_client_vat_prefix_survives_backspace_and_select_all_typing(screen, 
     assert panel.vatNumber.text() == "BE1234"
 
 
+def test_new_client_vat_takes_letters_and_digits_only(screen, qtbot):
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.vatNumber.setFocus()
+    panel.vatNumber.setCursorPosition(len(panel.vatNumber.text()))
+
+    qtbot.keyClicks(panel.vatNumber, "0477 .472-701")
+    assert panel.vatNumber.text() == "BE0477472701"
+
+    panel.vatNumber.setText("be 0477.472.701")  # a paste, in lower case
+    assert panel.vatNumber.text() == "BE0477472701"
+
+
 def test_changing_country_clears_vat_to_bare_prefix_for_new_client(screen):
     panel = screen.detail_panel
     panel._start_new()

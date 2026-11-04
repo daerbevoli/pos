@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.core import csv_import
 from app.models.models import Client
-from app.utils.validators import is_valid_vat
+from app.utils.validators import is_valid_vat, normalize_vat
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,8 @@ class ClientService:
         """A new Client from one import row, or None to skip it: no name, no
         street, no or an invalid VAT number, or that VAT number is already a
         client (already imported; a shared email is fine)."""
-        vat = row.get("vat")
-        street = (row.get("street") or "").strip()
+        vat = normalize_vat(row.get("vat"))
+        street =(row.get("street") or "").strip()
         zip_code = (row.get("zip") or row.get("zip_code") or "").strip()
         city = (row.get("city") or "").strip()
         if not street and not zip_code and not city and row.get("address"):
@@ -106,7 +106,9 @@ class ClientService:
             values = {column: data.get(column) for column in columns}
             if any(value is None for value in values.values()):
                 continue  # NULLs never clash, and a field not being saved can't either
-            q = session.query(Client).filter_by(is_active=True, **values)
+            if "vatNumber" in values:
+                values["vatNumber"] = normalize_vat(values["vatNumber"])  # as create()/update() store it
+            q =session.query(Client).filter_by(is_active=True, **values)
             if exclude_id is not None:
                 q = q.filter(Client.id != exclude_id)
             other = q.first()
@@ -116,6 +118,8 @@ class ClientService:
 
     @staticmethod
     def create(session: Session, **kwargs) -> Client:
+        if "vatNumber" in kwargs:
+            kwargs["vatNumber"] = normalize_vat(kwargs["vatNumber"])
         client = Client(**kwargs)
         session.add(client)
         session.commit()
@@ -129,6 +133,8 @@ class ClientService:
         if not client:
             logger.warning("Client update: client %s not found", client_id)
             return None
+        if "vatNumber" in kwargs:
+            kwargs["vatNumber"] = normalize_vat(kwargs["vatNumber"])
         for key, value in kwargs.items():
             setattr(client, key, value)
         session.commit()
