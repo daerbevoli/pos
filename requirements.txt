@@ -5,11 +5,9 @@ PyQt6-Qt6==6.11.0  # must match PyQt6
 PyQt6_sip==13.11.1
 SQLAlchemy==2.0.49
 python-escpos==3.1
-pyserial==3.5
 pyusb==1.3.1
 libusb==1.0.29.post7; sys_platform == "win32"  # bundled libusb DLL; Linux uses the system libusb-1.0
 reportlab==4.5.1
-openpyxl==3.1.5
 pillow==12.2.0
 cryptography==50.0.2  # AES-256-GCM encryption of backup archives
 requests==2.34.2
@@ -27,7 +25,6 @@ argcomplete==3.6.3  # python-escpos
 certifi==2026.7.22  # requests (HTTPS CA bundle)
 cffi==2.1.1  # cryptography
 charset-normalizer==3.4.7  # requests, reportlab
-et_xmlfile==2.0.0  # openpyxl
 greenlet==3.5.0  # SQLAlchemy
 idna==3.20  # requests
 importlib_resources==7.1.0  # python-escpos

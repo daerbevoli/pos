@@ -18,18 +18,16 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
 
+from app.constants.vat import VAT_RATES
 from app.core.sale.report_service import invoice_vat_breakdown
 from app.models.models import Invoice
 from app.utils.clock import local_days_range
 
 logger = logging.getLogger(__name__)
 
-# Column order of the per-rate columns: amount excl. VAT sold at each rate.
-LISTING_VAT_RATES = (0, 6, 12, 21)
-
 LISTING_HEADERS = [
     "Company", "VAT number", "Total incl. VAT", "Total excl. VAT",
-    *(f"VAT {rate}%" for rate in LISTING_VAT_RATES),
+    *(f"VAT {rate}%" for rate in VAT_RATES),
     "Invoices",
 ]
 
@@ -40,14 +38,14 @@ class ClientListingRow:
     vat_number: str
     total_incl: float = 0.0
     total_excl: float = 0.0
-    base_per_rate: dict[int, float] = field(default_factory=lambda: {r: 0.0 for r in LISTING_VAT_RATES})
+    base_per_rate: dict[int, float] = field(default_factory=lambda: {r: 0.0 for r in VAT_RATES})
     invoice_count: int = 0
 
     def as_cells(self) -> list:
         return [
             self.name, self.vat_number,
             f"{self.total_incl:.2f}", f"{self.total_excl:.2f}",
-            *(f"{self.base_per_rate[rate]:.2f}" for rate in LISTING_VAT_RATES),
+            *(f"{self.base_per_rate[rate]:.2f}" for rate in VAT_RATES),
             self.invoice_count,
         ]
 
@@ -83,7 +81,7 @@ class ClientListingService:
                 vat_number=latest.client_vat_number,
                 total_incl=round(final, 2),
                 total_excl=round(final - tax, 2),
-                base_per_rate={rate: breakdown.get(str(rate), {}).get("base", 0.0) for rate in LISTING_VAT_RATES},
+                base_per_rate={rate: breakdown.get(str(rate), {}).get("base", 0.0) for rate in VAT_RATES},
                 invoice_count=len(client_invoices),
             ))
         rows.sort(key=lambda r: (r.name or "").lower())
@@ -97,7 +95,7 @@ class ClientListingService:
         for row in rows:
             total.total_incl += row.total_incl
             total.total_excl += row.total_excl
-            for rate in LISTING_VAT_RATES:
+            for rate in VAT_RATES:
                 total.base_per_rate[rate] += row.base_per_rate[rate]
             total.invoice_count += row.invoice_count
         total.total_incl = round(total.total_incl, 2)

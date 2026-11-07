@@ -45,6 +45,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.constants.vat import VAT_RATES
 from app.core.csv_import import ImportFileError, read_csv_rows
 from app.core.database import get_session
 from app.core.inventory.inventory_report_service import InventoryReportService
@@ -166,14 +167,6 @@ class ArticleDetailPanel(QFrame):
         self.stock.setMinimumHeight(FORM_FIELD_HEIGHT)
         self.stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
-        # self.min_stock = QDoubleSpinBox()
-        # self.min_stock.setLocale(QLocale.c())
-        # self.min_stock.setMaximum(999999)
-        # self.min_stock.setDecimals(2)
-        # self.min_stock.setValue(5)
-        # self.min_stock.setMinimumHeight(FORM_FIELD_HEIGHT)
-        # self.min_stock.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-
         self.unit_display = PickerDisplay(self._unit_val)
         self.category_display = PickerDisplay(self._category_name)
         self.promo_display = PickerDisplay(self._promo_name)
@@ -184,7 +177,6 @@ class ArticleDetailPanel(QFrame):
             ("Selling Price *",  self.price,            None),
             ("Tax *",              self.tax_display,    "tax"),
             ("Stock Quantity",   self.stock,            None),
-            # ("Min Stock Level",  self.min_stock,        None),
             ("Unit *",             self.unit_display,   "unit"),
             ("Category",         self.category_display, "category"),
             ("Promo",            self.promo_display,    None),
@@ -363,7 +355,7 @@ class ArticleDetailPanel(QFrame):
         self._picker_title.setText(titles[picker_key])
 
         if picker_key == "tax":
-            options = [("0 %", "0"), ("6 %", "6"), ("12 %", "12"), ("21 %", "21")]
+            options = [(f"{rate} %", str(rate)) for rate in VAT_RATES]
             current = self._tax_val
             cols = 4
         elif picker_key == "unit":
@@ -421,7 +413,6 @@ class ArticleDetailPanel(QFrame):
         self.price.setValue(self.price.minimum())
         self.stock.setSpecialValueText(" ")
         self.stock.setValue(self.stock.minimum())
-        # self.min_stock.setValue(5)
         self._tax_val = "0"
         self.tax_display.setText("0 %")
         self._unit_val = "pcs"

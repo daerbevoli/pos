@@ -202,61 +202,6 @@ def test_change_stock_nonexistent_product_returns_none(db_session):
     assert ProductService.change_stock(db_session, 99999, 1) is None
 
 
-def test_move_stock_increases_and_records_movement(db_session):
-    p = _make_product(db_session, price=1.0)
-    db_session.refresh(p)
-    assert p.stock_quantity == 0
-
-    movement = ProductService.move_stock(
-        db_session, p.id, quantity_change=10, movement_type="purchase", reference="PO-1"
-    )
-
-    assert movement is not None
-    assert movement.quantity_before == 0
-    assert movement.quantity_after == 10
-    assert movement.movement_type == "purchase"
-    assert movement.reference == "PO-1"
-
-    db_session.refresh(p)
-    assert p.stock_quantity == 10
-
-
-def test_move_stock_can_go_negative_for_sales(db_session):
-    p = _make_product(db_session, stock_quantity=5)
-    ProductService.move_stock(db_session, p.id, quantity_change=-8, movement_type="sale")
-    db_session.refresh(p)
-    assert p.stock_quantity == -3
-
-
-def test_move_stock_negative_is_not_logged_as_warning(db_session, caplog):
-    p = _make_product(db_session, stock_quantity=0)
-    with caplog.at_level(logging.DEBUG, logger="app.core.inventory.product_service"):
-        ProductService.move_stock(db_session, p.id, quantity_change=-2, movement_type="sale")
-    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-
-
-def test_move_stock_is_held_at_stock_min(db_session):
-    p = _make_product(db_session, stock_quantity=STOCK_MIN + 3)
-    movement = ProductService.move_stock(db_session, p.id, quantity_change=-10, movement_type="sale")
-    db_session.refresh(p)
-    assert p.stock_quantity == STOCK_MIN
-    # The ledger records the change actually applied, so before + change == after.
-    assert movement.quantity == -3
-    assert movement.quantity_before + movement.quantity == movement.quantity_after
-
-
-def test_move_stock_is_held_at_stock_max(db_session):
-    p = _make_product(db_session, stock_quantity=STOCK_MAX - 1)
-    movement = ProductService.move_stock(db_session, p.id, quantity_change=5, movement_type="purchase")
-    db_session.refresh(p)
-    assert p.stock_quantity == STOCK_MAX
-    assert movement.quantity == 1
-
-
-def test_move_stock_nonexistent_product_returns_none(db_session):
-    assert ProductService.move_stock(db_session, 99999, 1, "purchase") is None
-
-
 # ── Categories ───────────────────────────────────────────────────────────
 
 def test_create_category(db_session):

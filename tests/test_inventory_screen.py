@@ -616,7 +616,7 @@ def test_import_defaults_missing_numeric_fields(screen, monkeypatch, tmp_path):
     with get_session() as session:
         product = session.query(Product).filter_by(name="Bare Minimum").first()
     assert product.price == 0.0
-    assert product.tax == 0
+    assert product.tax == 21
     assert product.unit == "pcs"
     assert product.stock_quantity == 0.0
     assert product.min_stock_level == 5.0
@@ -677,7 +677,7 @@ def test_import_overflowing_tax_defaults_instead_of_aborting_batch(screen, monke
         names = {p.name for p in ProductService.get_all(session, active_only=False)}
         overflowing = session.query(Product).filter_by(barcode="OVF1").first()
     assert "Overflowing Tax" in names
-    assert overflowing.tax == 0
+    assert overflowing.tax == 21
     assert "After Bad Row" in names
 
 

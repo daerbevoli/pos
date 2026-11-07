@@ -9,6 +9,7 @@ from collections.abc import Callable
 from sqlalchemy import func
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
+from app.constants.vat import VAT_RATES
 from app.core import csv_import
 from app.models.models import (
     Category,
@@ -17,7 +18,6 @@ from app.models.models import (
     PromoItem,
     Shortcut,
     ShortcutItem,
-    StockMovement,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,32 +172,6 @@ class ProductService:
 
     # ── Stock Management ──────────────────────────────────────────────────────
 
-    # Commented out for now: nothing in the app calls these yet (only tests did).
-    # @staticmethod
-    # def adjust_stock(
-    #     session: Session,
-    #     product_id: int,
-    #     quantity_change: float,
-    #     movement_type: str,
-    #     reference: str = None,
-    #     notes: str = None
-    # ) -> Optional[StockMovement]:
-    #     """
-    #     Adjust stock for a product, committed on its own — for a standalone
-    #     adjustment (inventory screen). Inside a larger save, use move_stock().
-    #     quantity_change: positive = stock in, negative = stock out
-    #     movement_type: 'purchase', 'sale', 'adjustment', 'return', 'waste'
-    #     """
-    #     movement = ProductService.move_stock(
-    #         session, product_id, quantity_change, movement_type, reference, notes
-    #     )
-    #     if movement is not None:
-    #         session.commit()
-    #         logger.info("Stock adjusted: product %s %+g (%s) -> %g%s",
-    #                     product_id, quantity_change, movement_type, movement.quantity_after,
-    #                     f", {notes}" if notes else "")
-    #     return movement
-
     @staticmethod
     def change_stock(
         session: Session,
@@ -226,60 +200,6 @@ class ProductService:
                      qty_before, product.stock_quantity)
         return qty_before, product.stock_quantity
 
-    @staticmethod
-    def move_stock(
-        session: Session,
-        product_id: int,
-        quantity_change: float,
-        movement_type: str,
-        reference: str = None,
-        notes: str = None
-    ) -> StockMovement | None:
-        """change_stock() plus a StockMovement row, for the rare manual
-        changes worth a history (purchase, waste, adjustment) — not for till
-        sales. Also only flushed, never committed."""
-        changed = ProductService.change_stock(session, product_id, quantity_change, reference)
-        if changed is None:
-            return None
-        qty_before, qty_after = changed
-        quantity_change = qty_after - qty_before
-
-        movement = StockMovement(
-            product_id=product_id,
-            movement_type=movement_type,
-            quantity=quantity_change,
-            quantity_before=qty_before,
-            quantity_after=qty_after,
-            reference=reference,
-            notes=notes
-        )
-        session.add(movement)
-        session.flush()
-        return movement
-
-    # Commented out for now: unused (the inventory Low Stock filter uses Product.is_low_stock).
-    # @staticmethod
-    # def get_low_stock_products(session: Session) -> list[Product]:
-    #     return (
-    #         session.query(Product)
-    #         .filter(
-    #             Product.is_active == True,
-    #             Product.stock_quantity <= Product.min_stock_level
-    #         )
-    #         .order_by(Product.stock_quantity)
-    #         .all()
-    #     )
-    #
-    # @staticmethod
-    # def get_stock_movements(session: Session, product_id: int) -> list[StockMovement]:
-    #     return (
-    #         session.query(StockMovement)
-    #         .filter_by(product_id=product_id)
-    #         .order_by(StockMovement.created_at.desc())
-    #         .limit(100)
-    #         .all()
-    #     )
-
     # ── CSV import ───────────────────────────────────────────────────────────
 
     @staticmethod
@@ -295,7 +215,8 @@ class ProductService:
     def _from_import_row(session: Session, row: dict, category_ids: dict[str, int]) -> Product | None:
         """A new Product from one import row, or None to skip it: no name, or
         its barcode is already an article. Unreadable numbers fall back to
-        the defaults; no price means open price, as on the edit form."""
+        the defaults; no price means open price, as on the edit form. A VAT
+        rate that isn't 0, 6, 12 or 21 (or none at all) becomes 21%."""
         name = (row.get("name") or "").strip()
         barcode = (row.get("barcode") or "").strip() or None
         if not name:
@@ -303,6 +224,7 @@ class ProductService:
         if barcode and ProductService.get_by_barcode(session, barcode, include_inactive=True) is not None:
             return None
         price = _number(row.get("price"), 0.0)
+        tax = _number(row.get("tax"), 21)
         is_open_price = (row.get("is_open_price") or "").strip().lower() in ("1", "true", "yes")
         if is_open_price or price <= 0:
             is_open_price, price = True, 0.0
@@ -311,7 +233,7 @@ class ProductService:
             name=name,
             price=price,
             is_open_price=is_open_price,
-            tax=int(_number(row.get("tax"), 0)),
+            tax=int(tax) if tax in VAT_RATES else 21,
             unit=(row.get("unit") or "pcs").strip(),
             stock_quantity=clamp_stock(_number(row.get("stock_quantity"), 0.0)),
             min_stock_level=_number(row.get("min_stock_level"), 5.0),

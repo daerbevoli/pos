@@ -56,7 +56,19 @@ def test_product_import_falls_back_on_unreadable_numbers(db_session):
     assert ProductService.import_rows(db_session, rows) == (1, 0)
     product = db_session.query(Product).filter_by(name="Odd").one()
     assert (product.price, product.is_open_price, product.tax, product.stock_quantity, product.min_stock_level) == \
-        (0.0, True, 0, 0.0, 5.0)
+        (0.0, True, 21, 0.0, 5.0)
+
+
+@pytest.mark.parametrize("tax, expected", [
+    ("6", 6), ("12.0", 12), ("0", 0), ("21", 21),  # the Belgian rates are kept
+    (None, 21), ("", 21), ("7", 21), ("5.5", 21), ("-6", 21),  # anything else is 21%
+])
+def test_product_import_keeps_only_belgian_vat_rates(db_session, tax, expected):
+    row = {"name": "Milk", "price": "1.20"}
+    if tax is not None:
+        row["tax"] = tax
+    assert ProductService.import_rows(db_session, [row]) == (1, 0)
+    assert db_session.query(Product).filter_by(name="Milk").one().tax == expected
 
 
 

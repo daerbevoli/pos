@@ -15,15 +15,13 @@ import logging
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.constants.vat import VAT_RATES
 from app.core.sale.cart import Cart
 from app.core.sale.sales_service import SalesService
 from app.models.models import Invoice, OpenTicket, Product, Sale, ZReport
 from app.utils.clock import utc_now
 
 logger = logging.getLogger(__name__)
-
-VAT_RATES = (0, 6, 21, 12)
-
 
 def till_sales(sales) -> list:
     """The sales that aren't invoiced (S-/RF-). An invoiced sale (I-/CN-)
