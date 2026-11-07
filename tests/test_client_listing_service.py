@@ -2,11 +2,11 @@
 import csv
 from datetime import date, datetime
 
-from app.core.client_listing_service import ClientListingService, LISTING_HEADERS
-from app.core.client_service import ClientService
-from app.core.product_service import ProductService
-from app.core.cart import Cart, CartItem
-from app.core.sales_service import SalesService
+from app.core.client.client_listing_service import ClientListingService, LISTING_HEADERS
+from app.core.client.client_service import ClientService
+from app.core.inventory.product_service import ProductService
+from app.core.sale.cart import Cart, CartItem
+from app.core.sale.sales_service import SalesService
 
 
 def _make_client(session, name, vat):

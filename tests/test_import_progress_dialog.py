@@ -5,9 +5,9 @@ CSV import run on a worker thread behind a progress bar.
 patched_db isolates the DB; start() is called instead of exec() so the
 test isn't blocked by the modal loop.
 """
-from app.core.client_service import ClientService
+from app.core.client.client_service import ClientService
 from app.core.database import get_session
-from app.core.product_service import ProductService
+from app.core.inventory.product_service import ProductService
 from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
 
 

@@ -17,8 +17,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 import app.core.database as database
-from app.core import backup_key
-from app.core.backup_service import (
+from app.core.backup import backup_key
+from app.core.backup.backup_service import (
     DB_MEMBER, ENC_MEMBER, KIND_DAILY, KIND_MANUAL, KIND_POST_Z, KIND_PRE_RESTORE, KIND_PRE_Z,
     MANIFEST_MEMBER, RETENTION, BackupError, BackupPasswordError, BackupService, archive_name,
 )

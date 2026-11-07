@@ -38,8 +38,8 @@ from app.constants import (
     SPACING_XS,
 )
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
-from app.core.client_listing_service import ClientListingService
-from app.core.client_service import ClientService
+from app.core.client.client_listing_service import ClientListingService
+from app.core.client.client_service import ClientService
 from app.core.csv_import import ImportFileError, read_csv_rows
 from app.core.database import get_session
 from app.ui.dialogs.client_listing_dialog import ClientListingDialog

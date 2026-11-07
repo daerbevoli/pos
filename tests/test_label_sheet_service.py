@@ -3,7 +3,7 @@ import pytest
 
 from reportlab.lib.units import mm
 
-from app.core.label_sheet_service import (
+from app.core.inventory.label_sheet_service import (
     LABEL_LAYOUTS, _BAR_HEIGHT, _barcode_drawing, _barcode_type, _detail_lines,
     build_label_sheet_pdf,
 )

@@ -1,9 +1,9 @@
 """Tests for the shared CSV import (app.core.csv_import) and the per-service row rules."""
 import pytest
 
-from app.core.client_service import ClientService
+from app.core.client.client_service import ClientService
 from app.core.csv_import import ImportFileError, read_csv_rows
-from app.core.product_service import ProductService
+from app.core.inventory.product_service import ProductService
 from app.models.models import Product
 
 

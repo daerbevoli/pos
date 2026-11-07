@@ -15,8 +15,8 @@ import logging
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.cart import Cart
-from app.core.sales_service import SalesService
+from app.core.sale.cart import Cart
+from app.core.sale.sales_service import SalesService
 from app.models.models import Invoice, OpenTicket, Product, Sale, ZReport
 from app.utils.clock import utc_now
 

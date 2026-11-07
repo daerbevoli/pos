@@ -16,7 +16,7 @@ from datetime import datetime
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from app.core.cart import WEIGHT_UNITS, Cart, CartItem, DiscountEntry, SubtotalMarker
+from app.core.sale.cart import WEIGHT_UNITS, Cart, CartItem, DiscountEntry, SubtotalMarker
 from app.core.settings_service import SettingsService
 from app.models.models import Invoice, Sale, ZReport
 from app.utils.clock import format_local
@@ -66,7 +66,6 @@ def _get_backend():
     if _backend is not None:
         return _backend
 
-    import usb.backend.libusb1
     import usb.core
 
     if sys.platform == "win32":
@@ -99,7 +98,6 @@ def _parse_id(raw: str, label: str) -> int:
 def _open(vendor_id: str, product_id: str):
     """Open a connection to the configured USB printer. Raises PrinterError on failure."""
     _get_backend()
-    import usb.backend.libusb1
     import usb.core
     from escpos.exceptions import Error as EscposError
     from escpos.printer import Usb

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.label_service import _build_zpl, _zpl_barcode, promo_label_data
+from app.core.inventory.label_service import _build_zpl, _zpl_barcode, promo_label_data
 
 
 def _product(price=2.50, promo=None):

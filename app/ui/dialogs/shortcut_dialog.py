@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from app.constants import DIALOG_BUTTON_HEIGHT, SHORTCUT_DIALOG_MIN_SIZE
 from app.core.database import get_session
-from app.core.product_service import ProductService
+from app.core.inventory.product_service import ProductService
 from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 

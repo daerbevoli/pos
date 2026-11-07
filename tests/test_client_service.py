@@ -1,7 +1,7 @@
 """Tests for app.core.client_service.ClientService."""
 import pytest
 
-from app.core.client_service import ClientService
+from app.core.client.client_service import ClientService
 from app.models.models import Client
 
 

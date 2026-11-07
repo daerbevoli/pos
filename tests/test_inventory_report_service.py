@@ -3,8 +3,8 @@ import csv
 
 import pytest
 
-from app.core.inventory_report_service import InventoryLine, InventoryReportService
-from app.core.product_service import ProductService
+from app.core.inventory.inventory_report_service import InventoryLine, InventoryReportService
+from app.core.inventory.product_service import ProductService
 
 
 def _make_product(session, **overrides):

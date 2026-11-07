@@ -17,8 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.cart import Cart, CartItem, DiscountEntry, SubtotalMarker
-from app.core.sales_service import invoice_lines
+from app.core.sale.cart import Cart, CartItem, DiscountEntry, SubtotalMarker
+from app.core.sale.sales_service import invoice_lines
 
 SEEDS = range(500)
 

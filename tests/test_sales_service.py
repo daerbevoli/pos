@@ -4,10 +4,10 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app.core.product_service import ProductService
-from app.core.cart import Cart, CartItem
-from app.core.sales_service import SalesService
-from app.models.models import Sale, SaleItem, Invoice
+from app.core.inventory.product_service import ProductService
+from app.core.sale.cart import Cart, CartItem
+from app.core.sale.sales_service import SalesService
+from app.models.models import Sale, Invoice
 
 
 def _make_product(session, **overrides):
@@ -196,7 +196,7 @@ def test_update_sale_missing_sale_raises(db_session):
 # ── finalize_invoice ─────────────────────────────────────────────────────
 
 def test_finalize_invoice_creates_sale_and_invoice(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, stock_quantity=10)
 
@@ -217,7 +217,7 @@ def test_finalize_invoice_creates_sale_and_invoice(db_session):
 def test_finalize_invoice_failure_rolls_back_sale_and_stock(db_session, monkeypatch):
     """A failure after the stock moved (e.g. invoice numbering) must not
     leave a committed sale with no invoice, or the stock already deducted."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     from app.models.models import StockMovement
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, stock_quantity=10)
@@ -262,7 +262,7 @@ def test_finalize_invoice_empty_cart_raises(db_session):
 def test_finalize_invoice_numbers_its_own_sequence(db_session):
     """Invoices count separately from sales: a plain sale in between
     doesn't use up an invoice number."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     first = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
@@ -276,7 +276,7 @@ def test_finalize_invoice_numbers_its_own_sequence(db_session):
 
 
 def test_finalize_invoice_snapshots_client_and_amounts(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Acme Corp", vatNumber="BE001", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=12.1, tax=21)  # 10 base, 2.1 tax
 
@@ -302,7 +302,7 @@ def test_finalize_invoice_snapshots_client_and_amounts(db_session):
 
 
 def test_finalize_invoice_snapshots_payment(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=10.0)
     breakdown = [{"method": "cash", "amount": 4.0}, {"method": "card", "amount": 6.0}]
@@ -331,7 +331,7 @@ def test_finalize_invoice_unknown_client_id_raises(db_session):
 
 
 def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Original Name", vatNumber="VORIG", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
 
@@ -352,7 +352,7 @@ def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
     """An invoice is editable until it's sent: reopening/overwriting the
     sale (update_sale) must re-derive the invoice's frozen snapshot fields
     rather than leave them stale."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=10.0, tax=21)
 
@@ -371,7 +371,7 @@ def test_update_sale_keeps_unsent_invoice_snapshot_in_sync(db_session):
 
 
 def test_update_sale_resyncs_unsent_invoice_payment(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=10.0)
     invoice = SalesService.finalize_invoice(
@@ -390,7 +390,7 @@ def test_update_sale_resyncs_unsent_invoice_payment(db_session):
 
 
 def test_update_sale_turning_receipt_into_invoice_snapshots_payment(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=10.0)
     sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)), payment_method="cash")
@@ -407,7 +407,7 @@ def test_update_sale_turning_receipt_into_invoice_snapshots_payment(db_session):
 def test_update_sale_with_client_turns_refund_into_credit_note(db_session):
     """A finished RF- ticket reopened and given a client must become a CN-
     credit note on re-payment, not stay a plain refund."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     cart = _cart_with(_item_for(product, quantity=-1))
@@ -426,7 +426,7 @@ def test_update_sale_with_client_turns_refund_into_credit_note(db_session):
 
 
 def test_update_sale_with_client_turns_receipt_into_invoice(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     cart = _cart_with(_item_for(product, quantity=1))
@@ -439,7 +439,7 @@ def test_update_sale_with_client_turns_receipt_into_invoice(db_session):
 
 
 def test_mark_invoice_sent_sets_timestamp(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
@@ -455,7 +455,7 @@ def test_mark_invoice_sent_sets_timestamp(db_session):
 def test_mark_invoice_sent_is_idempotent(db_session):
     """Calling it again after the invoice is already sent must not re-stamp
     (and, once real Peppol transmission is wired in, must not re-send)."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
@@ -478,7 +478,7 @@ def test_mark_invoice_sent_missing_invoice_raises(db_session):
 def test_update_sale_refuses_once_invoice_sent(db_session):
     """The hard lock: update_sale() must reject edits once mark_invoice_sent()
     has been called, even if a caller bypasses the UI's own reopen guard."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session)
     invoice = SalesService.finalize_invoice(
@@ -536,8 +536,8 @@ def test_get_sales_range_uses_local_days_not_utc_days(db_session, brussels_tz):
 
 
 def test_invoice_data_is_dated_in_local_time(db_session, brussels_tz):
-    from app.core.client_service import ClientService
-    from app.core.sales_service import generate_invoice_data
+    from app.core.client.client_service import ClientService
+    from app.core.sale.sales_service import generate_invoice_data
     product = _make_product(db_session)
     client = ClientService.create(db_session, name="Acme", street="Kerkstraat 1", zip_code="2000",
                                   city="Antwerpen", vatNumber="BE0123456789")
@@ -570,7 +570,7 @@ def test_refund_sale_numbered_rf_with_its_own_sequence(db_session):
 
 
 def test_refund_invoice_numbered_cn(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     product = _make_product(db_session)
     client = ClientService.create(
         db_session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
@@ -587,8 +587,8 @@ def test_refund_invoice_numbered_cn(db_session):
 def test_generate_invoice_data_sends_frozen_client_country(db_session):
     """The ERP partner's country comes from the invoice snapshot, not the
     live client — changing the client afterward must not alter the invoice."""
-    from app.core.client_service import ClientService
-    from app.core.sales_service import generate_invoice_data
+    from app.core.client.client_service import ClientService
+    from app.core.sale.sales_service import generate_invoice_data
     client = ClientService.create(db_session, name="Dutch BV", vatNumber="NL001", street="Straat 1",
                                   zip_code="1011", city="Amsterdam", country="NL")
     product = _make_product(db_session)
@@ -604,8 +604,8 @@ def test_generate_invoice_data_sends_frozen_client_country(db_session):
 def test_generate_invoice_data_sends_credit_note_as_out_refund_with_positive_lines(db_session):
     """Odoo refuses negative lines on a credit note: it's sent as an
     out_refund with positive quantities and amounts."""
-    from app.core.client_service import ClientService
-    from app.core.sales_service import generate_invoice_data
+    from app.core.client.client_service import ClientService
+    from app.core.sale.sales_service import generate_invoice_data
     client = ClientService.create(db_session, name="Acme", vatNumber="V1", street="1 Main St",
                                   zip_code="1000", city="Brussels")
     product = _make_product(db_session)
@@ -622,7 +622,7 @@ def test_generate_invoice_data_sends_credit_note_as_out_refund_with_positive_lin
 def test_update_sale_moves_invoice_to_another_client(db_session):
     """Reopening an unsent invoice and picking a different client re-addresses
     the same invoice (same number) to the new client."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     first = ClientService.create(db_session, name="First", vatNumber="V1", street="1 Main St",
                                  zip_code="1000", city="Brussels")
     second = ClientService.create(db_session, name="Second", vatNumber="V2", street="2 Side St",
@@ -651,7 +651,7 @@ def _line(name, quantity, **flags):
 def test_invoice_lines_leave_out_voided_pairs():
     """A line voided on a reopened sale and its reversal net to zero, so
     neither is sent — only the lines that were actually sold remain."""
-    from app.core.sales_service import invoice_lines
+    from app.core.sale.sales_service import invoice_lines
     cart = _cart_with(
         _line("Milk", 2, has_reversal=True),
         _line("Bread", 1),
@@ -665,7 +665,7 @@ def test_credit_note_lines_leave_out_voided_pairs():
     """On a credit note the refund lines are negative and a voided one's
     reversal positive — the pair must drop out rather than both being
     abs()'d into two credited lines."""
-    from app.core.sales_service import invoice_lines
+    from app.core.sale.sales_service import invoice_lines
     cart = _cart_with(
         _line("Milk", -2, has_reversal=True),
         _line("Bread", -1),
@@ -678,7 +678,7 @@ def test_credit_note_lines_leave_out_voided_pairs():
 # ── VAT on the discounted amount ─────────────────────────────────────────
 
 def test_vat_is_charged_on_the_discounted_line_amount(db_session):
-    from app.core.cart import DiscountEntry
+    from app.core.sale.cart import DiscountEntry
     product = _make_product(db_session, price=12.10, tax=21)
     cart = _cart_with(_item_for(product), DiscountEntry(amount=2.10, label="MANUAL DISCOUNT 2.10"))
 
@@ -691,7 +691,7 @@ def test_vat_is_charged_on_the_discounted_line_amount(db_session):
 
 
 def test_section_discount_vat_is_split_per_rate(db_session):
-    from app.core.cart import DiscountEntry, SubtotalMarker
+    from app.core.sale.cart import DiscountEntry, SubtotalMarker
     food = _make_product(db_session, name="Food", price=10.60, tax=6)
     drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
     cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker(),
@@ -706,9 +706,9 @@ def test_section_discount_vat_is_split_per_rate(db_session):
 
 
 def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
-    from app.core.client_service import ClientService
-    from app.core.cart import DiscountEntry, SubtotalMarker
-    from app.core.sales_service import invoice_lines
+    from app.core.client.client_service import ClientService
+    from app.core.sale.cart import DiscountEntry, SubtotalMarker
+    from app.core.sale.sales_service import invoice_lines
     client = ClientService.create(db_session, name="C", vatNumber="V9", street="s", zip_code="1000", city="Brussels")
     food = _make_product(db_session, name="Food", price=10.60, tax=6)
     drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
@@ -726,8 +726,8 @@ def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
 def test_invoice_number_not_reused_after_z_report_same_day(db_session):
     """A Z report purges sales but keeps invoices; the invoice sequence
     carries on rather than reissue an existing invoice number."""
-    from app.core.client_service import ClientService
-    from app.core.report_service import XZReportService
+    from app.core.client.client_service import ClientService
+    from app.core.sale.report_service import XZReportService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, stock_quantity=10)
     first = SalesService.finalize_invoice(db_session, _cart_with(_item_for(product, quantity=1)), client_id=client.id)
@@ -741,7 +741,7 @@ def test_invoice_number_not_reused_after_z_report_same_day(db_session):
 
 
 def test_z_report_restarts_sale_numbers(db_session):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     product = _make_product(db_session, stock_quantity=10)
     SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
     SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
@@ -753,7 +753,7 @@ def test_z_report_restarts_sale_numbers(db_session):
 
 
 def test_invoice_number_wraps_after_999(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     from app.models.models import NumberSequence
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, stock_quantity=10)
@@ -784,7 +784,7 @@ def test_wrapped_number_skips_one_still_in_use(db_session):
 def test_sequence_seeds_from_latest_number_on_existing_database(db_session):
     """A database from before stored counters continues after its last
     issued invoice instead of restarting at 001."""
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     from app.models.models import Invoice
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, stock_quantity=10)
@@ -850,7 +850,7 @@ def test_update_sale_bad_client_changes_nothing_in_session(db_session):
 def test_report_payment_totals_take_off_change(db_session):
     """Regression: 2.00 tendered for a 1.25 sale was counted as 2.00 cash
     in the X/Z report, overstating the drawer by the 0.75 handed back."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     product = _make_product(db_session, price=1.25)
     sale = SalesService.finalize_sale(
         db_session, _cart_with(_item_for(product, quantity=1)),
@@ -875,7 +875,7 @@ def test_report_payment_totals_take_off_change(db_session):
 def test_report_payment_totals_dont_deduct_change_twice_without_breakdown(db_session):
     """A sale with no stored breakdown falls back to final_amount, which is
     already net of change."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     product = _make_product(db_session, price=1.25)
     SalesService.finalize_sale(
         db_session, _cart_with(_item_for(product, quantity=1)),
@@ -887,7 +887,7 @@ def test_report_payment_totals_dont_deduct_change_twice_without_breakdown(db_ses
 
 
 def test_payment_totals_take_off_change(db_session):
-    from app.core.report_service import _sum_payment_breakdowns
+    from app.core.sale.report_service import _sum_payment_breakdowns
     product = _make_product(db_session, price=1.25)
     sale = SalesService.finalize_sale(
         db_session, _cart_with(_item_for(product, quantity=1)),
@@ -901,8 +901,8 @@ def test_payment_totals_take_off_change(db_session):
 def test_invoice_payment_totals_take_off_change_after_z_report(db_session):
     """The invoice snapshots change_given, so its cash/card total is still
     net of change once a Z report has purged the sale."""
-    from app.core.client_service import ClientService
-    from app.core.report_service import XZReportService, invoice_payment_breakdown
+    from app.core.client.client_service import ClientService
+    from app.core.sale.report_service import XZReportService, invoice_payment_breakdown
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=1.25)
     invoice = SalesService.finalize_invoice(
@@ -921,7 +921,7 @@ def test_invoice_payment_totals_take_off_change_after_z_report(db_session):
 
 
 def test_update_sale_resyncs_invoice_change(db_session):
-    from app.core.client_service import ClientService
+    from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Client", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels")
     product = _make_product(db_session, price=1.25)
     invoice = SalesService.finalize_invoice(
@@ -941,8 +941,8 @@ def test_update_sale_resyncs_invoice_change(db_session):
 def test_recovered_open_ticket_keeps_foreign_client_vat_treatment(db_session):
     """Regression: a crash-recovered invoice ticket for an EU client came
     back as domestic, so lines added after recovery got Belgian VAT."""
-    from app.core.client_service import ClientService
-    from app.core.sales_service import load_open_tickets, save_open_ticket
+    from app.core.client.client_service import ClientService
+    from app.core.sale.sales_service import load_open_tickets, save_open_ticket
     foreign = ClientService.create(db_session, name="F", vatNumber="FR1", street="s", zip_code="1", city="Paris", country="FR")
     domestic = ClientService.create(db_session, name="B", vatNumber="BE1", street="s", zip_code="2", city="Gent", country="BE")
     cart = Cart(is_domestic=False)

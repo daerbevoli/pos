@@ -11,7 +11,7 @@ import pytest
 from PyQt6.QtWidgets import QMessageBox
 
 import app.core.database as database
-from app.core.backup_service import BACKUP_SETTING_EXTRA_DIR, BackupError, BackupService
+from app.core.backup.backup_service import BACKUP_SETTING_EXTRA_DIR, BackupError, BackupService
 from app.core.database import get_session
 from app.core.settings_service import SettingsService
 from app.ui.dialogs.backup_dialog import BackupDialog
@@ -125,7 +125,7 @@ def test_confirmed_restore_restores_then_restarts(qtbot, patched_db, monkeypatch
 # ── Encryption ───────────────────────────────────────────────────────────
 
 def test_encrypted_restore_asks_password_retries_wrong_one_and_passes_it_on(qtbot, patched_db, monkeypatch):
-    from app.core.backup_service import BackupPasswordError
+    from app.core.backup.backup_service import BackupPasswordError
     _plain_archive(monkeypatch, encrypted=True)
     typed = iter(["wrong one", "right one"])
     prompts = []
@@ -207,7 +207,7 @@ def test_backup_now_reports_failure(qtbot, patched_db, overlays):
 
 def test_wait_for_all_waits_for_every_running_backup(qtbot, patched_db, monkeypatch):
     import threading
-    from app.core.backup_worker import BackupWorker
+    from app.core.backup.backup_worker import BackupWorker
     release = threading.Event()
     monkeypatch.setattr(BackupService, "create_backup",
                         lambda *a, **k: release.wait(5))

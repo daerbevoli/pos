@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QGridLayout, QWidget
 
 from app.constants import SPACING_XS
 from app.core.database import get_session
-from app.core.product_service import ProductService
+from app.core.inventory.product_service import ProductService
 from app.utils.utils import CategoryButton
 
 

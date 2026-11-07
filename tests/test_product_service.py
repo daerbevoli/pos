@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from app.core.product_service import ProductService, STOCK_MAX, STOCK_MIN
-from app.models.models import Product, Category, StockMovement
+from app.core.inventory.product_service import ProductService, STOCK_MAX, STOCK_MIN
+from app.models.models import StockMovement
 
 
 def _make_product(session, **overrides):

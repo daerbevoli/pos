@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def _usb_backend():
     # Raises if libusb can't be loaded: the bundled DLL on Windows, the
     # system libusb-1.0 on Linux.
-    from app.core.receipt_service import _get_backend
+    from app.core.sale.receipt_service import _get_backend
     _get_backend()
 
 
@@ -28,7 +28,7 @@ def _usb_enumerate():
     # Lists attached devices (none on a build server); never opens one.
     import usb.core
 
-    from app.core.receipt_service import _get_backend
+    from app.core.sale.receipt_service import _get_backend
     list(usb.core.find(find_all=True, backend=_get_backend()))
 
 
@@ -38,7 +38,7 @@ def _escpos():
 
 
 def _label_sheet_pdf():
-    from app.core.label_sheet_service import LABEL_LAYOUTS, build_label_sheet_pdf
+    from app.core.inventory.label_sheet_service import LABEL_LAYOUTS, build_label_sheet_pdf
     layout = next(iter(LABEL_LAYOUTS))
     with tempfile.TemporaryDirectory() as tmp:
         # One GTIN and one Code 128 code: each symbology is a separate module.

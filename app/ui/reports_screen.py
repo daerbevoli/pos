@@ -35,15 +35,15 @@ from app.constants import (
     SPACING_SM,
 )
 from app.core.database import get_session
-from app.core.receipt_service import PrinterError, ReceiptService
-from app.core.report_service import (
+from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.report_service import (
     XZReportService,
     invoice_category_breakdown,
     invoice_payment_breakdown,
     invoice_vat_breakdown,
     till_sales,
 )
-from app.core.sales_service import SalesService
+from app.core.sale.sales_service import SalesService
 from app.models.models import Invoice, Sale
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
 from app.ui.dialogs.z_reports_dialog import ZReportsDialog

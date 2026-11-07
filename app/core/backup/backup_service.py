@@ -61,7 +61,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy.orm import Session
 
 from app.__version__ import __version__
-from app.core import backup_key, database
+from app.core import database
+from app.core.backup import backup_key
 from app.core.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)

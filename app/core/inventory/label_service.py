@@ -8,7 +8,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.core.receipt_service import PrinterError, _get_backend, _parse_id
+from app.core.sale.receipt_service import PrinterError, _get_backend, _parse_id
 from app.core.settings_service import SettingsService
 from app.models.models import Product
 from app.utils.barcodes import barcode_symbology

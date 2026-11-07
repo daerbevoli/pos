@@ -27,10 +27,10 @@ from app.constants import (
     PROGRESS_DIALOG_WIDTH,
 )
 from app.core.admin import check_admin_code
-from app.core.backup_service import KIND_POST_Z, KIND_PRE_Z, BackupService
+from app.core.backup.backup_service import KIND_POST_Z, KIND_PRE_Z, BackupService
 from app.core.database import get_session
-from app.core.receipt_service import ReceiptService
-from app.core.report_service import XZReportService
+from app.core.sale.receipt_service import ReceiptService
+from app.core.sale.report_service import XZReportService
 from app.models.models import ZReport
 from app.ui.dialogs.numpad_dialog import NumpadDialog
 from app.ui.dialogs.step_worker import StepWorker

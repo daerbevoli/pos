@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.constants import BACKUP_DIALOG_MIN_SIZE, COLOR_LOG_ERROR, DIALOG_BUTTON_HEIGHT
-from app.core.backup_service import (
+from app.core.backup.backup_service import (
     BACKUP_SETTING_EXTRA_DIR,
     KIND_MANUAL,
     MIN_PASSWORD_LENGTH,
@@ -38,7 +38,7 @@ from app.core.backup_service import (
     BackupPasswordError,
     BackupService,
 )
-from app.core.backup_worker import BackupWorker
+from app.core.backup.backup_worker import BackupWorker
 from app.core.database import get_session
 from app.core.settings_service import SettingsService
 from app.utils.utils import FunctionButton, TapToDismissOverlay

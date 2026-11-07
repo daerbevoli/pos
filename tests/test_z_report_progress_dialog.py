@@ -10,9 +10,9 @@ so the test isn't blocked by the modal loop.
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from app.core.backup_service import BackupError, BackupResult, BackupService
+from app.core.backup.backup_service import BackupError, BackupResult, BackupService
 from app.core.database import get_session
-from app.core.receipt_service import PrinterError, ReceiptService
+from app.core.sale.receipt_service import PrinterError, ReceiptService
 from app.models.models import ZReport
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
 

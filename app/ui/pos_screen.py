@@ -53,7 +53,7 @@ from app.constants import (
     SPACING_XS,
 )
 from app.constants.countries import BELGIUM
-from app.core.cart import (
+from app.core.sale.cart import (
     WEIGHT_UNITS,
     Cart,
     CartItem,
@@ -61,13 +61,13 @@ from app.core.cart import (
     PaymentEntry,
     SubtotalMarker,
 )
-from app.core.client_service import ClientService
+from app.core.client.client_service import ClientService
 from app.core.database import get_session
-from app.core.erp_service import ErpService
-from app.core.erp_worker import InvoiceSendWorker
-from app.core.product_service import ProductService
-from app.core.receipt_service import PrinterError, ReceiptService
-from app.core.sales_service import (
+from app.core.erp.erp_service import ErpService
+from app.core.erp.erp_worker import InvoiceSendWorker
+from app.core.inventory.product_service import ProductService
+from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.sales_service import (
     SalesService,
     clear_open_ticket,
     generate_invoice_data,

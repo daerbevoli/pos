@@ -3,8 +3,8 @@ from unittest import mock
 import pytest
 from PIL import Image
 
-from app.core.cart import Cart, CartItem, SubtotalMarker
-from app.core.receipt_service import LOGO_MAX_WIDTH_PX, _print_company_info, _print_line_items, _print_logo
+from app.core.sale.cart import Cart, CartItem, SubtotalMarker
+from app.core.sale.receipt_service import LOGO_MAX_WIDTH_PX, _print_company_info, _print_line_items, _print_logo
 
 
 def _printed_text(printer):
@@ -76,14 +76,13 @@ def test_subtotal_lines_print_their_own_block():
 def fresh_backend(monkeypatch):
     """Undo _get_backend()'s module-level cache and usb.core.find patch."""
     import usb.core
-    import app.core.receipt_service as receipt_service
+    import app.core.sale.receipt_service as receipt_service
     monkeypatch.setattr(receipt_service, "_backend", None)
     monkeypatch.setattr(usb.core, "find", usb.core.find)
     return receipt_service
 
 
 def test_backend_on_linux_uses_system_libusb_and_patches_find_once(fresh_backend, monkeypatch):
-    import usb.backend.libusb1
     import usb.core
     backend = object()
     get_backend = mock.Mock(return_value=backend)
@@ -99,7 +98,6 @@ def test_backend_on_linux_uses_system_libusb_and_patches_find_once(fresh_backend
 
 
 def test_backend_that_cannot_load_raises_and_leaves_find_alone(fresh_backend, monkeypatch):
-    import usb.backend.libusb1
     import usb.core
     original_find = usb.core.find
     monkeypatch.setattr(fresh_backend.sys, "platform", "linux")

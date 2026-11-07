@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.constants import LABEL_SHEET_DIALOG_WIDTH, LABEL_SHEET_FIELD_HEIGHT
-from app.core.label_sheet_service import LABEL_LAYOUTS
+from app.core.inventory.label_sheet_service import LABEL_LAYOUTS
 from app.utils.utils import FunctionButton
 
 

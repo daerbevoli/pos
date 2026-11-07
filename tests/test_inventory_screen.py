@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QMessageBox, QFileDialog
 from app.ui.inventory_screen import InventoryScreen
 from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
-from app.core.product_service import ProductService
+from app.core.inventory.product_service import ProductService
 from app.core.database import get_session
 from app.models.models import Product
 
@@ -807,7 +807,7 @@ def test_print_barcodes_empty_barcode_blocks_layout_choice(screen, monkeypatch, 
 
 
 def test_label_sheet_layout_combo_starts_empty_and_lists_all_layouts(qtbot):
-    from app.core.label_sheet_service import LABEL_LAYOUTS
+    from app.core.inventory.label_sheet_service import LABEL_LAYOUTS
     dialog = LabelSheetDialog("Labelled", "2060000000019")
     qtbot.addWidget(dialog)
 

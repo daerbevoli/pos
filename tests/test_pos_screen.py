@@ -11,10 +11,10 @@ import pytest
 from PyQt6.QtWidgets import QMessageBox
 
 from app.ui.pos_screen import POSScreen
-from app.core.product_service import ProductService
-from app.core.client_service import ClientService
-from app.core.cart import Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker
-from app.core.sales_service import SalesService
+from app.core.inventory.product_service import ProductService
+from app.core.client.client_service import ClientService
+from app.core.sale.cart import Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker
+from app.core.sale.sales_service import SalesService
 from app.core.database import get_session
 from app.models.models import Sale
 
@@ -216,7 +216,7 @@ def test_reversed_refund_line_changes_revenue_but_is_not_a_mistake(screen):
     """Sale of 2 x 10, then a refund of 1 x 10 + 1 x 5 that's reopened and
     has its 5 line reversed: revenue ends at 20 - 10 = 10, and the reversal
     doesn't show up under mistakes."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
 
     ten, _, _ = _add_product(name="Ten", price=10.0)
     five, _, _ = _add_product(name="Five", price=5.0)

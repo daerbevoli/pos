@@ -12,8 +12,8 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from app.constants.countries import BELGIUM
-from app.core.cart import Cart, CartItem, DiscountEntry
-from app.core.product_service import ProductService
+from app.core.sale.cart import Cart, CartItem, DiscountEntry
+from app.core.inventory.product_service import ProductService
 from app.models.models import (
     Client,
     Invoice,

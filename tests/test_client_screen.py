@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from app.ui.client_screen import ClientScreen
-from app.core.client_service import ClientService
+from app.core.client.client_service import ClientService
 from app.core.database import get_session
 
 

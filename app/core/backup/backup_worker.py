@@ -10,7 +10,7 @@ import logging
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.core.backup_service import BackupError, BackupService
+from app.core.backup.backup_service import BackupError, BackupService
 
 logger = logging.getLogger(__name__)
 

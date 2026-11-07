@@ -25,10 +25,10 @@ from app.constants import (
     TAB_BAR_MIN_HEIGHT,
 )
 from app.constants.sizes import MAIN_WINDOW_SIZE
-from app.core.backup_service import KIND_DAILY, BackupService
-from app.core.backup_worker import BackupWorker
+from app.core.backup.backup_service import KIND_DAILY, BackupService
+from app.core.backup.backup_worker import BackupWorker
 from app.core.database import get_session
-from app.core.erp_worker import InvoiceSendWorker
+from app.core.erp.erp_worker import InvoiceSendWorker
 from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
 from app.ui.customer_display import CustomerDisplay

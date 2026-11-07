@@ -37,10 +37,10 @@ from app.constants import (
 )
 from app.core.admin import admin_code_problem, check_admin_code, set_admin_code
 from app.core.database import get_session
-from app.core.erp_service import ErpService
-from app.core.label_service import LabelPrinterService
-from app.core.product_service import ProductService
-from app.core.receipt_service import PrinterError, ReceiptService
+from app.core.erp.erp_service import ErpService
+from app.core.inventory.label_service import LabelPrinterService
+from app.core.inventory.product_service import ProductService
+from app.core.sale.receipt_service import PrinterError, ReceiptService
 from app.core.settings_service import SettingsService
 from app.ui.dialogs.backup_dialog import BackupDialog
 from app.ui.dialogs.category_dialog import CategoryDialog

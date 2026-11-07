@@ -4,9 +4,7 @@ dataclasses in app.core.sales_service, and the _calc_tax helper.
 """
 import json
 
-import pytest
-
-from app.core.cart import (
+from app.core.sale.cart import (
     Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker, calc_tax,
 )
 

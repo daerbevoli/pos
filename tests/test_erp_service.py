@@ -1,6 +1,6 @@
 """Tests for app.core.erp_service.ErpService, with Odoo's API faked."""
-from app.core.erp_service import ErpService
-from app.core.sales_service import InvoiceLine
+from app.core.erp.erp_service import ErpService
+from app.core.sale.sales_service import InvoiceLine
 
 
 def _line(name, rate):
@@ -24,7 +24,7 @@ def test_invoice_lines_look_up_each_tax_rate_once(monkeypatch):
 
 import pytest
 
-from app.core.erp_service import ERPError
+from app.core.erp.erp_service import ERPError
 
 CUSTOMER = {"name": "Acme", "street": "Kerkstraat 1", "zip": "2000", "city": "Antwerpen",
             "country": "BE", "vat": "BE 0477.472.701", "phone": None, "email": "acme@example.com"}

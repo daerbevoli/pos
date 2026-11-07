@@ -13,8 +13,8 @@ from PyQt6.QtWidgets import QAbstractItemView, QMessageBox
 
 from app.ui.customer_display import CustomerDisplay
 from app.ui.main_window import MainWindow
-from app.core.client_service import ClientService
-from app.core.product_service import ProductService
+from app.core.client.client_service import ClientService
+from app.core.inventory.product_service import ProductService
 from app.core.database import get_session
 
 

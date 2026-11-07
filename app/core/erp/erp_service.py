@@ -4,7 +4,7 @@ from typing import Any
 
 import requests
 
-from app.core.sales_service import InvoiceLine
+from app.core.sale.sales_service import InvoiceLine
 from app.utils.validators import normalize_vat
 
 logger = logging.getLogger(__name__)

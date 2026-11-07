@@ -18,7 +18,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
 
-from app.core.report_service import invoice_vat_breakdown
+from app.core.sale.report_service import invoice_vat_breakdown
 from app.models.models import Invoice
 from app.utils.clock import local_days_range
 

@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
 
 from app.constants import DIALOG_BUTTON_HEIGHT, Z_REPORTS_DIALOG_MIN_SIZE
 from app.core.database import get_session
-from app.core.receipt_service import PrinterError, ReceiptService
-from app.core.report_service import XZReportService
+from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.report_service import XZReportService
 from app.models.models import ZReport
 from app.utils.clock import format_local
 from app.utils.utils import FunctionButton, TapToDismissOverlay

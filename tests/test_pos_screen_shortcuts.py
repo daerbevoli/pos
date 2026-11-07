@@ -8,8 +8,8 @@ import pytest
 
 from app.ui.pos_screen import POSScreen
 from app.core.database import get_session
-from app.core.product_service import ProductService
-from app.core.cart import CartItem
+from app.core.inventory.product_service import ProductService
+from app.core.sale.cart import CartItem
 
 
 @pytest.fixture

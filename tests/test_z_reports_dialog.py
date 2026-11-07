@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core.database import get_session
-from app.core.receipt_service import PrinterError, ReceiptService
+from app.core.sale.receipt_service import PrinterError, ReceiptService
 from app.models.models import ZReport
 from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 

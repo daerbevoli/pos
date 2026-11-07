@@ -6,7 +6,7 @@ the test thread; ErpService is replaced by a fake, so no HTTP is made.
 """
 import pytest
 
-from app.core.erp_worker import InvoiceSendWorker
+from app.core.erp.erp_worker import InvoiceSendWorker
 
 INVOICE_DATA = {"inv_num": "I-0001"}
 

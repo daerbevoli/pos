@@ -89,7 +89,7 @@ def test_test_print_shows_success_overlay(screen, monkeypatch):
 
 
 def test_test_print_shows_error_overlay_on_failure(screen, monkeypatch):
-    from app.core.receipt_service import PrinterError
+    from app.core.sale.receipt_service import PrinterError
 
     calls = []
 
@@ -139,7 +139,7 @@ def _shortcut_rows(screen):
 
 def test_add_shortcut_creates_and_lists_it(screen, monkeypatch):
     from app.core.database import get_session
-    from app.core.product_service import ProductService
+    from app.core.inventory.product_service import ProductService
 
     with get_session() as session:
         pid = ProductService.create(session, name="Cola", price=1.0, tax=21).id
@@ -160,7 +160,7 @@ def test_add_shortcut_creates_and_lists_it(screen, monkeypatch):
 
 def test_edit_shortcut_renames_and_updates_items(screen, monkeypatch):
     from app.core.database import get_session
-    from app.core.product_service import ProductService
+    from app.core.inventory.product_service import ProductService
 
     with get_session() as session:
         a = ProductService.create(session, name="A", price=1.0, tax=21).id
@@ -185,7 +185,7 @@ def test_edit_shortcut_renames_and_updates_items(screen, monkeypatch):
 
 def test_remove_shortcut_deletes_it(screen, monkeypatch):
     from app.core.database import get_session
-    from app.core.product_service import ProductService
+    from app.core.inventory.product_service import ProductService
 
     with get_session() as session:
         ProductService.create_shortcut(session, "Doomed")

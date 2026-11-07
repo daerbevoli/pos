@@ -3,11 +3,11 @@ import pytest
 from PyQt6.QtCore import QDate
 
 from app.ui.reports_screen import ReportsScreen
-from app.core.report_service import _payment_breakdown, _discounts_and_mistakes, _sum_payment_breakdowns
-from app.core.product_service import ProductService
-from app.core.cart import Cart, CartItem, DiscountEntry
-from app.core.sales_service import SalesService
-from app.core.client_service import ClientService
+from app.core.sale.report_service import _payment_breakdown, _discounts_and_mistakes, _sum_payment_breakdowns
+from app.core.inventory.product_service import ProductService
+from app.core.sale.cart import Cart, CartItem, DiscountEntry
+from app.core.sale.sales_service import SalesService
+from app.core.client.client_service import ClientService
 from app.core.database import get_session
 
 
@@ -413,7 +413,7 @@ def _make_invoice():
 
 
 def test_close_z_report_refuses_while_an_invoice_is_unsent(patched_db):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     from app.models.models import Sale, ZReport
     invoice = _make_invoice()
 
@@ -427,7 +427,7 @@ def test_close_z_report_refuses_while_an_invoice_is_unsent(patched_db):
 
 
 def test_close_z_report_allowed_once_invoice_is_sent(patched_db):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     invoice = _make_invoice()
     with get_session() as session:
         SalesService.mark_invoice_sent(session, invoice.sale_id)
@@ -440,7 +440,7 @@ def test_close_z_report_allowed_once_invoice_is_sent(patched_db):
 def test_invoice_orphaned_by_an_earlier_z_report_does_not_block(patched_db):
     """An unsent invoice whose sale is already gone can't be sent from the
     POS anymore — it mustn't block every future Z report forever."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     from app.models.models import Invoice
     invoice = _make_invoice()
     with get_session() as session:
@@ -455,7 +455,7 @@ def test_invoice_orphaned_by_an_earlier_z_report_does_not_block(patched_db):
 def test_second_z_report_covers_only_the_sales_since_the_first(patched_db):
     """The everyday case: the next Z report starts where the last one ended
     and counts only the sales rung up since."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     with get_session() as session:
         product = _make_product(session, price=10.0)
     _finalize_sale(product)
@@ -479,7 +479,7 @@ def test_close_z_report_stores_discounts_and_mistakes(patched_db):
     """The Z report purges its sales, so discounts/mistakes must be kept on
     the ZReport row itself to be printable."""
     import json
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     with get_session() as session:
         product = _make_product(session, price=2.0)
     with get_session() as session:
@@ -517,7 +517,7 @@ def _invoice_with_discount(product, client_id):
 
 
 def test_x_report_leaves_invoices_and_their_discounts_out(patched_db):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     with get_session() as session:
         product = _make_product(session, price=10.0)
     _finalize_sale(product, quantity=1)
@@ -533,7 +533,7 @@ def test_x_report_leaves_invoices_and_their_discounts_out(patched_db):
 
 
 def test_z_report_totals_leave_invoices_out_but_purge_every_sale(patched_db):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     from app.models.models import Invoice, Sale
     with get_session() as session:
         product = _make_product(session, price=10.0)
@@ -551,7 +551,7 @@ def test_z_report_totals_leave_invoices_out_but_purge_every_sale(patched_db):
 
 
 def test_revenue_cards_split_sales_and_invoices(screen):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     with get_session() as session:
         product = _make_product(session, price=10.0)
     _finalize_sale(product, quantity=3)
@@ -594,7 +594,7 @@ def test_z_report_button_warns_and_skips_confirmation_when_unsent(screen, monkey
 def test_x_report_number_matches_the_z_report_that_closes_its_period(patched_db):
     """X reports share their period's number however often they're printed;
     the closing Z report takes that number, and the next period moves on."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     with get_session() as session:
         assert XZReportService.generate_x_report(session)["report_number"] == "X-0001"
         assert XZReportService.generate_x_report(session)["report_number"] == "X-0001"
@@ -657,7 +657,7 @@ def test_mark_sent_on_a_plain_sale_does_not_ask(screen, monkeypatch):
 def test_invoices_view_still_lists_invoices_after_z_report(screen):
     """A Z report purges sales but keeps invoices (sale_id -> NULL); the
     Invoices view must still show them from their own snapshot."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     invoice = _make_invoice()
     with get_session() as session:
         SalesService.mark_invoice_sent(session, invoice.sale_id)
@@ -676,7 +676,7 @@ def test_invoices_view_still_lists_invoices_after_z_report(screen):
 
 
 def test_purged_invoice_cannot_be_opened_on_pos(screen, qtbot, monkeypatch):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     invoice = _make_invoice()
     with get_session() as session:
         SalesService.mark_invoice_sent(session, invoice.sale_id)
@@ -733,7 +733,7 @@ def test_invoices_filter_survives_range_dropdown_and_load(screen):
 
 
 def test_invoice_vat_breakdown_survives_z_report(screen):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     invoice = _make_invoice()  # one 10.00 line at 21%
     with get_session() as session:
         SalesService.mark_invoice_sent(session, invoice.sale_id)
@@ -750,7 +750,7 @@ def test_invoice_vat_breakdown_survives_z_report(screen):
 
 
 def test_invoice_vat_breakdown_matches_sale_based_breakdown(patched_db):
-    from app.core.report_service import XZReportService, invoice_vat_breakdown
+    from app.core.sale.report_service import XZReportService, invoice_vat_breakdown
     from app.models.models import Invoice
     invoice = _make_invoice()
     with get_session() as session:
@@ -759,7 +759,7 @@ def test_invoice_vat_breakdown_matches_sale_based_breakdown(patched_db):
 
 
 def test_invoice_categories_survive_z_report(screen):
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     from app.models.models import Category
     with get_session() as session:
         category = Category(name="Drinks")
@@ -787,7 +787,7 @@ def test_invoice_categories_survive_z_report(screen):
 
 
 def test_invoice_category_breakdown_matches_sale_based_breakdown(patched_db):
-    from app.core.report_service import XZReportService, invoice_category_breakdown
+    from app.core.sale.report_service import XZReportService, invoice_category_breakdown
     from app.models.models import Invoice
     invoice = _make_invoice()
     with get_session() as session:
@@ -799,7 +799,7 @@ def test_invoice_category_breakdown_matches_sale_based_breakdown(patched_db):
 def test_invoice_payments_survive_z_report(screen):
     """Cash/card cards in the Invoices view come from each invoice's own
     payment snapshot, so they still add up to revenue after a Z report."""
-    from app.core.report_service import XZReportService
+    from app.core.sale.report_service import XZReportService
     invoice = _make_invoice()  # 10.00, paid cash
     with get_session() as session:
         SalesService.mark_invoice_sent(session, invoice.sale_id)
@@ -815,7 +815,7 @@ def test_invoice_payments_survive_z_report(screen):
 def test_invoice_payment_breakdown_falls_back_to_sale_for_legacy_invoices(patched_db):
     """Invoices issued before payments were snapshotted onto them read the
     payment off their sale while it exists, and are left out once it's purged."""
-    from app.core.report_service import invoice_payment_breakdown
+    from app.core.sale.report_service import invoice_payment_breakdown
     from app.models.models import Invoice
     invoice = _make_invoice()
     with get_session() as session:
