@@ -252,6 +252,7 @@ def test_show_on_takes_the_screens_geometry(display, monkeypatch):
 
 def test_settings_button_toggles_display(window, display, monkeypatch):
     monkeypatch.setattr(CustomerDisplay, "secondary_screen", staticmethod(lambda mw: None))
+    window.settings_screen.is_admin = True  # the button is admin only
     window.settings_screen.btn_customer_display.click()
     assert display.isVisible()
     window.settings_screen.btn_customer_display.click()

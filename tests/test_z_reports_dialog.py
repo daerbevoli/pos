@@ -93,7 +93,7 @@ def test_reprint_is_titled_as_a_copy(patched_db, monkeypatch):
             pass
 
     printer = FakePrinter()
-    monkeypatch.setattr("app.core.receipt_service._open", lambda *a: printer)
+    monkeypatch.setattr("app.core.sale.receipt_service._open", lambda *a: printer)
     _add_z("Z-0001")
     with get_session() as session:
         z = session.query(ZReport).one()

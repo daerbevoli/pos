@@ -84,10 +84,11 @@ def fresh_backend(monkeypatch):
 
 def test_backend_on_linux_uses_system_libusb_and_patches_find_once(fresh_backend, monkeypatch):
     import usb.core
+    from usb.backend import libusb1
     backend = object()
     get_backend = mock.Mock(return_value=backend)
     monkeypatch.setattr(fresh_backend.sys, "platform", "linux")
-    monkeypatch.setattr(usb.backend.libusb1, "get_backend", get_backend)
+    monkeypatch.setattr(libusb1, "get_backend", get_backend)
 
     assert fresh_backend._get_backend() is backend
     patched_find = usb.core.find
@@ -99,9 +100,10 @@ def test_backend_on_linux_uses_system_libusb_and_patches_find_once(fresh_backend
 
 def test_backend_that_cannot_load_raises_and_leaves_find_alone(fresh_backend, monkeypatch):
     import usb.core
+    from usb.backend import libusb1
     original_find = usb.core.find
     monkeypatch.setattr(fresh_backend.sys, "platform", "linux")
-    monkeypatch.setattr(usb.backend.libusb1, "get_backend", mock.Mock(return_value=None))
+    monkeypatch.setattr(libusb1, "get_backend", mock.Mock(return_value=None))
 
     for _ in range(2):  # each retry fails the same way
         with pytest.raises(fresh_backend.PrinterError):

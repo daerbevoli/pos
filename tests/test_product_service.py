@@ -230,7 +230,7 @@ def test_move_stock_can_go_negative_for_sales(db_session):
 
 def test_move_stock_negative_is_not_logged_as_warning(db_session, caplog):
     p = _make_product(db_session, stock_quantity=0)
-    with caplog.at_level(logging.DEBUG, logger="app.core.product_service"):
+    with caplog.at_level(logging.DEBUG, logger="app.core.inventory.product_service"):
         ProductService.move_stock(db_session, p.id, quantity_change=-2, movement_type="sale")
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 

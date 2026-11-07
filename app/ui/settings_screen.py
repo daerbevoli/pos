@@ -102,10 +102,10 @@ class SettingsScreen(QWidget):
         catalog_row.addLayout(cats_col, 1)
         catalog_row.addLayout(promos_col, 1)
 
-        self.tabs.addTab(general_tab, "General")
-        self.tabs.addTab(printers_tab, "Printers")
         self.tabs.addTab(catalog_tab, "Catalog")
+        self.tabs.addTab(printers_tab, "Printers")
         self.tabs.addTab(erp_tab, "ERP")
+        self.tabs.addTab(general_tab, "General")
         self.log_panel = LogPanel()
         self.tabs.addTab(self.log_panel, "Logs")
 
@@ -286,7 +286,7 @@ class SettingsScreen(QWidget):
         self.btn_rf_cn.clicked.connect(self._rf_cn)
         self.btn_reports.clicked.connect(self._open_reports)
         self.btn_backup.clicked.connect(self._backup)
-        self.btn_customer_display.clicked.connect(self.customer_display_requested.emit)
+        self.btn_customer_display.clicked.connect(self._customer_display)
         self.btn_close_pos.clicked.connect(self._close_pos)
         for btn in (self.btn_admin, self.btn_rf_cn, self.btn_reports, self.btn_backup,
                     self.btn_customer_display, self.btn_close_pos):
@@ -628,7 +628,7 @@ class SettingsScreen(QWidget):
         """Admin only: the new code typed twice, so a typo can't lock the
         admin out."""
         if not self.is_admin:
-            self._show_overlay("Only admin.")
+            self._show_overlay("Only admin")
             logger.info("Admin code change refused: not in admin mode")
             return
         code = self._ask_code("New admin code")
@@ -648,7 +648,7 @@ class SettingsScreen(QWidget):
         """Asks MainWindow to toggle refund / credit-note mode on the active
         POS ticket (see MainWindow._toggle_rf_cn())."""
         if not self.is_admin:
-            self._show_overlay("Only admin.")
+            self._show_overlay("Only admin")
             logger.info("RF/CN refused: not in admin mode")
             return
         self.tabs.setCurrentIndex(0)
@@ -656,15 +656,24 @@ class SettingsScreen(QWidget):
 
     def _open_reports(self):
         if not self.is_admin:
-            self._show_overlay("Only admin.")
+            self._show_overlay("Only admin")
             logger.info("Reports refused: not in admin mode")
             return
         self.tabs.setCurrentIndex(0)
         self.navigate.emit(4)
 
+    def _customer_display(self):
+        if not self.is_admin:
+            self._show_overlay("Only admin")
+            logger.info("Customer display refused: not in admin mode")
+            return
+        self.customer_display_requested.emit()
+
     def _backup(self):
-        """Anyone may take a backup; restoring and changing the backup
-        folder are admin-only, checked inside the dialog."""
+        if not self.is_admin:
+            self._show_overlay("Only admin")
+            logger.info("Backup refused: not in admin mode")
+            return
         BackupDialog(parent=self, is_admin=self.is_admin).exec()
 
     def _close_pos(self):
@@ -672,7 +681,7 @@ class SettingsScreen(QWidget):
         in-app way to quit. Open tickets survive it: they're autosaved and
         restored on the next launch."""
         if not self.is_admin:
-            self._show_overlay("Only admin.")
+            self._show_overlay("Only admin")
             logger.info("Close POS refused: not in admin mode")
             return
         if QMessageBox.question(self, "Close POS", "Are you sure you want to close the POS?") \

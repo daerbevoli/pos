@@ -115,7 +115,7 @@ def test_two_backups_in_the_same_second_get_distinct_names(live_db, tmp_path, mo
         def now(cls, tz=None):
             return fixed
 
-    monkeypatch.setattr("app.core.backup_service.datetime", _Frozen)
+    monkeypatch.setattr("app.core.backup.backup_service.datetime", _Frozen)
     dest = tmp_path / "backups"
     first = _backup(live_db, [dest]).archives[0]
     second = _backup(live_db, [dest]).archives[0]

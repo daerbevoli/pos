@@ -1,4 +1,8 @@
-# Builds SuperPOS with PyInstaller on every push/PR and on version tags.
+# Tests and builds SuperPOS with PyInstaller on every push/PR and on version tags.
+#
+# Two jobs: `test` runs the suite, `build` (PyInstaller + self-test + artifact)
+# only starts once every platform's tests have passed, so a red test shows up
+# on its own and no installer is produced from broken code.
 #
 # Each matrix entry is one platform; adding Linux later means uncommenting its
 # entry (and installing its system packages, see superpos.spec). Artifacts are
@@ -20,7 +24,42 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          # - os: ubuntu-22.04
+          #   platform: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0 libxcb-cursor0
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+
   build:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -58,11 +97,6 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match app/__version__.py ($version)"
             exit 1
           fi
-
-      - name: Run tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: pytest -q
 
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm superpos.spec

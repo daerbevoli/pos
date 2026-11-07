@@ -247,7 +247,7 @@ def test_admin_code_change_needs_admin_mode(screen, monkeypatch):
     from app.core.admin import check_admin_code
     monkeypatch.setattr(_FakeNumpad, "queue", ["5555", "5555"])
     screen._change_admin_code()
-    assert screen.overlay.message_label.text() == "Only admin."
+    assert screen.overlay.message_label.text() == "Only admin"
     assert not check_admin_code("5555")
 
 

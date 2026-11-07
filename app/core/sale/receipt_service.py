@@ -67,13 +67,17 @@ def _get_backend():
         return _backend
 
     import usb.core
+    # Imported by name on purpose: `import usb.core` doesn't load usb.backend,
+    # and IDE "optimize imports" deletes a bare `import usb.backend.libusb1`
+    # as a duplicate of the `usb` name.
+    from usb.backend import libusb1
 
     if sys.platform == "win32":
         library = _bundled_libusb_dll()
-        backend = usb.backend.libusb1.get_backend(find_library=lambda x: library)
+        backend = libusb1.get_backend(find_library=lambda x: library)
     else:
         library = "system libusb-1.0"
-        backend = usb.backend.libusb1.get_backend()
+        backend = libusb1.get_backend()
     if backend is None:
         logger.error("USB backend could not be loaded from %s", library)
         raise PrinterError(f"USB backend could not be loaded from {library}.")
