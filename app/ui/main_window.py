@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
 
         self.client_screen.selected_client.connect(self.pos_screen.set_client)
         self.inventory_screen.selected_product.connect(self.pos_screen.add_product_by_id)
-        self.reports_screen.sale_selected.connect(self.pos_screen.show_sale)
+        self.reports_screen.sale_selected.connect(self._show_sale)
 
         # ── Customer display: mirrors the active POS ticket in its own window ──
         self.customer_display = CustomerDisplay(self)
@@ -247,16 +247,32 @@ class MainWindow(QMainWindow):
         untouched and switch the mode on the first free V-tab instead."""
         self._navigate(0)
         entering = not self.pos_screen.cart.is_refund
-        if self.pos_screen.tab_has_open_ticket(self._active_vtab):
-            free = next(
-                (i for i in range(1, MAX_VTABS + 1) if not self.pos_screen.tab_has_open_ticket(i)),
-                None,
-            )
-            if free is None:
-                self.pos_screen.overlay.show_message("All V-tabs have an open ticket", kind="error")
-                return
-            self._switch_vtab(free)
+        if not self._move_to_free_vtab(self.pos_screen.tab_has_open_ticket,
+                                       "All V-tabs have an open ticket"):
+            return
         self.pos_screen.set_rf_cn(entering)
+
+    def _show_sale(self, sale_id: int):
+        """A sale picked on the Reports screen opens on the POS: on the active
+        V-tab, or, if that one has a ticket being built, on the first free
+        V-tab. With every V-tab busy, nothing is opened and an overlay says so."""
+        self._navigate(0)
+        if not self._move_to_free_vtab(self.pos_screen.tab_has_open_ticket, "All V-tabs are active"):
+            return
+        self.pos_screen.show_sale(sale_id)
+
+    def _move_to_free_vtab(self, is_busy, message: str) -> bool:
+        """Stays on the active V-tab if `is_busy(slot)` is False for it,
+        otherwise switches to the first V-tab where it is. Returns False,
+        with `message` in an overlay, if every V-tab is busy."""
+        if not is_busy(self._active_vtab):
+            return True
+        free = next((i for i in range(1, MAX_VTABS + 1) if not is_busy(i)), None)
+        if free is None:
+            self.pos_screen.overlay.show_message(message, kind="error")
+            return False
+        self._switch_vtab(free)
+        return True
 
     # ── Tab label update (from POSScreen when a cart changes) ─────────────────
 

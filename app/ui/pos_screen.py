@@ -5,10 +5,9 @@ payment row, and a numpad + category/product grid.
 Tab state (cart, frozen, client) is managed per V-tab slot and
 driven externally by MainWindow via set_active_tab().
 """
-import datetime
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from functools import partial
 
 from PyQt6.QtCore import (
@@ -96,14 +95,12 @@ TABS = 5  # number of V-tabs, slots 1..TABS; MainWindow builds one tab button pe
 # font + QSS padding) is above the 3 px asked for, so Qt draws it taller.
 DIVIDER_ROLE = Qt.ItemDataRole.UserRole + 1
 
-
 def _cart_font(bold: bool) -> QFont:
     """The one font every cart row is drawn with, so all rows share a size."""
     font = QFont()
     font.setPixelSize(FONT_SIZE_CART)
     font.setBold(bold)
     return font
-
 
 def _item_cells(item: CartItem) -> list[str]:
     """An item row's four column texts: quantity, name, unit price, line
@@ -122,25 +119,30 @@ def _item_cells(item: CartItem) -> list[str]:
 
 
 class _TabState:
-    """Snapshot of one V-tab slot's POS state."""
+    """One V-tab slot's POS state. The active tab's is read and written in
+    place through POSScreen's properties (see _tab_field); only the fields
+    kept on widgets (client name, frozen date, shortcut) are copied in and
+    out on a tab switch."""
     def __init__(self):
         self.cart             = Cart()
-        self.sale_finished    = True
-        self.is_invoice       = False
-        self.client_id        = None
+        self.sale_finished    = True   # whether the ticket has been paid/frozen (vs. still being built)
+        self.is_invoice       = False  # whether the sale is being issued as an invoice, not a receipt
+        self.client_id        = None   # DB Client.id attached to the sale/invoice, set via set_client()
         self.client_name      = ""
         self.ticket_date_text = ""
-        self.frozen_breakdown = []
-        self.frozen_change    = 0.0
-        self.frozen_total     = 0.0
+        self.frozen_breakdown = []     # payment split (cash/card/etc.) of the finalized sale, for redisplay
+        self.frozen_change    = 0.0    # change given on the finalized sale
+        self.frozen_total     = 0.0    # grand total of the finalized sale
         self.sale_id          = None   # DB Sale.id this frozen ticket was saved as, if any
         self.active_shortcut_id = None  # DB Shortcut.id selected in this tab's product grid, if any
 
 
-def _guard_locked_line(entry) -> bool:
-    """Blocks quantity changes on a line already saved on a reopened sale.
-    Returns True if the action should be blocked."""
-    return isinstance(entry, CartItem) and entry.locked
+def _tab_field(name: str) -> property:
+    """A POSScreen attribute that reads and writes the active tab's _TabState field."""
+    return property(
+        lambda self: getattr(self._state, name),
+        lambda self, value: setattr(self._state, name, value),
+    )
 
 
 class POSScreen(QWidget):
@@ -149,23 +151,25 @@ class POSScreen(QWidget):
     rf_cn_mode_changed = pyqtSignal(bool)  # active tab entered/left refund / credit-note mode, for header
     display_changed    = pyqtSignal(dict)  # active ticket panel state for the CustomerDisplay, see emit_display()
 
-    isAdmin = True
+    isAdmin = False
+
+    # The active tab's state, stored on its _TabState (self._state).
+    cart              = _tab_field("cart")
+    sale_finished     = _tab_field("sale_finished")
+    is_invoice        = _tab_field("is_invoice")
+    client_id         = _tab_field("client_id")
+    _frozen_breakdown = _tab_field("frozen_breakdown")
+    _frozen_change    = _tab_field("frozen_change")
+    _frozen_total     = _tab_field("frozen_total")
+    _current_sale_id  = _tab_field("sale_id")
 
     def __init__(self):
         super().__init__()
-        # id: V-tab slot (1-5) -> its saved _TabState snapshot; swapped in/out by
-        # _save_tab_state()/_load_tab_state() whenever set_active_tab() fires.
+        # V-tab slot (1-5) -> its _TabState; self._state is the one on screen.
         self._tab_states: dict[int, _TabState] = {i: _TabState() for i in range(1, TABS + 1)}
-        self._active_tab        = 1   # id: which V-tab slot (key into _tab_states) is currently on screen
-        self.cart               = self._tab_states[1].cart  # active tab's Cart; re-pointed on tab switch
-        self.sale_finished      = True   # whether the current ticket has been paid/frozen (vs. still being built)
-        self.is_invoice         = False  # whether the current sale is being issued as an invoice, not a receipt
-        self.client_id          = None   # id: DB Client.id attached to the current sale/invoice, set via _on_client_selected
-        self._frozen_breakdown  = []    # cached payment split (cash/card/etc.) for the last finalized sale, for reprint/redisplay
-        self._frozen_change     = 0.0    # cached change-due amount for the last finalized sale
-        self._frozen_total      = 0.0    # cached grand total for the last finalized sale
+        self._active_tab        = 1   # which V-tab slot (key into _tab_states) is currently on screen
+        self._state             = self._tab_states[1]
         self._row_to_entry      = []     # cart_table row -> cart.entries index (None for divider/summary rows)
-        self._current_sale_id   = None   # id: DB Sale.id this tab's frozen ticket was saved as, if any
         self._barcode_entry_mode     = False  # awaiting a manually-typed exact barcode via the Barcode button
         self._barcode_entry_quantity = None   # quantity text typed before the Barcode button was pressed, if any (may be a lone "-")
         self._invoice_send_in_progress = False  # an InvoiceSendWorker is running; Send invoice is ignored until it finishes
@@ -235,7 +239,7 @@ class POSScreen(QWidget):
         # No time ticking at finished (frozen) sale
         if self.sale_finished and not override:
             return
-        text = datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
+        text = datetime.now().strftime("%d-%m-%Y %H:%M")
         if text != self.ticket_date.text():
             self.ticket_date.setText(text)
             self.emit_display()
@@ -249,7 +253,7 @@ class POSScreen(QWidget):
         self.header_widget.setObjectName("header")
 
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(4, 2, 4, 2)
+        header_layout.setContentsMargins(8, 4, 8, 4)
 
         self.ticket_title = QLabel(f"V {self._active_tab}")
         self.ticket_title.setObjectName("ticketTitle")
@@ -304,8 +308,8 @@ class POSScreen(QWidget):
         self._amount_validator = QRegularExpressionValidator(
             QRegularExpression(r'-?[0-9]{0,7}([.,][0-9]{0,3})?'), self
         )
-        # a manually typed barcode is digits only, any length. Swapped by _set_barcode_entry_mode().
-        self._barcode_validator = QRegularExpressionValidator(QRegularExpression(r'[0-9]{0, 15}'), self)
+        # a manually typed barcode is digits only, 15 digits (for now). Swapped by _set_barcode_entry_mode().
+        self._barcode_validator = QRegularExpressionValidator(QRegularExpression(r'[0-9]{0,15}'), self)
         self.cart_input.setValidator(self._amount_validator)
 
         self.payment_footer = QWidget()
@@ -405,12 +409,9 @@ class POSScreen(QWidget):
         self.btn_subtotal     = FunctionButton("Subtotal", "subtotalBtn")
         self.btn_cash         = FunctionButton("Cash", "cashBtn")
 
-        pay_grid.addWidget(self.btn_card, 0, 0, 2, 1)
-        pay_grid.addWidget(self.btn_subtotal, 0, 1, 2, 1)
-        pay_grid.addWidget(self.btn_cash, 0, 2, 2, 1)
-        pay_grid.setColumnStretch(0, 1)
-        pay_grid.setColumnStretch(1, 1)
-        pay_grid.setColumnStretch(2, 1)
+        for c, btn in enumerate((self.btn_card, self.btn_subtotal, self.btn_cash)):
+            pay_grid.addWidget(btn, 0, c, 2, 1)
+            pay_grid.setColumnStretch(c, 1)
 
         col.addLayout(pay_grid, stretch=2)
 
@@ -533,11 +534,7 @@ class POSScreen(QWidget):
         runs before MainWindow connects tab_updated, so MainWindow calls this
         once after wiring up to show recovered carts' amounts on the tab bar."""
         for slot, s in self._tab_states.items():
-            if slot == self._active_tab:
-                cart, finished = self.cart, self.sale_finished
-            else:
-                cart, finished = s.cart, s.sale_finished
-            amount = f"{cart.remaining_due:.2f}" if cart.entries and not finished else ""
+            amount = f"{s.cart.remaining_due:.2f}" if s.cart.entries and not s.sale_finished else ""
             self.tab_updated.emit(slot, amount)
 
     def emit_rf_cn_mode(self):
@@ -558,33 +555,19 @@ class POSScreen(QWidget):
         # cart_input / barcode-entry mode are transient scratch state, not tied
         # to any particular tab's cart. Cancel them here so leftover typed digits or
         # a pending barcode scan from the old tab don't bleed into the new one.
-        self._set_barcode_entry_mode(False)
-        self._barcode_entry_quantity = None
-        self.cart_input.clear()
+        self._cancel_barcode_entry()
         self._active_tab = idx
         self._load_tab_state(idx)
 
     def _save_tab_state(self):
-        s = self._tab_states[self._active_tab]
-        s.cart             = self.cart
-        s.sale_finished    = self.sale_finished
-        s.is_invoice       = self.is_invoice
-        s.client_id        = self.client_id
+        """Stores what the active tab keeps on widgets rather than on its _TabState."""
+        s = self._state
         s.client_name      = self.client_label.text() if self.client_label.isVisible() else ""
         s.ticket_date_text = self.ticket_date.text() if self.sale_finished else ""
-        s.frozen_breakdown = self._frozen_breakdown
-        s.frozen_change    = self._frozen_change
-        s.frozen_total     = self._frozen_total
-        s.sale_id          = self._current_sale_id
         s.active_shortcut_id = self.shortcut_grid.active_shortcut_id
 
     def _load_tab_state(self, idx: int):
-        s = self._tab_states[idx]
-        self.cart          = s.cart
-        self.sale_finished = s.sale_finished
-        self.is_invoice    = s.is_invoice
-        self.client_id     = s.client_id
-        self._current_sale_id = s.sale_id
+        s = self._state = self._tab_states[idx]
 
         if s.client_name:
             self.client_label.setText(s.client_name)
@@ -593,9 +576,6 @@ class POSScreen(QWidget):
             self.client_label.hide()
 
         # Restore frozen / unfrozen visuals
-        self._frozen_breakdown = s.frozen_breakdown or []
-        self._frozen_change    = s.frozen_change or 0.0
-        self._frozen_total     = s.frozen_total
         self._set_frozen_style(s.sale_finished or not self.cart_active)
         self.ticket_total_lbl.setVisible(not s.sale_finished)
         if s.sale_finished:
@@ -703,7 +683,7 @@ class POSScreen(QWidget):
                 return True
             amount = self._read_amount_input()
             if amount is None or amount <= 0:
-                self._show_overlay("Enter an valid amount", kind="info")
+                self._show_overlay("Enter a valid amount", kind="info")
                 return True
             if pending_entry.quantity is None:
                 pending_entry.quantity = -amount if self.cart.is_refund else amount
@@ -720,9 +700,7 @@ class POSScreen(QWidget):
         if self._barcode_entry_mode:
             # A real scan interrupted manual barcode entry — whatever's in
             # cart_input is a partial typed barcode, not a quantity.
-            self._set_barcode_entry_mode(False)
-            self._barcode_entry_quantity = None
-            self.cart_input.clear()
+            self._cancel_barcode_entry()
 
         if self._handle_pending_or_guards():
             return
@@ -730,24 +708,42 @@ class POSScreen(QWidget):
         query = self.cart_input.text().strip()
         if self._reject_bare_amount(query):
             return
-
-        with get_session() as session:
-            product = ProductService.get_by_barcode(session, barcode)
-            if product:
-                if query:
-                    quantity = self._typed_quantity(query, product)
-                    if quantity is None:
-                        return
-                elif product.unit in WEIGHT_UNITS:
-                    quantity = None  # waits for the weight, like the Barcode button
-                else:
-                    quantity = 1
-                self.cart.add_product(product, quantity=quantity)
-                self._refresh_cart(select_last=True)
-                self.cart_input.clear()
-            else:
-                self._show_overlay("Unknown barcode", kind="error")
+        self._add_product_by_barcode(barcode, query)
         self.cart_input.clear()
+
+    def _on_barcode_enter(self):
+        if self._handle_pending_or_guards():
+            return
+        if not self._barcode_entry_mode:
+            return
+
+        code = self.cart_input.text().strip()
+        typed = self._barcode_entry_quantity
+        self._cancel_barcode_entry()
+        if code:
+            self._add_product_by_barcode(code, typed)
+
+
+    def _add_product_by_barcode(self, code: str, typed: str | None):
+        """Adds the product with this exact barcode (scanned or typed in
+        barcode-entry mode). Its quantity is the amount typed before it, if
+        any; otherwise a weighed item waits for its weight and anything
+        else goes in once."""
+        with get_session() as session:
+            product = ProductService.get_by_barcode(session, code)
+            if product is None:
+                self._show_overlay("Unknown barcode", kind="error")
+                return
+            if typed:
+                quantity = self._typed_quantity(typed, product)
+                if quantity is None:
+                    return
+            elif product.unit in WEIGHT_UNITS:
+                quantity = None
+            else:
+                quantity = 1
+            self.cart.add_product(product, quantity=quantity)
+            self._refresh_cart(select_last=True)
 
     def _open_barcode(self):
         """Enter manual barcode-entry mode: whatever quantity was already
@@ -772,54 +768,25 @@ class POSScreen(QWidget):
         self.cart_input.setValidator(self._barcode_validator if active else self._amount_validator)
         self.cart_input.setPlaceholderText("Manual barcode" if active else "")
 
-    def _on_barcode_enter(self):
-        if self._handle_pending_or_guards():
-            return
-
-        if not self._barcode_entry_mode:
-            return
-
+    def _cancel_barcode_entry(self):
+        """Leaves manual barcode entry, dropping the partial barcode and the
+        quantity stashed for it."""
         self._set_barcode_entry_mode(False)
-        code = self.cart_input.text().strip()
-        self.cart_input.clear()
-        if not code:
-            return
-        with get_session() as session:
-            product = ProductService.get_by_barcode(session, code)
-            if product:
-                typed = self._barcode_entry_quantity
-                self._barcode_entry_quantity = None
-                if typed is not None:
-                    quantity = self._typed_quantity(typed, product)
-                    if quantity is None:
-                        return
-                elif product.unit in WEIGHT_UNITS:
-                    quantity = None
-                else:
-                    quantity = 1
-                self.cart.add_product(product, quantity=quantity)
-                self._refresh_cart(select_last=True)
-            else:
-                self._show_overlay("Unknown barcode", kind="error")
         self._barcode_entry_quantity = None
+        self.cart_input.clear()
 
     def _clear_cart(self, override: bool = False):
-        # An empty but unfinished tab (e.g. a digit typed on a frozen ticket,
-        # then erased) still holds an open-ticket row that blocks the Z report,
-        # so Clear must work on it too — without asking, as nothing is lost.
+        """Clear cart when no entries immediately but ask for messagebox when entries"""
         if not override and not self.cart_active and self.sale_finished:
             return
         if (override or not self.cart_active
                 or QMessageBox.question(self, "Clear cart", "Clear cart?") == QMessageBox.StandardButton.Yes):
-            self._frozen_breakdown = []
-            self._frozen_change    = 0.0
-            self._frozen_total     = 0.0
+            self._reset_frozen()
             self.input_stack.setCurrentIndex(0)
             self.ticket_total_lbl.setVisible(False)
             self.cart.clear()
             self._update_payment_footer()
-            self._set_barcode_entry_mode(False)
-            self.cart_input.clear()
+            self._cancel_barcode_entry()
             self.client_label.setVisible(False)
             self.client_id = None
             self.is_invoice = False
@@ -859,36 +826,37 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def _apply_percent_discount(self):
+        self._apply_discount(self.cart.apply_percent_discount)
+
+    def _apply_amount_discount(self):
+        self._apply_discount(self.cart.apply_amount_discount)
+
+    def _apply_discount(self, apply):
+        """Applies the typed value through `apply` (one of the cart's
+        apply_*_discount methods, which return None when nothing could be
+        discounted)."""
         if self.sale_finished:
             return
         if self._guard_payment_in_progress():
             return
         value = self._read_amount_input()
         if value is None:
-            self._show_overlay("Enter a number first to apply a discount", kind="info")
+            self._show_overlay("Enter a number first", kind="info")
             return
-        if self.cart.apply_percent_discount(value) is None:
-            self._show_overlay("Nothing to discount", kind="error")
+        if apply(value) is None:
+            self._show_overlay("Nothing to discount", kind="info")
             return
         self.cart_input.clear()
         self._refresh_cart(select_last=True)
         self.cart_table.setFocus()
 
-    def _apply_amount_discount(self):
-        if self.sale_finished:
-            return
-        if self._guard_payment_in_progress():
-            return
-        value = self._read_amount_input()
-        if value is None:
-            self._show_overlay("Enter a number first to apply a discount", kind="info")
-            return
-        if self.cart.apply_amount_discount(value) is None:
-            self._show_overlay("Nothing to discount", kind="error")
-            return
-        self.cart_input.clear()
-        self._refresh_cart(select_last=True)
-        self.cart_table.setFocus()
+    def _guard_pending_items(self) -> bool:
+        """Blocks subtotal/payment while a line still awaits its weight or
+        price. Returns True (and shows an overlay) if the action should be blocked."""
+        if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
+            self._show_overlay("Fill in pending amount first", kind="error")
+            return True
+        return False
 
     def _show_subtotal(self):
         if self.sale_finished:
@@ -907,10 +875,8 @@ class POSScreen(QWidget):
                 section_has_content = True
                 break
         if not section_has_content:
-            self._show_overlay("Already subtotalled", kind="info")
             return
-        if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
-            self._show_overlay("Fill in the amount for pending items first", kind="error")
+        if self._guard_pending_items():
             return
         self.cart.add_subtotal()
         self._refresh_cart(select_last=True)
@@ -1126,10 +1092,7 @@ class POSScreen(QWidget):
         if not any(isinstance(e, CartItem) for e in self.cart.entries):
             self._show_overlay("Add items before payment", kind="error")
             return False
-        if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
-            self._show_overlay("Fill in the amount for pending items first", kind="error")
-            return False
-        return True
+        return not self._guard_pending_items()
 
     def _pay_out_refund(self, method: str):
         """A refund is paid out in full by the chosen method in one go — no
@@ -1202,7 +1165,7 @@ class POSScreen(QWidget):
         (e.g. the invoice was sent meanwhile, or the day's sale numbers ran out)."""
         total = self.cart.total
         try:
-            self._save_sale(breakdown, total_tendered, final_method)
+            self._current_sale_id = self._save_sale(breakdown, total_tendered, final_method)
         except ValueError as e:
             logger.warning("Sale not saved: %s", e)
             self._show_overlay(f"Not saved: {e}", kind="error")
@@ -1211,11 +1174,12 @@ class POSScreen(QWidget):
         self._freeze_ticket(breakdown, change)
         return True
 
-    def _save_sale(self, breakdown: list[dict], total_tendered: float, final_method: str):
+    def _save_sale(self, breakdown: list[dict], total_tendered: float, final_method: str) -> int:
+        """Saves the paid cart and returns the id of the Sale it's saved as."""
         with get_session() as session:
             if self._current_sale_id is not None:
                 # Re-paying a reopened ticket: overwrite the existing sale in place.
-                sale = SalesService.update_sale(
+                return SalesService.update_sale(
                     session,
                     sale_id=self._current_sale_id,
                     cart=self.cart,
@@ -1223,10 +1187,9 @@ class POSScreen(QWidget):
                     amount_tendered=total_tendered,
                     payment_breakdown=breakdown,
                     client_id=self.client_id if self.is_invoice else None,
-                )
-                self._current_sale_id = sale.id
-            elif self.is_invoice:
-                invoice = SalesService.finalize_invoice(
+                ).id
+            if self.is_invoice:
+                return SalesService.finalize_invoice(
                     session,
                     cart=self.cart,
                     payment_method=final_method,
@@ -1234,17 +1197,14 @@ class POSScreen(QWidget):
                     notes="Credit note" if self.cart.is_refund else "Invoice",
                     client_id=self.client_id,
                     payment_breakdown=breakdown,
-                )
-                self._current_sale_id = invoice.sale_id
-            else:
-                sale = SalesService.finalize_sale(
-                    session,
-                    cart=self.cart,
-                    payment_method=final_method,
-                    amount_tendered=total_tendered,
-                    payment_breakdown=breakdown,
-                )
-                self._current_sale_id = sale.id
+                ).sale_id
+            return SalesService.finalize_sale(
+                session,
+                cart=self.cart,
+                payment_method=final_method,
+                amount_tendered=total_tendered,
+                payment_breakdown=breakdown,
+            ).id
 
     def _set_frozen_style(self, frozen: bool):
         for widget in (self.cart_table, self.client_label, self.header_widget, self.ticket_title, self.ticket_date, self.cart_input, self.ticket_total_lbl):
@@ -1252,18 +1212,36 @@ class POSScreen(QWidget):
             widget.style().unpolish(widget)
             widget.style().polish(widget)
 
+    def _reset_frozen(self):
+        """Forgets the paid-ticket breakdown, change and total."""
+        self._frozen_breakdown = []
+        self._frozen_change    = 0.0
+        self._frozen_total     = 0.0
+
+    def _show_paid_view(self):
+        """A paid ticket's look: frozen colours, the Total/Change footer in
+        place of the input, no running total. Call before _refresh_cart(),
+        which draws rows in the frozen colours."""
+        self._set_frozen_style(True)
+        self._update_payment_footer()
+        self.input_stack.setCurrentIndex(1)
+        self.ticket_total_lbl.setVisible(False)
+
+    def _show_open_view(self):
+        """A ticket being built: normal colours, the input and running total."""
+        self._set_frozen_style(False)
+        self.input_stack.setCurrentIndex(0)
+        self.ticket_total_lbl.setVisible(True)
+
     def _freeze_ticket(self, breakdown: list[dict], change: float):
         self.sale_finished     = True
         self._clear_open_ticket()  # a real Sale/Invoice row now covers this ticket
         self._frozen_breakdown = breakdown
         self._frozen_change    = change
         self._frozen_total     = self.cart.total
-        self._set_frozen_style(True)
         self.cart_input.clear()
-        self._update_payment_footer()
-        self.input_stack.setCurrentIndex(1)
+        self._show_paid_view()
         self._refresh_cart(select_last=True)
-        self.ticket_total_lbl.setVisible(False)
         self._open_drawer()
         self.cart_table.setFocus()
 
@@ -1284,14 +1262,10 @@ class POSScreen(QWidget):
 
     def _unfreeze_ticket(self):
         self.sale_finished     = False
-        self._frozen_breakdown = []
-        self._frozen_change    = 0.0
-        self._frozen_total     = 0.0
+        self._reset_frozen()
         self._current_sale_id = None
         self.cart.clear()
-        self._set_frozen_style(False)
-        self.input_stack.setCurrentIndex(0)
-        self.ticket_total_lbl.show()
+        self._show_open_view()
         self.client_label.hide()
         self.client_id = None
         self.is_invoice = False
@@ -1329,14 +1303,10 @@ class POSScreen(QWidget):
                     entry.locked = True
 
         self.sale_finished     = False
-        self._frozen_breakdown = []
-        self._frozen_change    = 0.0
-        self._frozen_total     = 0.0
+        self._reset_frozen()
         # self._current_sale_id stays set: next payment overwrites this sale in place.
-        self._set_frozen_style(False)
-        self.input_stack.setCurrentIndex(0)
+        self._show_open_view()
         self._refresh_cart()
-        self.ticket_total_lbl.setVisible(True)
         self.cart_table.setFocus()
 
     def _attach_sale_client(self, sale: Sale):
@@ -1423,9 +1393,7 @@ class POSScreen(QWidget):
             self._frozen_breakdown = [{"method": sale.payment_method, "amount": sale.amount_tendered or 0.0}]
         self._frozen_change    = sale.change_given or 0.0
         self._frozen_total     = sale.total_amount
-        self._set_frozen_style(True)
-        self._update_payment_footer()
-        self.input_stack.setCurrentIndex(1)
+        self._show_paid_view()
         self.ticket_date.setText(format_local(sale.created_at, "%d-%m-%Y %H:%M"))
         self._refresh_cart()
 
@@ -1533,44 +1501,42 @@ class POSScreen(QWidget):
         if self.sale_finished:
             return None
         row = self.cart_table.currentRow()
-        row_map = getattr(self, "_row_to_entry", None)
-        if row < 0 or not row_map or row >= len(row_map):
+        if not 0 <= row < len(self._row_to_entry):
             return None
-        return row_map[row]
+        return self._row_to_entry[row]
+
+    def _adjustable_selected_item(self) -> CartItem | None:
+        """The selected line if + / − may change its quantity: an item with
+        a set quantity, not weighed, not a reversal and not locked (already
+        saved on a reopened sale). None otherwise, also while a partial
+        payment is outstanding (with an overlay saying so)."""
+        if self._guard_payment_in_progress():
+            return None
+        idx = self._get_selected_entry_index()
+        if idx is None:
+            return None
+        entry = self.cart.entries[idx]
+        if (not isinstance(entry, CartItem) or entry.locked or entry.quantity is None
+                or entry.is_reversal or entry.unit in WEIGHT_UNITS):
+            return None
+        return entry
 
     def _increase_product(self):
-        if self._guard_payment_in_progress():
+        entry = self._adjustable_selected_item()
+        if entry is None or entry.has_reversal:
             return
-        idx = self._get_selected_entry_index()
-        if idx is None:
-            return
-        entry = self.cart.entries[idx]
-        if _guard_locked_line(entry):
-            return
-        if isinstance(entry, CartItem) and entry.quantity is not None and not entry.is_reversal and not entry.has_reversal:
-            if entry.unit in WEIGHT_UNITS:
-                return
-            # Grow the line away from zero — more returned on a refund line.
-            entry.quantity += -1 if entry.quantity < 0 else 1
-            self.cart.sync_promo_discounts()
-            self._refresh_cart()
+        # Grow the line away from zero — more returned on a refund line.
+        entry.quantity += -1 if entry.quantity < 0 else 1
+        self.cart.sync_promo_discounts()
+        self._refresh_cart()
 
     def _decrease_product(self):
-        if self._guard_payment_in_progress():
+        entry = self._adjustable_selected_item()
+        if entry is None or abs(entry.quantity) <= 1:
             return
-        idx = self._get_selected_entry_index()
-        if idx is None:
-            return
-        entry = self.cart.entries[idx]
-        if _guard_locked_line(entry):
-            return
-        if (isinstance(entry, CartItem) and entry.quantity is not None
-                and not entry.is_reversal and abs(entry.quantity) > 1):
-            if entry.unit in WEIGHT_UNITS:
-                return
-            entry.quantity -= -1 if entry.quantity < 0 else 1
-            self.cart.sync_promo_discounts()
-            self._refresh_cart()
+        entry.quantity -= -1 if entry.quantity < 0 else 1
+        self.cart.sync_promo_discounts()
+        self._refresh_cart()
 
     def _read_amount_input(self) -> float | None:
         text = self.cart_input.text().strip()
@@ -1648,17 +1614,16 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def add_product_by_id(self, product_id: int):
+        if self._barcode_entry_mode:
+            # A product tap abandons manual barcode entry first, whatever
+            # happens next: the input holds a partial barcode, not a
+            # quantity, and must not linger if the tap is then refused.
+            self._cancel_barcode_entry()
         if self._guard_payment_in_progress():
             return
         if self._selected_pending_item() is not None:
             self._show_overlay("Enter the pending amount before adding another item", kind="info")
             return
-        if self._barcode_entry_mode:
-            # A product tap abandons manual barcode entry — the input holds a
-            # partial barcode, not a quantity.
-            self._set_barcode_entry_mode(False)
-            self._barcode_entry_quantity = None
-            self.cart_input.clear()
 
         query = self.cart_input.text().strip()
         if self._reject_bare_amount(query):
@@ -1674,7 +1639,7 @@ class POSScreen(QWidget):
                 return
             open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
             if open_price == 0:
-                self._show_overlay("Enter an valid amount", kind="info")
+                self._show_overlay("Enter a valid amount", kind="info")
                 return
             if self.sale_finished:
                 self._unfreeze_ticket()
@@ -1692,13 +1657,9 @@ class POSScreen(QWidget):
 
     def tab_has_open_ticket(self, slot: int) -> bool:
         """Whether V-tab `slot` holds a ticket still being built (lines rung
-        up, not yet paid). MainWindow uses it to send RF / CN to a free tab."""
-        if slot == self._active_tab:
-            cart, finished = self.cart, self.sale_finished
-        else:
-            s = self._tab_states[slot]
-            cart, finished = s.cart, s.sale_finished
-        return bool(cart.entries) and not finished
+        up, not yet paid). MainWindow uses it to send RF / CN and show sale to a free tab."""
+        s = self._tab_states[slot]
+        return (bool(s.cart.entries) or s.is_invoice) and not s.sale_finished
 
     def set_rf_cn(self, active: bool):
         """Turns refund / credit-note mode on or off for the active tab. While
@@ -1716,9 +1677,10 @@ class POSScreen(QWidget):
         self.cart_table.setFocus()
 
     def show_sale(self, sale_id: int):
-        """Jumps to a sale picked on the Reports screen — but never over a
-        ticket still being built, which would otherwise be silently lost."""
-        if self.cart_active and not self.sale_finished:
+        """Shows a sale picked on the Reports screen on the active tab, but
+        never over an open ticket. MainWindow switches to a free tab first (see
+        MainWindow._show_sale()), so the refusal is only a safety net."""
+        if self.tab_has_open_ticket(self._active_tab):
             self._show_overlay(f"V {self._active_tab} is occupied — finish or clear its ticket first",
                                kind="error")
             return

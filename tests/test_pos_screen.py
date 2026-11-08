@@ -278,6 +278,25 @@ def test_product_tap_during_manual_barcode_entry_cancels_it(screen):
     assert screen.cart.entries[0].quantity == 1
 
 
+def test_refused_product_tap_still_cancels_manual_barcode_entry(screen):
+    """A tap refused because an item awaits its weight still drops the
+    manual barcode first, so it doesn't linger in the input."""
+    kg, _, _ = _add_product(name="Kg", unit="kg")
+    other, _, _ = _add_product(name="Other")
+    screen.add_product_by_id(kg)  # awaits its weight
+    # The Barcode button itself is refused while a weight is pending, so
+    # enter the mode directly to reach the refused-tap path.
+    screen._set_barcode_entry_mode(True)
+    screen._on_ticket_text("5")
+
+    screen.add_product_by_id(other)
+
+    assert screen._barcode_entry_mode is False
+    assert screen.cart_input.text() == ""
+    assert screen.cart_input.placeholderText() == ""
+    assert len(screen.cart.entries) == 1
+
+
 def test_scan_unknown_barcode_shows_overlay(screen):
     _scan(screen, "0000000000000")
     assert not screen.overlay.isHidden()

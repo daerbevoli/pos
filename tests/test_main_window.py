@@ -209,6 +209,56 @@ def test_rf_cn_with_every_vtab_open_shows_overlay(window):
     assert not window.pos_screen.overlay.isHidden()
 
 
+def _paid_sale_id(window, barcode):
+    """Rings up and pays one item on the active V-tab, then clears it."""
+    _ring_up_item(window, barcode)
+    window.pos_screen._open_payment("cash")
+    sale_id = window.pos_screen._current_sale_id
+    window.pos_screen._clear_cart(override=True)
+    return sale_id
+
+
+def test_sale_from_reports_opens_on_free_active_vtab(window):
+    sale_id = _paid_sale_id(window, "rep1")
+    window._navigate(4)
+
+    window.reports_screen.sale_selected.emit(sale_id)
+
+    assert window.stack.currentIndex() == 0
+    assert window._active_vtab == 1
+    assert window.pos_screen._current_sale_id == sale_id
+
+
+def test_sale_from_reports_moves_to_free_vtab_when_active_is_busy(window):
+    sale_id = _paid_sale_id(window, "rep2")
+    _ring_up_item(window, "rep3")  # V 1 now has a ticket being built
+    window._navigate(4)
+
+    window.reports_screen.sale_selected.emit(sale_id)
+
+    assert window._active_vtab == 2
+    assert window._vtab_buttons[2].isChecked() is True
+    assert window.pos_screen._current_sale_id == sale_id
+    window._switch_vtab(1)
+    assert len(window.pos_screen.cart.entries) == 1  # V 1's ticket untouched
+    assert window.pos_screen.sale_finished is False
+
+
+def test_sale_from_reports_with_every_vtab_busy_shows_overlay(window):
+    sale_id = _paid_sale_id(window, "rep4")
+    for i in range(1, MAX_VTABS + 1):
+        window._switch_vtab(i)
+        _ring_up_item(window, f"rep5{i}")
+    window._navigate(4)
+
+    window.reports_screen.sale_selected.emit(sale_id)
+
+    assert window.stack.currentIndex() == 0
+    assert window._active_vtab == MAX_VTABS
+    assert window.pos_screen.sale_finished is False
+    assert window.pos_screen.overlay.message_label.text() == "All V-tabs are active"
+
+
 def test_error_badge_opens_logs_and_acknowledges(window):
     window.error_badge._on_record("ERROR printer failed", logging.ERROR)
     window.error_badge.click()
