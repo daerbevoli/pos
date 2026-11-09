@@ -5,6 +5,11 @@ Every fixture that touches the database uses an isolated in-memory SQLite
 engine — nothing here ever reads or writes the real per-user database that
 app.core.database.get_db_path() points at.
 """
+import os
+
+# Same as CI: real display servers (Wayland) ignore window positioning and pop up windows.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

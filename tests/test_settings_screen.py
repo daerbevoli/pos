@@ -227,7 +227,7 @@ def test_admin_refused_with_wrong_code(screen, monkeypatch):
 
     assert screen.is_admin is False
     assert emitted == []
-    assert screen.overlay.message_label.text() == "Wrong code."
+    assert screen.overlay.message_label.text() == "Code incorrect"
 
 
 def test_admin_button_again_leaves_admin_mode(screen, qtbot):
@@ -258,7 +258,7 @@ def test_admin_code_change_typed_twice_takes_effect(screen, monkeypatch):
 
     screen._change_admin_code()
 
-    assert screen.overlay.message_label.text() == "Admin code changed."
+    assert screen.overlay.message_label.text() == "Admin code changed"
     assert check_admin_code("5555") and not check_admin_code("2060")
 
 
