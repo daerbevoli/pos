@@ -785,3 +785,20 @@ QPushButton#ZRBtn:pressed {
 QWidget#customerDisplay {
     background-color: #fbf3ee;
 }
+
+/* ── Settings: admin-only tabs while not in admin mode ───── */
+/* The global QWidget rule fixes the colours for every state, so a disabled
+   page would look normal; these grey it out (SettingsScreen._apply_admin_lock). */
+QWidget#adminLocked:disabled,
+QWidget#adminLocked *:disabled {
+    background-color: #dfe3e9;
+    color: #8a93a0;
+}
+
+QWidget#adminLocked QPushButton:disabled,
+QWidget#adminLocked QLineEdit:disabled,
+QWidget#adminLocked QListWidget:disabled {
+    background-color: #d3d8df;
+    border: 1px solid #c2c8d0;
+    color: #8a93a0;
+}

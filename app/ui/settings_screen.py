@@ -52,8 +52,6 @@ from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 logger = logging.getLogger(__name__)
 
-
-
 class SettingsScreen(QWidget):
     settings_saved = pyqtSignal()
     navigate = pyqtSignal(int)
@@ -108,6 +106,12 @@ class SettingsScreen(QWidget):
         self.tabs.addTab(general_tab, "General")
         self.log_panel = LogPanel()
         self.tabs.addTab(self.log_panel, "Logs")
+
+        # Admin-only tabs: still viewable, but disabled (greyed out, no input)
+        # until admin mode is on. See _apply_admin_lock().
+        self._admin_pages = (catalog_tab, printers_tab, erp_tab, general_tab)
+        for page in self._admin_pages:
+            page.setObjectName("adminLocked")
 
         # ── Store info ────────────────────────────────────────────────────────
         store_group = QGroupBox("Store Information")
@@ -302,6 +306,15 @@ class SettingsScreen(QWidget):
         # (FunctionButtons would otherwise stretch to fill their column).
         for btn in self.findChildren(QPushButton):
             btn.setFixedHeight(SETTINGS_BUTTON_HEIGHT)
+
+        self._apply_admin_lock()
+
+    def _apply_admin_lock(self):
+        """Disabling a page disables every widget on it, so nothing there can
+        be typed into or clicked; the Logs tab and the Buttons row stay usable
+        (the Admin button is how you get out of read-only)."""
+        for page in self._admin_pages:
+            page.setEnabled(self.is_admin)
 
     def _show_logo_preview(self, path: str):
         pixmap = QPixmap(path)
@@ -603,6 +616,7 @@ class SettingsScreen(QWidget):
         if self.is_admin:
             self.is_admin = False
             logger.info("Admin mode disabled")
+            self._apply_admin_lock()
             self.admin_changed.emit(False)
             with get_session() as session:
                 cashier = SettingsService.get(session, "cashier_name", "Cashier")
@@ -617,6 +631,7 @@ class SettingsScreen(QWidget):
             return
         self.is_admin = True
         logger.info("Admin mode enabled")
+        self._apply_admin_lock()
         self.admin_changed.emit(True)
         self.salesperson_changed.emit("Admin")
 
