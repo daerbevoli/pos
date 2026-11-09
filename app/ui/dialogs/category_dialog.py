@@ -52,10 +52,10 @@ class CategoryDialog(QDialog):
     def on_ok(self):
         name = self.line_edit.text().strip()
         if not name:
-            self.overlay.show_message("Name cannot be empty")
+            self.overlay.show_message("Category name cannot be empty")
             return
         if name.lower() != self._original and name.lower() in self._existing:
-            self.overlay.show_message(f"{name} already exists")
+            self.overlay.show_message(f"Category '{name}' already exists")
             return
         self.cat_name = name
         self.accept()

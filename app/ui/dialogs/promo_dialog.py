@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -34,7 +33,7 @@ from PyQt6.QtWidgets import (
 from app.constants import DIALOG_BUTTON_HEIGHT, PROMO_DIALOG_MIN_SIZE
 from app.core.database import get_session
 from app.core.inventory.product_service import ProductService
-from app.utils.utils import FunctionButton
+from app.utils.utils import FunctionButton, TapToDismissOverlay
 
 # Column indices for the products table.
 COL_PRODUCT, COL_PRICE, COL_TYPE, COL_VALUE, COL_NEW_PRICE, COL_REMOVE = range(6)
@@ -67,6 +66,8 @@ class PromoDialog(QDialog):
         # Working list of per-product discounts: dicts with product_id, name,
         # price, discount_type ("percent"|"fixed"), discount_value.
         self._items: list[dict] = []
+
+        self.overlay = TapToDismissOverlay(self)
 
         self._build_ui(promo_name, start_date, end_date, is_active)
         self._load_initial_items(items or [])
@@ -360,16 +361,16 @@ class PromoDialog(QDialog):
     def on_ok(self):
         name = self.name_edit.text().strip()
         if not name:
-            QMessageBox.warning(self, "Promo", "Name cannot be empty.")
+            self.overlay.show_message("Name cannot be empty")
             return
         if name.lower() != self._original and name.lower() in self._existing:
-            QMessageBox.warning(self, "Promo", f"“{name}” already exists.")
+            self.overlay.show_message(f"“{name}” already exists")
             return
         if self.date.isChecked():
             start = self.start_edit.date().toPyDate()
             end = self.end_edit.date().toPyDate()
             if end < start:
-                QMessageBox.warning(self, "Promo", "End date can't be before the start date.")
+                self.overlay.show_message("End date can't be before the start date")
                 return
         else:
             start = end = None  # indefinite — always active until removed/edited

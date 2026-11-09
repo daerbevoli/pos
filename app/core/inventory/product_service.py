@@ -301,19 +301,19 @@ class ProductService:
     @staticmethod
     def delete_category(session: Session, category_id: int) -> bool:
         """
-        Delete a category. Any products in it are left uncategorised
+        Delete a category. Any products in it are left uncategorized
         (category_id set to NULL). Returns False if it doesn't exist.
         """
         cat = session.query(Category).filter_by(id=category_id).first()
         if not cat:
             return False
-        uncategorised = session.query(Product).filter_by(category_id=category_id).update(
+        uncategorized = session.query(Product).filter_by(category_id=category_id).update(
             {Product.category_id: None}, synchronize_session=False
         )
         name = cat.name
         session.delete(cat)
         session.commit()
-        logger.info("Category deleted: %s %r (%d products uncategorised)", category_id, name, uncategorised)
+        logger.info("Category deleted: %s %r (%d products uncategorized)", category_id, name, uncategorized)
         return True
 
     # ── Promos ────────────────────────────────────────────────────────────────

@@ -53,12 +53,13 @@ from app.utils.utils import FunctionButton, TapToDismissOverlay
 logger = logging.getLogger(__name__)
 
 class SettingsScreen(QWidget):
-    settings_saved = pyqtSignal()
-    navigate = pyqtSignal(int)
-    salesperson_changed = pyqtSignal(str)  # cashier name update for header
-    admin_changed = pyqtSignal(bool)       # admin mode toggled, for POS's admin-only actions
-    rf_cn_requested = pyqtSignal()         # admin pressed RF / CN: toggle it on the active POS ticket
-    customer_display_requested = pyqtSignal()  # show/hide the customer display window
+
+    settings_saved = pyqtSignal()               # Signal when settings is saved
+    navigate = pyqtSignal(int)                  # Navigate through screens
+    salesperson_changed = pyqtSignal(str)       # cashier name update for header
+    admin_changed = pyqtSignal(bool)            # admin mode toggled, for POS's admin-only actions
+    rf_cn_requested = pyqtSignal()              # admin pressed RF / CN: toggle it on the active POS ticket
+    customer_display_requested = pyqtSignal()   # show/hide the customer display window
 
     is_admin = False
 
@@ -74,7 +75,7 @@ class SettingsScreen(QWidget):
         layout.setContentsMargins(*MARGIN_SETTINGS)
         layout.setSpacing(SPACING_MD)
 
-        self.tabs = QTabWidget()
+        self.tabs = QTabWidget()    # tabs for logs, general etc
         layout.addWidget(self.tabs)
 
         general_tab = QWidget()
@@ -107,8 +108,7 @@ class SettingsScreen(QWidget):
         self.log_panel = LogPanel()
         self.tabs.addTab(self.log_panel, "Logs")
 
-        # Admin-only tabs: still viewable, but disabled (greyed out, no input)
-        # until admin mode is on. See _apply_admin_lock().
+        # Admin-only tabs: viewable but disabled
         self._admin_pages = (catalog_tab, printers_tab, erp_tab, general_tab)
         for page in self._admin_pages:
             page.setObjectName("adminLocked")
@@ -164,6 +164,48 @@ class SettingsScreen(QWidget):
         left_col.addWidget(about_group)
         left_col.addStretch()
 
+        # ── Categories ─────────────────────────────────────────────
+        cats_group = QGroupBox("Categories")
+        cats_layout = QVBoxLayout(cats_group)
+        self.categories_list = QListWidget()
+        self.categories_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
+        cats_layout.addWidget(self.categories_list)
+        cats_col.addWidget(cats_group)
+        self._reload_categories()
+        btn_add = FunctionButton("Add")
+        btn_add.clicked.connect(self._on_add_cat)
+        btn_remove = FunctionButton("Remove")
+        btn_remove.clicked.connect(self._on_remove_cat)
+        btn_edit = FunctionButton("Edit")
+        btn_edit.clicked.connect(self._on_edit_cat)
+        cats_btn_layout = QHBoxLayout()
+        cats_btn_layout.addWidget(btn_add)
+        cats_btn_layout.addWidget(btn_edit)
+        cats_btn_layout.addWidget(btn_remove)
+        cats_col.addLayout(cats_btn_layout)
+
+        # ── Promos ─────────────────────────────────────────────────
+        promos_group = QGroupBox("Promos")
+        promos_layout = QVBoxLayout(promos_group)
+        self.promos_list = QListWidget()
+        self.promos_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
+        promos_layout.addWidget(self.promos_list)
+        promos_col.addWidget(promos_group)
+        self._reload_promos()
+        btn_add_promo = FunctionButton("Add")
+        btn_add_promo.clicked.connect(self._on_add_promo)
+        btn_edit_promo = FunctionButton("Edit")
+        btn_edit_promo.clicked.connect(self._on_edit_promo)
+        btn_remove_promo = FunctionButton("Remove")
+        btn_remove_promo.clicked.connect(self._on_remove_promo)
+        promos_btn_layout = QHBoxLayout()
+        promos_btn_layout.addWidget(btn_add_promo)
+        promos_btn_layout.addWidget(btn_edit_promo)
+        promos_btn_layout.addWidget(btn_remove_promo)
+        promos_col.addLayout(promos_btn_layout)
+
+
+        # ── Shortcuts ─────────────────────────────────────────────────
         sc_group = QGroupBox("Shortcuts")
         sc_layout = QVBoxLayout(sc_group)
         self.shortcuts_list = QListWidget()
@@ -183,7 +225,7 @@ class SettingsScreen(QWidget):
         sc_btn_layout.addWidget(btn_remove_sc)
         sc_col.addLayout(sc_btn_layout)
 
-        # ── Printer config ────────────────────────────────────────────────────
+        # ── Receipt printer config ────────────────────────────────────────────────────
         printer_group = QGroupBox("Receipt Printer (USB)")
         printer_form = QFormLayout(printer_group)
 
@@ -217,47 +259,7 @@ class SettingsScreen(QWidget):
         label_form.addRow("", label_test_btn)
         printers_row.addWidget(label_group)
 
-        # ── Categories ─────────────────────────────────────────────
-        cats_group = QGroupBox("Categories")
-        cats_layout = QVBoxLayout(cats_group)
-        self.categories_list = QListWidget()
-        self.categories_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
-        cats_layout.addWidget(self.categories_list)
-        cats_col.addWidget(cats_group)
-        self._reload_categories()
-        btn_add = FunctionButton("Add")
-        btn_add.clicked.connect(self._on_add)
-        btn_remove = FunctionButton("Remove")
-        btn_remove.clicked.connect(self._on_remove)
-        btn_edit = FunctionButton("Edit")
-        btn_edit.clicked.connect(self._on_edit)
-        cats_btn_layout = QHBoxLayout()
-        cats_btn_layout.addWidget(btn_add)
-        cats_btn_layout.addWidget(btn_edit)
-        cats_btn_layout.addWidget(btn_remove)
-        cats_col.addLayout(cats_btn_layout)
-
-        # ── Promos ─────────────────────────────────────────────────
-        promos_group = QGroupBox("Promos")
-        promos_layout = QVBoxLayout(promos_group)
-        self.promos_list = QListWidget()
-        self.promos_list.setSelectionBehavior(QListWidget.SelectionBehavior.SelectRows)
-        promos_layout.addWidget(self.promos_list)
-        promos_col.addWidget(promos_group)
-        self._reload_promos()
-        btn_add_promo = FunctionButton("Add")
-        btn_add_promo.clicked.connect(self._on_add_promo)
-        btn_edit_promo = FunctionButton("Edit")
-        btn_edit_promo.clicked.connect(self._on_edit_promo)
-        btn_remove_promo = FunctionButton("Remove")
-        btn_remove_promo.clicked.connect(self._on_remove_promo)
-        promos_btn_layout = QHBoxLayout()
-        promos_btn_layout.addWidget(btn_add_promo)
-        promos_btn_layout.addWidget(btn_edit_promo)
-        promos_btn_layout.addWidget(btn_remove_promo)
-        promos_col.addLayout(promos_btn_layout)
-
-        # --- ERP -------
+        # ── ERP ─────────────────────────────────────────────
         erp_group = QGroupBox("ERP Information")
         erp_form = QFormLayout(erp_group)
 
@@ -276,7 +278,7 @@ class SettingsScreen(QWidget):
         erp_form.addRow("", erp_test_btn)
         erp_row.addWidget(erp_group)
 
-        # ── Buttons (admin functions moved off the POS control grid) ─────────
+        # ── Buttons ─────────
         buttons_group = QGroupBox("Buttons")
         buttons_layout = QHBoxLayout(buttons_group)
         buttons_layout.setSpacing(SPACING_XS)
@@ -303,16 +305,13 @@ class SettingsScreen(QWidget):
         layout.addStretch()
 
         # One height for every button on this screen, whichever tab it is on
-        # (FunctionButtons would otherwise stretch to fill their column).
         for btn in self.findChildren(QPushButton):
             btn.setFixedHeight(SETTINGS_BUTTON_HEIGHT)
 
         self._apply_admin_lock()
 
     def _apply_admin_lock(self):
-        """Disabling a page disables every widget on it, so nothing there can
-        be typed into or clicked; the Logs tab and the Buttons row stay usable
-        (the Admin button is how you get out of read-only)."""
+        """Disable admin pages if not admin"""
         for page in self._admin_pages:
             page.setEnabled(self.is_admin)
 
@@ -367,6 +366,54 @@ class SettingsScreen(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, cat.id)
                 self.categories_list.addItem(item)
 
+    def _selected_category(self):
+        """Return (id, name) of the selected category, or (None, None)."""
+        item = self.categories_list.currentItem()
+        if item is None:
+            return None, None
+        return item.data(Qt.ItemDataRole.UserRole), item.text()
+
+    def _category_names(self):
+        return [self.categories_list.item(i).text() for i in range(self.categories_list.count())]
+
+    def _on_add_cat(self):
+        dialog = CategoryDialog(parent=self, existing_names=self._category_names())
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            created = ProductService.create_category(session, dialog.cat_name)
+        if created is None:
+            self._show_overlay("Category already exists")
+        self._reload_categories()
+
+    def _on_edit_cat(self):
+        cat_id, cat_name = self._selected_category()
+        if cat_id is None:
+            return
+        dialog = CategoryDialog(parent=self, cat_name=cat_name, existing_names=self._category_names())
+        if not dialog.exec() or dialog.cat_name == cat_name:
+            return
+        with get_session() as session:
+            renamed = ProductService.rename_category(session, cat_id, dialog.cat_name)
+        if renamed is None:
+            self._show_overlay("Category name already exist")
+        self._reload_categories()
+
+    def _on_remove_cat(self):
+        cat_id, cat_name = self._selected_category()
+        if cat_id is None:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Remove Category",
+            f"Remove “{cat_name}”?\nProducts in this category will be left uncategorized.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        with get_session() as session:
+            ProductService.delete_category(session, cat_id)
+        self._reload_categories()
+
     def _reload_promos(self):
         """Repopulate the list from the DB, stashing each promo id on its item."""
         self.promos_list.clear()
@@ -384,6 +431,85 @@ class SettingsScreen(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, promo.id)
                 self.promos_list.addItem(item)
 
+    def _selected_promo_id(self):
+        item = self.promos_list.currentItem()
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _promo_names(self):
+        """Raw promo names for uniqueness checks — the list widget shows a
+        formatted label (with discount/active info), not the bare name."""
+        with get_session() as session:
+            return [p.name for p in ProductService.get_all_promos(session)]
+
+    def _on_add_promo(self):
+        dialog = PromoDialog(parent=self, existing_names=self._promo_names())
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            created = ProductService.create_promo(
+                session, dialog.promo_name, dialog.start_date,
+                dialog.end_date, dialog.is_active,
+            )
+            if created is None:
+                self._show_overlay("Promo already exists")
+            else:
+                ProductService.set_promo_items(session, created.id, dialog.items)
+        self._reload_promos()
+
+    def _on_edit_promo(self):
+        promo_id = self._selected_promo_id()
+        if promo_id is None:
+            return
+        with get_session() as session:
+            promo = next((p for p in ProductService.get_all_promos(session) if p.id == promo_id), None)
+            if not promo:
+                return
+            items = [
+                {
+                    "product_id": pi.product_id,
+                    "discount_type": pi.discount_type,
+                    "discount_value": pi.discount_value,
+                }
+                for pi in ProductService.get_promo_items(session, promo_id)
+            ]
+            promo_name, start_date, end_date, is_active = (
+                promo.name, promo.start_date, promo.end_date, promo.is_active,
+            )
+        dialog = PromoDialog(
+            parent=self, promo_name=promo_name, start_date=start_date,
+            end_date=end_date, is_active=is_active,
+            existing_names=self._promo_names(), items=items,
+        )
+        if not dialog.exec():
+            return
+        with get_session() as session:
+            updated = ProductService.update_promo(
+                session, promo_id, dialog.promo_name, dialog.start_date,
+                dialog.end_date, dialog.is_active,
+            )
+            if updated is None:
+                self._show_overlay("Promo name already in use")
+            else:
+                ProductService.set_promo_items(session, promo_id, dialog.items)
+        self._reload_promos()
+
+    def _on_remove_promo(self):
+        promo_id = self._selected_promo_id()
+        if promo_id is None:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Remove Promo",
+            "Remove this promo?",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        with get_session() as session:
+            ProductService.delete_promo(session, promo_id)
+        self._reload_promos()
+
     def _reload_shortcuts(self):
         """Repopulate the list from the DB, stashing each shortcut id on its item."""
         self.shortcuts_list.clear()
@@ -393,47 +519,15 @@ class SettingsScreen(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, sc.id)
                 self.shortcuts_list.addItem(item)
 
-    def _selected_category(self):
-        """Return (id, name) of the selected category, or (None, None)."""
-        item = self.categories_list.currentItem()
-        if item is None:
-            return None, None
-        return item.data(Qt.ItemDataRole.UserRole), item.text()
-
-    def _category_names(self):
-        return [self.categories_list.item(i).text() for i in range(self.categories_list.count())]
-
-    def _selected_promo_id(self):
-        item = self.promos_list.currentItem()
-        if item is None:
-            return None
-        return item.data(Qt.ItemDataRole.UserRole)
-
-    def _promo_names(self, exclude_id=None):
-        """Raw promo names for uniqueness checks — the list widget shows a
-        formatted label (with discount/active info), not the bare name."""
-        with get_session() as session:
-            return [p.name for p in ProductService.get_all_promos(session) if p.id != exclude_id]
-
-    def _shortcut_names(self):
-        return [self.shortcuts_list.item(i).text() for i in range(self.shortcuts_list.count())]
-
-    def _on_add(self):
-        dialog = CategoryDialog(parent=self, existing_names=self._category_names())
-        if not dialog.exec():
-            return
-        with get_session() as session:
-            created = ProductService.create_category(session, dialog.cat_name)
-        if created is None:
-            self._show_overlay("Category already exists")
-        self._reload_categories()
-
     def _selected_shortcut(self):
         """Return (id, name) of the selected shortcut, or (None, None)."""
         item = self.shortcuts_list.currentItem()
         if item is None:
             return None, None
         return item.data(Qt.ItemDataRole.UserRole), item.text()
+
+    def _shortcut_names(self):
+        return [self.shortcuts_list.item(i).text() for i in range(self.shortcuts_list.count())]
 
     def _on_add_sc(self):
         dialog = ShortcutDialog(parent=self, existing_names=self._shortcut_names())
@@ -465,7 +559,7 @@ class SettingsScreen(QWidget):
             if dialog.sc_name != sc_name:
                 renamed = ProductService.rename_shortcut(session, sc_id, dialog.sc_name)
                 if renamed is None:
-                    QMessageBox.warning(self, "Shortcut", "Could not rename shortcut — that name is already in use.")
+                    self._show_overlay("Shortcut name already in use")
                     return
             ProductService.set_shortcut_items(session, sc_id, dialog.product_ids)
         self._reload_shortcuts()
@@ -473,7 +567,6 @@ class SettingsScreen(QWidget):
     def _on_remove_sc(self):
         sc_id, sc_name = self._selected_shortcut()
         if sc_id is None:
-            QMessageBox.information(self, "Shortcut", "Select a shortcut to remove.")
             return
         confirm = QMessageBox.question(
             self,
@@ -485,105 +578,6 @@ class SettingsScreen(QWidget):
         with get_session() as session:
             ProductService.delete_shortcut(session, sc_id)
         self._reload_shortcuts()
-
-    def _on_edit(self):
-        cat_id, cat_name = self._selected_category()
-        if cat_id is None:
-            QMessageBox.information(self, "Category", "Select a category to edit.")
-            return
-        dialog = CategoryDialog(parent=self, cat_name=cat_name, existing_names=self._category_names())
-        if not dialog.exec() or dialog.cat_name == cat_name:
-            return
-        with get_session() as session:
-            renamed = ProductService.rename_category(session, cat_id, dialog.cat_name)
-        if renamed is None:
-            QMessageBox.warning(self, "Category", "Could not rename category — that name is already in use.")
-        self._reload_categories()
-
-    def _on_remove(self):
-        cat_id, cat_name = self._selected_category()
-        if cat_id is None:
-            QMessageBox.information(self, "Category", "Select a category to remove.")
-            return
-        confirm = QMessageBox.question(
-            self,
-            "Remove Category",
-            f"Remove “{cat_name}”?\nProducts in this category will be left uncategorized.",
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-        with get_session() as session:
-            ProductService.delete_category(session, cat_id)
-        self._reload_categories()
-
-    def _on_add_promo(self):
-        dialog = PromoDialog(parent=self, existing_names=self._promo_names())
-        if not dialog.exec():
-            return
-        with get_session() as session:
-            created = ProductService.create_promo(
-                session, dialog.promo_name, dialog.start_date,
-                dialog.end_date, dialog.is_active,
-            )
-            if created is None:
-                self._show_overlay("Error adding promo")
-            else:
-                ProductService.set_promo_items(session, created.id, dialog.items)
-        self._reload_promos()
-
-    def _on_edit_promo(self):
-        promo_id = self._selected_promo_id()
-        if promo_id is None:
-            QMessageBox.information(self, "Promo", "Select a promo to edit.")
-            return
-        with get_session() as session:
-            promo = next((p for p in ProductService.get_all_promos(session) if p.id == promo_id), None)
-            if not promo:
-                return
-            items = [
-                {
-                    "product_id": pi.product_id,
-                    "discount_type": pi.discount_type,
-                    "discount_value": pi.discount_value,
-                }
-                for pi in ProductService.get_promo_items(session, promo_id)
-            ]
-            promo_name, start_date, end_date, is_active = (
-                promo.name, promo.start_date, promo.end_date, promo.is_active,
-            )
-        dialog = PromoDialog(
-            parent=self, promo_name=promo_name, start_date=start_date,
-            end_date=end_date, is_active=is_active,
-            existing_names=self._promo_names(exclude_id=promo_id), items=items,
-        )
-        if not dialog.exec():
-            return
-        with get_session() as session:
-            updated = ProductService.update_promo(
-                session, promo_id, dialog.promo_name, dialog.start_date,
-                dialog.end_date, dialog.is_active,
-            )
-            if updated is None:
-                QMessageBox.warning(self, "Promo", "Could not update promo — that name is already in use.")
-            else:
-                ProductService.set_promo_items(session, promo_id, dialog.items)
-        self._reload_promos()
-
-    def _on_remove_promo(self):
-        promo_id = self._selected_promo_id()
-        if promo_id is None:
-            QMessageBox.information(self, "Promo", "Select a promo to remove.")
-            return
-        confirm = QMessageBox.question(
-            self,
-            "Remove Promo",
-            "Remove this promo?",
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-        with get_session() as session:
-            ProductService.delete_promo(session, promo_id)
-        self._reload_promos()
 
     def _save(self):
         with get_session() as session:
@@ -626,8 +620,8 @@ class SettingsScreen(QWidget):
         if not dialog.exec():
             return
         if not check_admin_code(dialog.value):
-            logger.warning("Admin mode refused: wrong code")
-            self._show_overlay("Wrong code.")
+            logger.warning("Admin mode refused: code incorrect")
+            self._show_overlay("Code incorrect")
             return
         self.is_admin = True
         logger.info("Admin mode enabled")
@@ -651,13 +645,13 @@ class SettingsScreen(QWidget):
             return
         problem = admin_code_problem(code)
         if problem:
-            self._show_overlay(problem, kind="error")
+            self._show_overlay(problem)
             return
         if self._ask_code("Repeat new admin code") != code:
-            self._show_overlay("The codes didn't match. Admin code not changed.", kind="error")
+            self._show_overlay("The codes didn't match. Admin code not changed.")
             return
         set_admin_code(code)
-        self._show_overlay("Admin code changed.")
+        self._show_overlay("Admin code changed")
 
     def _rf_cn(self):
         """Asks MainWindow to toggle refund / credit-note mode on the active
