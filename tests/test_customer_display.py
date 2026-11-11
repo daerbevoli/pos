@@ -11,6 +11,7 @@ from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import QAbstractItemView, QMessageBox
 
+from app.constants.screens import SCREENS
 from app.ui.customer_display import CustomerDisplay
 from app.ui.main_window import MainWindow
 from app.core.client.client_service import ClientService
@@ -181,7 +182,7 @@ def test_display_follows_pos_while_another_screen_is_in_front(window, pos, displ
     """emit_display() must use isHidden(), not isVisible(): the client bar is
     'invisible' whenever Inventory/Settings/... covers the POS screen."""
     pos.set_client(_make_client(), "ACME")
-    window._navigate(1)
+    window._navigate(SCREENS["inventory"])
     pos.emit_display()
     assert display.client_label.text() == "INVOICE - ACME"
     assert not display.client_label.isHidden()

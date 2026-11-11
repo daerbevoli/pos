@@ -34,6 +34,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_SM,
 )
+from app.constants.screens import SCREENS
 from app.core.database import get_session
 from app.core.sale.receipt_service import PrinterError, ReceiptService
 from app.core.sale.report_service import (
@@ -506,7 +507,7 @@ class ReportsScreen(QWidget):
     def _confirm(self):
         if self.sales_table.currentRow() != -1 and not self._display_sale():
             return
-        self.navigate.emit(0)
+        self.navigate.emit(SCREENS["pos"])
 
     def _invoices_only(self):
         self.invoices_only = not self.invoices_only

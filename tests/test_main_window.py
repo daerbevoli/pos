@@ -6,6 +6,7 @@ import logging
 
 import pytest
 
+from app.constants.screens import SCREENS
 from app.ui.main_window import MainWindow, MAX_VTABS
 from app.core.inventory.product_service import ProductService
 from app.core.client.client_service import ClientService
@@ -41,7 +42,7 @@ def window(qtbot, patched_db):
 
 def test_construction_wires_all_screens(window):
     assert window.stack.count() == 5
-    assert window.stack.currentIndex() == 0  # POS screen first
+    assert window.stack.currentIndex() == SCREENS["pos"]
 
 
 def test_clock_box_sits_in_the_vtab_bar_after_the_tabs(window):
@@ -79,31 +80,31 @@ def test_switch_to_same_tab_is_noop(window):
 
 
 def test_navigate_switches_stack_screen(window):
-    window._navigate(2)  # client screen
-    assert window.stack.currentIndex() == 2
+    window._navigate(SCREENS["clients"])
+    assert window.stack.currentIndex() == SCREENS["clients"]
 
 
 def test_navigate_back_to_pos_activates_current_vtab(window):
     window._switch_vtab(2)
-    window._navigate(1)  # go to inventory
-    window._navigate(0)  # back to POS
-    assert window.stack.currentIndex() == 0
+    window._navigate(SCREENS["inventory"])
+    window._navigate(SCREENS["pos"])
+    assert window.stack.currentIndex() == SCREENS["pos"]
     assert window.pos_screen._active_tab == 2
 
 
 def test_client_screen_navigate_signal_switches_stack(window):
-    window.client_screen.navigate.emit(0)
-    assert window.stack.currentIndex() == 0
+    window.client_screen.navigate.emit(SCREENS["pos"])
+    assert window.stack.currentIndex() == SCREENS["pos"]
 
 
 def test_inventory_screen_navigate_signal_switches_stack(window):
-    window.inventory_screen.navigate.emit(0)
-    assert window.stack.currentIndex() == 0
+    window.inventory_screen.navigate.emit(SCREENS["pos"])
+    assert window.stack.currentIndex() == SCREENS["pos"]
 
 
 def test_reports_screen_navigate_signal_switches_stack(window):
-    window.reports_screen.navigate.emit(0)
-    assert window.stack.currentIndex() == 0
+    window.reports_screen.navigate.emit(SCREENS["pos"])
+    assert window.stack.currentIndex() == SCREENS["pos"]
 
 
 def test_selected_client_signal_sets_pos_screen_client(window):
@@ -170,10 +171,10 @@ def test_settings_admin_button_enables_admin_on_pos(window):
 
 
 def test_settings_rf_cn_button_toggles_pos_mode_and_returns_to_pos(window):
-    window._navigate(3)
+    window._navigate(SCREENS["settings"])
     window.settings_screen._admin()
     window.settings_screen._rf_cn()
-    assert window.stack.currentIndex() == 0
+    assert window.stack.currentIndex() == SCREENS["pos"]
     assert window._active_vtab == 1
     assert window.pos_screen.cart.is_refund is True
 
@@ -220,11 +221,11 @@ def _paid_sale_id(window, barcode):
 
 def test_sale_from_reports_opens_on_free_active_vtab(window):
     sale_id = _paid_sale_id(window, "rep1")
-    window._navigate(4)
+    window._navigate(SCREENS["reports"])
 
     window.reports_screen.sale_selected.emit(sale_id)
 
-    assert window.stack.currentIndex() == 0
+    assert window.stack.currentIndex() == SCREENS["pos"]
     assert window._active_vtab == 1
     assert window.pos_screen._current_sale_id == sale_id
 
@@ -232,7 +233,7 @@ def test_sale_from_reports_opens_on_free_active_vtab(window):
 def test_sale_from_reports_moves_to_free_vtab_when_active_is_busy(window):
     sale_id = _paid_sale_id(window, "rep2")
     _ring_up_item(window, "rep3")  # V 1 now has a ticket being built
-    window._navigate(4)
+    window._navigate(SCREENS["reports"])
 
     window.reports_screen.sale_selected.emit(sale_id)
 
@@ -249,11 +250,11 @@ def test_sale_from_reports_with_every_vtab_busy_shows_overlay(window):
     for i in range(1, MAX_VTABS + 1):
         window._switch_vtab(i)
         _ring_up_item(window, f"rep5{i}")
-    window._navigate(4)
+    window._navigate(SCREENS["reports"])
 
     window.reports_screen.sale_selected.emit(sale_id)
 
-    assert window.stack.currentIndex() == 0
+    assert window.stack.currentIndex() == SCREENS["pos"]
     assert window._active_vtab == MAX_VTABS
     assert window.pos_screen.sale_finished is False
     assert window.pos_screen.overlay.message_label.text() == "All V-tabs are active"

@@ -35,6 +35,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.constants.screens import SCREENS
 from app.core.admin import admin_code_problem, check_admin_code, set_admin_code
 from app.core.database import get_session
 from app.core.erp.erp_service import ErpService
@@ -602,7 +603,7 @@ class SettingsScreen(QWidget):
     def _on_ok(self):
         self._save()
         self.tabs.setCurrentIndex(0)
-        self.navigate.emit(0)
+        self.navigate.emit(SCREENS["pos"])
 
     def _admin(self):
         """Toggles admin mode: switching it on takes the admin code, switching
@@ -669,7 +670,7 @@ class SettingsScreen(QWidget):
             logger.info("Reports refused: not in admin mode")
             return
         self.tabs.setCurrentIndex(0)
-        self.navigate.emit(4)
+        self.navigate.emit(SCREENS["reports"])
 
     def _customer_display(self):
         if not self.is_admin:

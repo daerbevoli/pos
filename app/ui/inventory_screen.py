@@ -45,6 +45,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.constants.screens import SCREENS
 from app.constants.vat import VAT_RATES
 from app.core.csv_import import ImportFileError, read_csv_rows
 from app.core.database import get_session
@@ -571,7 +572,7 @@ class ArticleDetailPanel(QFrame):
             self.parent_screen.table.clearSelection()
             self._clear()
             self.parent_screen.refresh()
-            self.parent_screen.navigate.emit(0)
+            self.parent_screen.navigate.emit(SCREENS["pos"])
 
     def _on_cancel(self):
         if self._mode == "new":
@@ -596,7 +597,7 @@ class ArticleDetailPanel(QFrame):
         was_display = self._mode == "display"
         self._on_cancel()
         if was_display:
-            self.parent_screen.navigate.emit(0)
+            self.parent_screen.navigate.emit(SCREENS["pos"])
 
     def _on_deactivate(self):
         if self.current_product_id is None or self._mode != "display":
@@ -1022,7 +1023,7 @@ class InventoryScreen(QWidget):
         self._select_product_row(product_id)
 
     def _clear(self):
-        self.navigate.emit(0)
+        self.navigate.emit(SCREENS["pos"])
 
     def _select_product_row(self, product_id: int) -> bool:
         """Selects product_id's row in the table if it's in the current

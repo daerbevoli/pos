@@ -24,6 +24,7 @@ from app.constants import (
     TAB_BAR_MAX_HEIGHT,
     TAB_BAR_MIN_HEIGHT,
 )
+from app.constants.screens import SCREENS
 from app.constants.sizes import MAIN_WINDOW_SIZE
 from app.core.backup.backup_service import KIND_DAILY, BackupService
 from app.core.backup.backup_worker import BackupWorker
@@ -59,7 +60,7 @@ class MainWindow(QMainWindow):
 
         self._active_vtab = 1
         # Per V-tab: which QStackedWidget index (screen) was last active
-        self._vtab_screen = {i: 0 for i in range(1, MAX_VTABS + 1)}
+        self._vtab_screen = {i: SCREENS["pos"] for i in range(1, MAX_VTABS + 1)}
         self._salesperson_name = ""  # "Cashier name" / "Admin", shown top right
         self._rf_cn_mode = False     # active POS ticket is in refund / credit-note mode
 
@@ -174,7 +175,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.stack, stretch=1)
 
         # Initialize to POS screen, tab 1
-        self.stack.setCurrentIndex(0)
+        self.stack.setCurrentIndex(SCREENS["pos"])
         self._refresh_salesperson()
 
     def showEvent(self, event):
@@ -230,12 +231,12 @@ class MainWindow(QMainWindow):
     def _navigate(self, screen_idx: int):
         self._vtab_screen[self._active_vtab] = screen_idx
         self.stack.setCurrentIndex(screen_idx)
-        if screen_idx == 0:
+        if screen_idx == SCREENS["pos"]:
             self.pos_screen.set_active_tab(self._active_vtab)
 
     def _open_logs(self):
         """Error badge tapped: show the log and count the errors as seen."""
-        self._navigate(3)
+        self._navigate(SCREENS["settings"])
         self.settings_screen.show_logs()
         self.error_badge.acknowledge()
 
@@ -245,7 +246,7 @@ class MainWindow(QMainWindow):
         looking. The mode can't flip under an open ticket (see
         POSScreen.set_rf_cn()), so if the active V-tab has one, leave it
         untouched and switch the mode on the first free V-tab instead."""
-        self._navigate(0)
+        self._navigate(SCREENS["pos"])
         entering = not self.pos_screen.cart.is_refund
         if not self._move_to_free_vtab(self.pos_screen.tab_has_open_ticket,
                                        "All V-tabs have an open ticket"):
@@ -256,7 +257,7 @@ class MainWindow(QMainWindow):
         """A sale picked on the Reports screen opens on the POS: on the active
         V-tab, or, if that one has a ticket being built, on the first free
         V-tab. With every V-tab busy, nothing is opened and an overlay says so."""
-        self._navigate(0)
+        self._navigate(SCREENS["pos"])
         if not self._move_to_free_vtab(self.pos_screen.tab_has_open_ticket, "All V-tabs are active"):
             return
         self.pos_screen.show_sale(sale_id)

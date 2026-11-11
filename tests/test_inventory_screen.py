@@ -7,6 +7,7 @@ import csv
 import pytest
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
+from app.constants.screens import SCREENS
 from app.ui.inventory_screen import InventoryScreen
 from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
@@ -924,7 +925,7 @@ def test_clear_in_display_mode_leaves_shortcut_grid_and_returns_to_pos(screen, q
     screen.detail_panel.btn_search_sc.click()
     with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
         screen.detail_panel.btn_clear.click()
-    assert blocker.args == [0]
+    assert blocker.args == [SCREENS["pos"]]
     assert screen.table_stack.currentWidget() is screen.table
 
 

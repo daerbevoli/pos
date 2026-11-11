@@ -51,6 +51,7 @@ from app.constants import (
     SPACING_SM,
     SPACING_XS,
 )
+from app.constants.screens import SCREENS
 from app.constants.countries import BELGIUM
 from app.core.sale.cart import (
     WEIGHT_UNITS,
@@ -429,9 +430,9 @@ class POSScreen(QWidget):
         self.btn_disc_amt.clicked.connect(self._apply_amount_discount)
         self.btn_up.clicked.connect(lambda: self._move_selection(-1))
         self.btn_down.clicked.connect(lambda: self._move_selection(1))
-        self.btn_articles.clicked.connect(lambda: self.navigate.emit(1))
-        self.btn_client.clicked.connect(lambda: self.navigate.emit(2))
-        self.btn_settings.clicked.connect(lambda: self.navigate.emit(3))
+        self.btn_articles.clicked.connect(lambda: self.navigate.emit(SCREENS["inventory"]))
+        self.btn_client.clicked.connect(lambda: self.navigate.emit(SCREENS["clients"]))
+        self.btn_settings.clicked.connect(lambda: self.navigate.emit(SCREENS["settings"]))
 
         self.btn_left.clicked.connect(self._previous_sale)
         self.btn_right.clicked.connect(self._next_sale)
@@ -1386,7 +1387,7 @@ class POSScreen(QWidget):
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
             self._attach_sale_client(sale)
 
-        self.sale_finished     = True
+        self.sale_finished      = True
         if sale.payment_breakdown:
             self._frozen_breakdown = json.loads(sale.payment_breakdown)
         else:

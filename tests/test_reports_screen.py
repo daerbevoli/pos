@@ -2,6 +2,7 @@
 import pytest
 from PyQt6.QtCore import QDate
 
+from app.constants.screens import SCREENS
 from app.ui.reports_screen import ReportsScreen
 from app.core.sale.report_service import _payment_breakdown, _discounts_and_mistakes, _sum_payment_breakdowns
 from app.core.inventory.product_service import ProductService
@@ -317,7 +318,7 @@ def test_showing_the_screen_resets_to_today(screen):
 def test_confirm_emits_navigate_signal(screen, qtbot):
     with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
         screen._confirm()
-    assert blocker.args == [0]
+    assert blocker.args == [SCREENS["pos"]]
 
 
 def test_confirm_without_a_selected_row_does_not_show_any_sale(screen, qtbot):

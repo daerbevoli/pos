@@ -7,6 +7,7 @@ monkeypatched since they'd otherwise pop a real modal dialog and hang.
 """
 import pytest
 
+from app.constants.screens import SCREENS
 from app.ui.settings_screen import SettingsScreen
 from app.core.settings_service import SettingsService
 
@@ -299,7 +300,7 @@ def test_reports_navigates_for_admin(screen, qtbot):
     screen._admin()
     with qtbot.waitSignal(screen.navigate, timeout=1000) as blocker:
         screen._open_reports()
-    assert blocker.args == [4]
+    assert blocker.args == [SCREENS["reports"]]
 
 
 def test_rf_cn_blocked_without_admin(screen, monkeypatch, qtbot):

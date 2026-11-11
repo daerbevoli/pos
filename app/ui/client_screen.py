@@ -37,6 +37,7 @@ from app.constants import (
     SPACING_MD,
     SPACING_XS,
 )
+from app.constants.screens import SCREENS
 from app.constants.countries import BELGIUM, COUNTRY_NAMES
 from app.core.client.client_listing_service import ClientListingService
 from app.core.client.client_service import ClientService
@@ -470,7 +471,7 @@ class ClientDetailPanel(QFrame):
                 self.parent_screen.selected_client.emit(self.current_client_id, self.name.text())
             self.parent_screen.table.clearSelection()
             self._clear()
-            self.parent_screen.navigate.emit(0)
+            self.parent_screen.navigate.emit(SCREENS["pos"])
 
     def _on_cancel(self):
         if self._mode == "new":
@@ -496,7 +497,7 @@ class ClientDetailPanel(QFrame):
         was_display = self._mode == "display"
         self._on_cancel()
         if was_display:
-            self.parent_screen.navigate.emit(0)
+            self.parent_screen.navigate.emit(SCREENS["pos"])
 
     def _on_deactivate(self):
         if self.current_client_id is None or self._mode != "display":
@@ -745,7 +746,7 @@ class ClientScreen(QWidget):
         self._select_client_row(client_id)
 
     def _clear(self):
-        self.navigate.emit(0)
+        self.navigate.emit(SCREENS["pos"])
 
     def _select_client_row(self, client_id: int) -> bool:
         """Selects client_id's row in the table if it's in the current
