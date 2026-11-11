@@ -22,3 +22,9 @@ COUNTRY_NAMES = {
     "PL": "Poland", "PT": "Portugal", "RO": "Romania", "SK": "Slovakia",
     "SI": "Slovenia", "ES": "Spain", "SE": "Sweden",
 }
+
+
+def vat_prefix(country_code: str) -> str:
+    """The prefix of a VAT number from this country: its ISO code, except
+    Greece, whose VAT numbers start with EL, not GR."""
+    return "EL" if country_code == "GR" else country_code

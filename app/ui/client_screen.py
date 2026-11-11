@@ -1,16 +1,16 @@
 """
 Client Screen
-Table list of clients on top; selecting a row shows a "Client
-selecteren"-style detail panel below, with a field list on the left and a
-function-key grid on the right (New/Modify/Deactivate/Reactivate client, Import, Search by
-vat, OK/Cancel). New/Modify client edit the fields inline in the panel
-itself, mirroring the inventory screen's article editing.
+User chooses a client for a vat invoice. Client can be searched by name or vat.
+Pressing a client shows it in a detail panel above the list.
+Client consist of name, street, zip, city, country and vat (all mandatory) and phone and email.
+Client can be added, modified and deactivated and reactivated.
+The client listing can be generated, clients can be imported and exported
 """
 import csv
 import logging
 
 from PyQt6.QtCore import QEvent, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QKeySequence
+from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,7 +38,7 @@ from app.constants import (
     SPACING_XS,
 )
 from app.constants.screens import SCREENS
-from app.constants.countries import BELGIUM, COUNTRY_NAMES
+from app.constants.countries import BELGIUM, COUNTRY_NAMES, vat_prefix
 from app.core.client.client_listing_service import ClientListingService
 from app.core.client.client_service import ClientService
 from app.core.csv_import import ImportFileError, read_csv_rows
@@ -71,7 +71,6 @@ class ClientDetailPanel(QFrame):
         self._mode = "display"  # "display" | "new" | "edit"
 
         self._active_row: FieldRow | None = None
-        self._vat_prefix = ""  # country-code prefix currently enforced on vatNumber
 
         self.overlay = TapToDismissOverlay(self)
 
@@ -121,6 +120,15 @@ class ClientDetailPanel(QFrame):
 
         self.vatNumber = QLineEdit()
         self.vatNumber.setMinimumHeight(FORM_FIELD_HEIGHT)
+        # The country code shown in front of the VAT field, out of reach of
+        # edits; the stored VAT number is this + the field (see _full_vat()).
+        self.vat_prefix_label = QLabel()
+        vat_box = QWidget()
+        vat_layout = QHBoxLayout(vat_box)
+        vat_layout.setContentsMargins(0, 0, 0, 0)
+        vat_layout.setSpacing(SPACING_XS)
+        vat_layout.addWidget(self.vat_prefix_label)
+        vat_layout.addWidget(self.vatNumber, 1)
 
         self.phone = QLineEdit()
         self.phone.setMinimumHeight(FORM_FIELD_HEIGHT)
@@ -143,7 +151,7 @@ class ClientDetailPanel(QFrame):
         self._row_map: dict = {}
 
         for label_text, widget in rows_spec:
-            row = FieldRow(label_text, widget)
+            row = FieldRow(label_text, vat_box if widget is self.vatNumber else widget)
             field_col.addWidget(row)
             self._fields.append(widget)
             self._row_map[widget] = row
@@ -207,11 +215,10 @@ class ClientDetailPanel(QFrame):
         self.btn_up.clicked.connect(lambda: self._navigate(-1))
         self.btn_down.clicked.connect(lambda: self._navigate(1))
         self.country.currentIndexChanged.connect(self._on_country_selected)
-        self.vatNumber.textChanged.connect(self._on_vat_text_changed)
 
         self._set_edit_mode(False)
 
-    # ── Event filter (focus tracking + keyboard nav) ───────────────────────
+    # ── Event filter that tracks events on form field on new ───────────────────────
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.FocusIn:
@@ -223,8 +230,6 @@ class ClientDetailPanel(QFrame):
                 row.set_active(True)
 
         elif event.type() == QEvent.Type.KeyPress:
-            if obj is self.vatNumber and self._vat_guard_blocks(event):
-                return True
             key = event.key()
             if key == Qt.Key.Key_Up:
                 self._navigate(-1)
@@ -236,39 +241,6 @@ class ClientDetailPanel(QFrame):
                 return True
 
         return super().eventFilter(obj, event)
-
-    def _vat_guard_blocks(self, event) -> bool:
-        """Keeps the VAT field's country-code prefix intact against keyboard
-        edits: backspace/delete/cut can't reach into it, and typing or
-        pasting over a selection that overlaps it only replaces the part
-        after it."""
-        if self._mode not in ("new", "edit") or not self._vat_prefix:
-            return False
-        prefix_len = len(self._vat_prefix)
-        le = self.vatNumber
-        key = event.key()
-        sel_start = le.selectionStart()
-        has_selection = sel_start != -1
-
-        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            if has_selection:
-                return sel_start < prefix_len
-            pos = le.cursorPosition()
-            return pos <= prefix_len if key == Qt.Key.Key_Backspace else pos < prefix_len
-
-        if event.matches(QKeySequence.StandardKey.Cut) and has_selection:
-            return sel_start < prefix_len
-
-        is_paste = event.matches(QKeySequence.StandardKey.Paste)
-        is_typed_char = bool(event.text()) and event.text().isprintable()
-        if is_paste or is_typed_char:
-            if has_selection and sel_start < prefix_len:
-                sel_len = max(0, sel_start + len(le.selectedText()) - prefix_len)
-                le.setSelection(prefix_len, sel_len)
-            elif not has_selection and le.cursorPosition() < prefix_len:
-                le.setCursorPosition(prefix_len)
-
-        return False
 
     def _navigate(self, direction: int):
         if self._mode == "display":
@@ -297,6 +269,7 @@ class ClientDetailPanel(QFrame):
         self.zip_code.clear()
         self.city.clear()
         self._set_country(BELGIUM)
+        self.vat_prefix_label.clear()
         self.vatNumber.clear()
         self.phone.clear()
         self.email.clear()
@@ -306,36 +279,24 @@ class ClientDetailPanel(QFrame):
         self.country.setCurrentIndex(idx if idx >= 0 else self.country.findData(BELGIUM))
 
     def _apply_country_to_vat(self, code: str):
-        """Resets the VAT field to just `code` — changing the country
-        discards whatever VAT number was there for the old one."""
-        self._vat_prefix = code
-        self.vatNumber.setText(code)
+        """Shows `code`'s VAT prefix and empties the field — changing
+        the country discards whatever VAT number was there for the old one."""
+        self.vat_prefix_label.setText(vat_prefix(code))
+        self.vatNumber.clear()
+
+    def _full_vat(self) -> str:
+        """The VAT number as stored: prefix label + the field, letters and
+        digits only, upper case, without a country code the cashier typed or
+        pasted too ("be 0123.456.789" -> "BE0123456789")."""
+        prefix = self.vat_prefix_label.text()
+        # shortcut: a number whose own digits start with its country's letters
+        # (e.g. some French keys) loses them; fix if that ever shows up.
+        return prefix + normalize_vat(self.vatNumber.text()).removeprefix(prefix)
 
     def _on_country_selected(self):
         if self._mode not in ("new", "edit"):
             return
         self._apply_country_to_vat(self.country.currentData())
-
-    def _on_vat_text_changed(self, text: str):
-        """Keeps the VAT number to letters and digits, upper case (see
-        normalize_vat(): "BE 0123.456.789" pastes as "BE0123456789"), and
-        is the safety net for edits _vat_guard_blocks can't see (e.g. a
-        context-menu paste or drag-and-drop): if the prefix is gone, it's
-        put back without discarding whatever text is there."""
-        if self._mode not in ("new", "edit"):
-            return
-        cursor = self.vatNumber.cursorPosition()
-        corrected = normalize_vat(text)
-        cursor = len(normalize_vat(text[:cursor]))
-        if self._vat_prefix and not corrected.startswith(self._vat_prefix):
-            corrected = self._vat_prefix + corrected
-            cursor = len(corrected)
-        if corrected == text:
-            return
-        self.vatNumber.blockSignals(True)
-        self.vatNumber.setText(corrected)
-        self.vatNumber.setCursorPosition(cursor)
-        self.vatNumber.blockSignals(False)
 
     def _populate_fields(self, client):
         self.name.setText(client.name or "")
@@ -343,11 +304,9 @@ class ClientDetailPanel(QFrame):
         self.zip_code.setText(client.zip_code or "")
         self.city.setText(client.city or "")
         self._set_country(client.country or BELGIUM)
-        self.vatNumber.setText(client.vatNumber or "")
-        # Track the country's code as the VAT prefix without rewriting the
-        # stored value — only a later, user-driven country change should
-        # strip/replace it (see _on_country_selected).
-        self._vat_prefix = client.country or BELGIUM
+        prefix = vat_prefix(client.country or BELGIUM)
+        self.vat_prefix_label.setText(prefix)
+        self.vatNumber.setText((client.vatNumber or "").removeprefix(prefix))
         self.phone.setText(client.phone or "")
         self.email.setText(client.email or "")
         is_active = getattr(client, "is_active", True)
@@ -411,8 +370,8 @@ class ClientDetailPanel(QFrame):
         if not self.city.text().strip():
             self._show_overlay("City is required.")
             return False
-        vat = self.vatNumber.text().strip()
-        if not vat or vat == self._vat_prefix:
+        vat = self._full_vat()
+        if vat == self.vat_prefix_label.text():  # nothing past the country code
             self._show_overlay("VAT number is required.")
             return False
         if not is_valid_vat(vat, self.country.currentData()):
@@ -427,7 +386,7 @@ class ClientDetailPanel(QFrame):
             "zip_code": self.zip_code.text().strip(),
             "city": self.city.text().strip(),
             "country": self.country.currentData(),
-            "vatNumber": normalize_vat(self.vatNumber.text()),
+            "vatNumber": self._full_vat(),
             "phone": self.phone.text().strip() or None,
             "email": self.email.text().strip() or None,
         }

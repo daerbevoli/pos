@@ -8,7 +8,6 @@ hit an isolated in-memory database.
 import csv
 
 import pytest
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from app.ui.client_screen import ClientScreen
@@ -105,9 +104,9 @@ def test_new_client_happy_path_persists(screen):
     panel.street.setText("1 Main St")
     panel.zip_code.setText("1000")
     panel.city.setText("Brussels")
-    # The country-code prefix (Belgium by default) is locked in place —
-    # typing appends after it rather than replacing it.
-    assert panel.vatNumber.text() == "BE"
+    # The country code (Belgium by default) sits in a label in front of the
+    # field; pasting the full number doesn't double it.
+    assert panel.vat_prefix_label.text() == "BE"
     panel.vatNumber.setText("BE0801427262")
     panel._on_ok()
     assert panel._mode == "display"
@@ -174,13 +173,28 @@ def test_new_client_validation_blocks_empty_vat(screen):
     panel.street.setText("1 Main St")
     panel.zip_code.setText("1000")
     panel.city.setText("Brussels")
-    # The country-code prefix can't be removed, so "empty" here means
-    # leaving it at the bare prefix with no actual VAT digits.
-    assert panel.vatNumber.text() == "BE"
+    assert panel.vatNumber.text() == ""
 
     panel._on_ok()
     assert panel._mode != "display"
 
+    with get_session() as session:
+        assert ClientService.get_all(session) == []
+
+
+def test_new_client_vat_of_just_the_country_code_counts_as_empty(screen):
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.name.setText("Has Name")
+    panel.street.setText("1 Main St")
+    panel.zip_code.setText("75001")
+    panel.city.setText("Paris")
+    panel.country.setCurrentIndex(panel.country.findData("FR"))  # no checksum for FR
+    panel.vatNumber.setText("fr")
+
+    panel._on_ok()
+
+    assert panel.overlay.message_label.text() == "VAT number is required."
     with get_session() as session:
         assert ClientService.get_all(session) == []
 
@@ -209,34 +223,20 @@ def test_start_new_ignored_while_already_editing(screen):
 def test_new_client_vat_gets_country_prefix(screen):
     panel = screen.detail_panel
     panel._start_new()
-    assert panel.vatNumber.text() == "BE"
+    assert panel.vat_prefix_label.text() == "BE"
+    assert panel.vatNumber.text() == ""
+
+    panel.vatNumber.setText("1234")
+    assert panel._full_vat() == "BE1234"
 
 
-def test_new_client_vat_prefix_is_unremovable(screen):
-    panel = screen.detail_panel
-    panel._start_new()
-
-    panel.vatNumber.setText("1234")  # replacing the whole field, prefix and all
-    assert panel.vatNumber.text() == "BE1234"
-
-    panel.vatNumber.setText("")  # clearing the field entirely
-    assert panel.vatNumber.text() == "BE"
-
-
-def test_new_client_vat_prefix_survives_backspace_and_select_all_typing(screen, qtbot):
+def test_new_client_typed_country_code_is_dropped(screen, qtbot):
     panel = screen.detail_panel
     panel._start_new()
     panel.vatNumber.setFocus()
 
-    # Backspacing from the end can never eat into the prefix.
-    for _ in range(5):
-        qtbot.keyClick(panel.vatNumber, Qt.Key.Key_Backspace)
-    assert panel.vatNumber.text() == "BE"
-
-    # Select-all + typing only replaces the part after the prefix.
-    panel.vatNumber.selectAll()
-    qtbot.keyClicks(panel.vatNumber, "1234")
-    assert panel.vatNumber.text() == "BE1234"
+    qtbot.keyClicks(panel.vatNumber, "be0477")  # cashier types the code out of habit
+    assert panel._full_vat() == "BE0477"
 
 
 def test_new_client_vat_takes_letters_and_digits_only(screen, qtbot):
@@ -246,20 +246,31 @@ def test_new_client_vat_takes_letters_and_digits_only(screen, qtbot):
     panel.vatNumber.setCursorPosition(len(panel.vatNumber.text()))
 
     qtbot.keyClicks(panel.vatNumber, "0477 .472-701")
-    assert panel.vatNumber.text() == "BE0477472701"
+    assert panel._full_vat() == "BE0477472701"
 
     panel.vatNumber.setText("be 0477.472.701")  # a paste, in lower case
-    assert panel.vatNumber.text() == "BE0477472701"
+    assert panel._full_vat() == "BE0477472701"
 
 
 def test_changing_country_clears_vat_to_bare_prefix_for_new_client(screen):
     panel = screen.detail_panel
     panel._start_new()
-    panel.vatNumber.setText("BE0123456789")
+    panel.vatNumber.setText("0123456789")
 
     panel.country.setCurrentIndex(panel.country.findData("FR"))
 
-    assert panel.vatNumber.text() == "FR"
+    assert panel.vat_prefix_label.text() == "FR"
+    assert panel.vatNumber.text() == ""
+
+
+def test_greek_client_vat_prefix_is_el(screen):
+    panel = screen.detail_panel
+    panel._start_new()
+    panel.country.setCurrentIndex(panel.country.findData("GR"))
+    assert panel.vat_prefix_label.text() == "EL"
+
+    panel.vatNumber.setText("EL094259216")  # pasted with its prefix
+    assert panel._full_vat() == "EL094259216"
 
 
 # ── Edit flow ────────────────────────────────────────────────────────────
@@ -303,11 +314,13 @@ def test_changing_country_while_editing_clears_vat_to_bare_prefix(screen):
 
     panel = screen.detail_panel
     panel._start_edit()
-    assert panel.vatNumber.text() == "BE0123456789"
+    assert panel.vat_prefix_label.text() == "BE"
+    assert panel.vatNumber.text() == "0123456789"
 
     panel.country.setCurrentIndex(panel.country.findData("FR"))
 
-    assert panel.vatNumber.text() == "FR"
+    assert panel.vat_prefix_label.text() == "FR"
+    assert panel.vatNumber.text() == ""
 
 
 # ── Deactivate / reactivate flow ─────────────────────────────────────────
