@@ -12,7 +12,7 @@
 # A release is made by tagging the commit "v" + app/__version__.py; the build
 # fails if the two disagree.
 #
-# Still to add: the Inno Setup installer and publishing a GitHub Release on tags.
+# Still to add: publishing a GitHub Release on tags.
 
 name: Build
 
@@ -123,4 +123,22 @@ jobs:
         with:
           name: SuperPOS-${{ steps.version.outputs.version }}-${{ matrix.platform }}
           path: dist/SuperPOS/
+          if-no-files-found: error
+
+      # Only after the self-test passed: never package a build that can't print.
+      - name: Build installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc installer\superpos.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Upload installer (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: SuperPOS-${{ steps.version.outputs.version }}-setup
+          path: dist/SuperPOS-${{ steps.version.outputs.version }}-setup.exe
           if-no-files-found: error

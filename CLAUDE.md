@@ -15,6 +15,7 @@ pytest tests/test_sales_service.py::test_foo  # single test
 pytest -k promo                 # by keyword
 
 pyinstaller superpos.spec       # one-folder build for the current OS (no cross-compiling: Windows .exe needs Windows) -> dist/SuperPOS/
+iscc installer\superpos.iss     # Windows installer from that build (version read from the exe) -> dist/SuperPOS-<version>-setup.exe; data in %APPDATA% is never touched
 python main.py --self-test      # exercise dynamically loaded deps (USB, escpos, reportlab, crypto, HTTPS); results in the log, exit code 0 = pass
 ```
 
