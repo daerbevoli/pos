@@ -1003,8 +1003,17 @@ class POSScreen(QWidget):
         keep_previous = (not select_last and not self.sale_finished
                          and prev_idx is not None and prev_idx in self._row_to_entry)
         row = self._row_to_entry.index(prev_idx) if keep_previous else self.cart_table.rowCount() - 1
+        if not keep_previous:
+            # The promo line drawn under an item just added: keep the item itself selected.
+            while row > 0 and self._is_promo_row(row):
+                row -= 1
         self._select_cart_row(row)
         self.cart_table.viewport().update()
+
+    def _is_promo_row(self, row: int) -> bool:
+        idx = self._row_to_entry[row] if row < len(self._row_to_entry) else None
+        entry = self.cart.entries[idx] if idx is not None else None
+        return isinstance(entry, DiscountEntry) and entry.is_promo
 
     def _update_totals(self):
         """What follows the cart: the V-tab amount, the Total/Remaining label,

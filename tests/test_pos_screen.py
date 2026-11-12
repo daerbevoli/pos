@@ -1031,6 +1031,18 @@ def test_reversal_line_copies_original_tax_rate(screen):
     assert reversal.base_tax_rate == 21
 
 
+def test_adding_a_promo_item_selects_the_item_not_its_promo_line(screen):
+    pid, barcode, _ = _add_product(barcode="promo_sel", price=10.0)
+    with get_session() as session:
+        promo = ProductService.create_promo(session, "New Year Promo")
+        ProductService.set_promo_items(
+            session, promo.id, [{"product_id": pid, "discount_type": "percent", "discount_value": 15.0}]
+        )
+    _scan(screen, barcode)
+    assert len(screen.cart.entries) == 2  # CartItem + its promo DiscountEntry
+    assert screen._get_selected_entry_index() == 0
+
+
 def test_remove_selected_on_promo_discount_removes_the_product_line(screen):
     """Selecting the promo's DiscountEntry row (not the product row) and
     deleting it removes the product line too — the discount isn't a
