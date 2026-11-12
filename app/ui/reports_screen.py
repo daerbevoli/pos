@@ -92,6 +92,7 @@ class ReportsScreen(QWidget):
 
     # Send selected sale id to pos to display
     sale_selected = pyqtSignal(int)
+    z_report_closed = pyqtSignal()  # no open tickets left: a safe moment to offer an update
 
     def __init__(self):
         super().__init__()
@@ -462,6 +463,8 @@ class ReportsScreen(QWidget):
         dialog = ZReportProgressDialog(self)
         dialog.exec()
         self._load_report()
+        if dialog.z_number is not None:
+            self.z_report_closed.emit()
 
     def _mark_invoice_sent(self):
         """Manually lock the selected invoice as sent — for one delivered

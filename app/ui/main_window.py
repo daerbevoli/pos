@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -30,9 +31,11 @@ from app.core.backup.backup_service import KIND_DAILY, BackupService
 from app.core.backup.backup_worker import BackupWorker
 from app.core.database import get_session
 from app.core.erp.erp_worker import InvoiceSendWorker
+from app.core import update_service
 from app.core.settings_service import SettingsService
 from app.ui.client_screen import ClientScreen
 from app.ui.customer_display import CustomerDisplay
+from app.ui.dialogs.step_worker import StepWorker
 from app.ui.inventory_screen import InventoryScreen
 from app.ui.pos_screen import TABS, POSScreen
 from app.ui.reports_screen import ReportsScreen
@@ -48,6 +51,9 @@ MAX_VTABS = TABS  # one source of truth: POSScreen keeps a state slot per V-tab
 # noon keeps it right across sleep/hibernate and clock changes, and catches
 # up when the POS is started after noon. The check only lists one folder.
 BACKUP_CHECK_INTERVAL_MS = 60_000
+
+# Look for a new release this long after startup, so the first sale isn't slowed down.
+UPDATE_CHECK_DELAY_MS = 30_000
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +71,12 @@ class MainWindow(QMainWindow):
         self._rf_cn_mode = False     # active POS ticket is in refund / credit-note mode
 
         self._backup_worker = None
+        self._update_worker = None
 
         self._build_ui()
         self._start_clock()
         self._start_backup_schedule()
+        self._start_update_check()
 
     def _build_ui(self):
         central = QWidget()
@@ -163,6 +171,7 @@ class MainWindow(QMainWindow):
         self.client_screen.selected_client.connect(self.pos_screen.set_client)
         self.inventory_screen.selected_product.connect(self.pos_screen.add_product_by_id)
         self.reports_screen.sale_selected.connect(self._show_sale)
+        self.reports_screen.z_report_closed.connect(self._offer_update)
 
         # ── Customer display: mirrors the active POS ticket in its own window ──
         self.customer_display = CustomerDisplay(self)
@@ -317,4 +326,58 @@ class MainWindow(QMainWindow):
         self._backup_worker.failed.connect(
             lambda message: logger.error("Daily backup failed: %s", message))
         self._backup_worker.start()
+
+    # ── Updates ───────────────────────────────────────────────────────────────
+
+    def _start_update_check(self):
+        """Offer an update downloaded earlier (startup is a quiet moment),
+        then look for a newer release in the background. A new download is
+        offered at the next startup or after the next Z report, never mid-day."""
+        if not update_service.enabled():
+            return
+        QTimer.singleShot(0, self._offer_update)
+        QTimer.singleShot(UPDATE_CHECK_DELAY_MS, self._fetch_update)
+        QApplication.instance().aboutToQuit.connect(self._stop_update_fetch)
+
+    def _fetch_update(self):
+        def fetch(_progress):
+            def tick(_fraction):
+                if worker.isInterruptionRequested():
+                    raise InterruptedError
+            return update_service.fetch_update(tick)
+
+        worker = self._update_worker = StepWorker(fetch, parent=self)
+        worker.failed.connect(self._on_update_fetch_failed)
+        worker.start()
+
+    def _on_update_fetch_failed(self, error):
+        # A warning, not an error: being offline must not light the error badge.
+        if not isinstance(error, InterruptedError):
+            logger.warning("Update check failed: %s", error)
+
+    def _stop_update_fetch(self):
+        """Quitting must not wait for a download; the .partial file is removed."""
+        if self._update_worker is not None and self._update_worker.isRunning():
+            self._update_worker.requestInterruption()
+            self._update_worker.wait()
+
+    def _offer_update(self):
+        """Asks to install a downloaded update. Not while a ticket is open:
+        installing closes the POS."""
+        setup = update_service.downloaded_update()
+        if setup is None or any(self.pos_screen.tab_has_open_ticket(i) for i in range(1, MAX_VTABS + 1)):
+            return
+        version = update_service.SETUP_NAME.fullmatch(setup.name).group(1)
+        reply = QMessageBox.question(
+            self, "Update available",
+            f"SuperPOS {version} is ready to install.\n"
+            "The POS closes and starts again by itself in about a minute.\nInstall now?")
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            update_service.install(setup)
+        except OSError as e:  # e.g. UAC prompt cancelled: keep running, ask again later
+            logger.warning("Update %s not started: %s", version, e)
+            return
+        QApplication.quit()
 
