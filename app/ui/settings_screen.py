@@ -3,6 +3,7 @@ Settings Screen
 Store info, receipt printer, label printer configuration.
 Catalog for add/edit/delete categories, shortcuts and promos.
 ERP details and connection
+Update: version, checking for and installing updates
 Logs
 """
 import logging
@@ -36,6 +37,7 @@ from app.constants import (
     SPACING_XS,
 )
 from app.constants.screens import SCREENS
+from app.core import update_service
 from app.core.admin import admin_code_problem, check_admin_code, set_admin_code
 from app.core.database import get_session
 from app.core.erp.erp_service import ErpService
@@ -61,6 +63,8 @@ class SettingsScreen(QWidget):
     admin_changed = pyqtSignal(bool)            # admin mode toggled, for POS's admin-only actions
     rf_cn_requested = pyqtSignal()              # admin pressed RF / CN: toggle it on the active POS ticket
     customer_display_requested = pyqtSignal()   # show/hide the customer display window
+    update_check_requested = pyqtSignal()       # MainWindow runs the (single) update check
+    update_now_requested = pyqtSignal()         # MainWindow checks for open tickets, then installs
 
     is_admin = False
 
@@ -94,6 +98,9 @@ class SettingsScreen(QWidget):
         erp_row = QHBoxLayout(erp_tab)
         erp_row.setSpacing(15)
 
+        update_tab = QWidget()
+        update_col = QVBoxLayout(update_tab)
+
         sc_col = QVBoxLayout()
         cats_col = QVBoxLayout()
         promos_col = QVBoxLayout()
@@ -106,11 +113,12 @@ class SettingsScreen(QWidget):
         self.tabs.addTab(printers_tab, "Printers")
         self.tabs.addTab(erp_tab, "ERP")
         self.tabs.addTab(general_tab, "General")
+        self.tabs.addTab(update_tab, "Update")
         self.log_panel = LogPanel()
         self.tabs.addTab(self.log_panel, "Logs")
 
         # Admin-only tabs: viewable but disabled
-        self._admin_pages = (catalog_tab, printers_tab, erp_tab, general_tab)
+        self._admin_pages = (catalog_tab, printers_tab, erp_tab, general_tab, update_tab)
         for page in self._admin_pages:
             page.setObjectName("adminLocked")
 
@@ -157,13 +165,37 @@ class SettingsScreen(QWidget):
         admin_row.addStretch()
         left_col.addWidget(admin_group)
 
+        left_col.addStretch()
+
+        # ── Update tab: about + updates ──────────────────────────────────────
         about_group = QGroupBox("About")
         about_row = QHBoxLayout(about_group)
         self.version_label = QLabel(f"SuperPOS version {__version__}")
         about_row.addWidget(self.version_label)
         about_row.addStretch()
-        left_col.addWidget(about_group)
-        left_col.addStretch()
+        update_col.addWidget(about_group)
+
+        update_group = QGroupBox("Update")
+        update_layout = QVBoxLayout(update_group)
+        self.update_status = QLabel()
+        self.btn_check_update = QPushButton("Check for Updates")
+        self.btn_check_update.clicked.connect(self._check_update)
+        self.btn_update_now = QPushButton("Update Now")
+        self.btn_update_now.clicked.connect(self.update_now_requested.emit)
+        update_btn_row = QHBoxLayout()
+        update_btn_row.addWidget(self.btn_check_update)
+        update_btn_row.addWidget(self.btn_update_now)
+        update_btn_row.addStretch()
+        update_layout.addWidget(self.update_status)
+        update_layout.addLayout(update_btn_row)
+        update_col.addWidget(update_group)
+        update_col.addStretch()
+        if update_service.enabled():
+            self.show_update_result(update_service.downloaded_update())
+        else:
+            self.btn_check_update.setEnabled(False)
+            self.btn_update_now.hide()
+            self.update_status.setText("Updates only work in the installed Windows version.")
 
         # ── Categories ─────────────────────────────────────────────
         cats_group = QGroupBox("Categories")
@@ -730,6 +762,25 @@ class SettingsScreen(QWidget):
             self._show_overlay("Test ERP connection Failed", kind="error")
         else:
             self._show_overlay("Test ERP connection Success")
+
+    def _check_update(self):
+        self.update_status.setText("Checking for updates…")
+        self.btn_check_update.setEnabled(False)
+        self.btn_update_now.hide()
+        self.update_check_requested.emit()
+
+    def show_update_result(self, setup, error: str | None = None):
+        """Shows the outcome of an update check: `setup` is the downloaded
+        installer's Path (update ready) or None (up to date / failed)."""
+        self.btn_check_update.setEnabled(True)
+        self.btn_update_now.setVisible(setup is not None)
+        if error:
+            self.update_status.setText(f"Could not check for updates: {error}")
+        elif setup is not None:
+            version = update_service.SETUP_NAME.fullmatch(setup.name).group(1)
+            self.update_status.setText(f"SuperPOS {version} is ready to install.")
+        else:
+            self.update_status.setText(f"SuperPOS {__version__} is up to date.")
 
     def show_logs(self):
         self.tabs.setCurrentWidget(self.log_panel)

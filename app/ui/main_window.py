@@ -172,6 +172,8 @@ class MainWindow(QMainWindow):
         self.inventory_screen.selected_product.connect(self.pos_screen.add_product_by_id)
         self.reports_screen.sale_selected.connect(self._show_sale)
         self.reports_screen.z_report_closed.connect(self._offer_update)
+        self.settings_screen.update_check_requested.connect(self._fetch_update)
+        self.settings_screen.update_now_requested.connect(self._update_now)
 
         # ── Customer display: mirrors the active POS ticket in its own window ──
         self.customer_display = CustomerDisplay(self)
@@ -340,6 +342,11 @@ class MainWindow(QMainWindow):
         QApplication.instance().aboutToQuit.connect(self._stop_update_fetch)
 
     def _fetch_update(self):
+        """One check at a time, automatic or from Settings → Update: a running
+        one reports to the Update tab when it ends."""
+        if self._update_worker is not None and self._update_worker.isRunning():
+            return
+
         def fetch(_progress):
             def tick(_fraction):
                 if worker.isInterruptionRequested():
@@ -347,6 +354,7 @@ class MainWindow(QMainWindow):
             return update_service.fetch_update(tick)
 
         worker = self._update_worker = StepWorker(fetch, parent=self)
+        worker.done.connect(self.settings_screen.show_update_result)
         worker.failed.connect(self._on_update_fetch_failed)
         worker.start()
 
@@ -354,6 +362,7 @@ class MainWindow(QMainWindow):
         # A warning, not an error: being offline must not light the error badge.
         if not isinstance(error, InterruptedError):
             logger.warning("Update check failed: %s", error)
+            self.settings_screen.show_update_result(None, error=str(error))
 
     def _stop_update_fetch(self):
         """Quitting must not wait for a download; the .partial file is removed."""
@@ -361,12 +370,31 @@ class MainWindow(QMainWindow):
             self._update_worker.requestInterruption()
             self._update_worker.wait()
 
+    def _open_ticket_vtabs(self) -> list[int]:
+        return [i for i in range(1, MAX_VTABS + 1) if self.pos_screen.tab_has_open_ticket(i)]
+
     def _offer_update(self):
-        """Asks to install a downloaded update. Not while a ticket is open:
-        installing closes the POS."""
+        """Asks to install a downloaded update, at a quiet moment. Not while
+        a ticket is open: installing closes the POS."""
         setup = update_service.downloaded_update()
-        if setup is None or any(self.pos_screen.tab_has_open_ticket(i) for i in range(1, MAX_VTABS + 1)):
+        if setup is None or self._open_ticket_vtabs():
             return
+        self._confirm_and_install(setup)
+
+    def _update_now(self):
+        """Settings → Update → Update Now: refused while any V-tab holds an open ticket."""
+        setup = update_service.downloaded_update()
+        if setup is None:
+            self.settings_screen.show_update_result(None)
+            return
+        if busy := self._open_ticket_vtabs():
+            tabs = ", ".join(f"V {i}" for i in busy)
+            self.settings_screen.overlay.show_message(
+                f"Finish or clear the open tickets first ({tabs})", kind="error")
+            return
+        self._confirm_and_install(setup)
+
+    def _confirm_and_install(self, setup):
         version = update_service.SETUP_NAME.fullmatch(setup.name).group(1)
         reply = QMessageBox.question(
             self, "Update available",

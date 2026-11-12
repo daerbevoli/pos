@@ -266,3 +266,46 @@ def test_error_badge_opens_logs_and_acknowledges(window):
     assert window.stack.currentWidget() is window.settings_screen
     assert window.settings_screen.tabs.currentWidget() is window.settings_screen.log_panel
     assert not window.error_badge.active and window.error_badge.count == 0
+
+
+@pytest.fixture
+def ready_update(monkeypatch, tmp_path):
+    """A downloaded 9.9.9 setup; records install() instead of running it."""
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+
+    from app.core import update_service
+    setup = tmp_path / "SuperPOS-9.9.9-setup.exe"
+    setup.write_bytes(b"x")
+    installed = []
+    monkeypatch.setattr(update_service, "downloaded_update", lambda: setup)
+    monkeypatch.setattr(update_service, "install", installed.append)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: None))
+    return installed
+
+
+def test_update_tab_is_admin_only(window):
+    tabs = window.settings_screen.tabs
+    update_tab = next(tabs.widget(i) for i in range(tabs.count()) if tabs.tabText(i) == "Update")
+    assert not update_tab.isEnabled()
+    window.settings_screen._admin()
+    assert update_tab.isEnabled()
+
+
+def test_update_now_refused_while_a_vtab_has_an_open_ticket(window, ready_update):
+    _ring_up_item(window, "upd1")
+    window.settings_screen.update_now_requested.emit()
+    assert ready_update == []
+
+
+def test_update_now_installs_when_every_vtab_is_empty(window, ready_update):
+    window.settings_screen.update_now_requested.emit()
+    assert [p.name for p in ready_update] == ["SuperPOS-9.9.9-setup.exe"]
+
+
+def test_update_result_shows_update_now_only_when_ready(window, tmp_path):
+    s = window.settings_screen
+    s.show_update_result(tmp_path / "SuperPOS-9.9.9-setup.exe")
+    assert not s.btn_update_now.isHidden() and "9.9.9" in s.update_status.text()
+    s.show_update_result(None)
+    assert s.btn_update_now.isHidden() and "up to date" in s.update_status.text()
