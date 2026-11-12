@@ -19,7 +19,7 @@ iscc installer\superpos.iss     # Windows installer from that build (version rea
 python main.py --self-test      # exercise dynamically loaded deps (USB, escpos, reportlab, crypto, HTTPS); results in the log, exit code 0 = pass
 ```
 
-CI (`.github/workflows/build.yml`) runs tests, the PyInstaller build and `--self-test` per platform (Windows only for now; a Linux entry is ready to uncomment) and checks a `v*` tag matches `app/__version__.py`, the single source of the version.
+CI (`.github/workflows/build.yml`) runs tests, the PyInstaller build and `--self-test` per platform (Windows only for now; a Linux entry is ready to uncomment) and checks a `v*` tag matches `app/__version__.py`, the single source of the version. Every push builds the Inno Setup installer as an artifact; only a `v*` tag publishes a GitHub Release with it (release: bump `__version__`, commit, `git tag vX.Y.Z`, push the tag).
 
 Logs go to a `logs/` folder next to the DB (never the working directory: the .exe may be started from anywhere; bundled resources are read via `sys._MEIPASS`, see `main.py`). The SQLite DB lives outside the repo at `~/.local/share/SuperPOS/superpos.db` (Linux) / `%APPDATA%\SuperPOS\superpos.db` (Windows), created automatically by `init_db()` on first launch. Tests never touch it — every fixture in `tests/conftest.py` uses an isolated in-memory SQLite engine (`db_session`, or `seeded_session` which runs the real `_seed_defaults()` seeding logic).
 

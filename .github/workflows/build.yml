@@ -10,9 +10,8 @@
 # updater can pick the right download per platform.
 #
 # A release is made by tagging the commit "v" + app/__version__.py; the build
-# fails if the two disagree.
-#
-# Still to add: publishing a GitHub Release on tags.
+# fails if the two disagree. Only a tag publishes a GitHub Release (with the
+# setup .exe the in-app updater downloads); other pushes just leave artifacts.
 
 name: Build
 
@@ -60,6 +59,8 @@ jobs:
 
   build:
     needs: test
+    permissions:
+      contents: write   # publishing the GitHub Release on tags
     strategy:
       fail-fast: false
       matrix:
@@ -142,3 +143,13 @@ jobs:
           name: SuperPOS-${{ steps.version.outputs.version }}-setup
           path: dist/SuperPOS-${{ steps.version.outputs.version }}-setup.exe
           if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        if: runner.os == 'Windows' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          "dist/SuperPOS-${{ steps.version.outputs.version }}-setup.exe"
+          --title "SuperPOS ${{ steps.version.outputs.version }}"
+          --generate-notes
