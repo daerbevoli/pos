@@ -55,3 +55,5 @@ Name: "{autodesktop}\SuperPOS"; Filename: "{app}\SuperPOS.exe"; Tasks: desktopic
 
 [Run]
 Filename: "{app}\SuperPOS.exe"; Description: "{cm:LaunchProgram,SuperPOS}"; Flags: nowait postinstall skipifsilent
+; The in-app updater installs silently: start the new version again (as the cashier, not the UAC admin).
+Filename: "{app}\SuperPOS.exe"; Flags: nowait postinstall skipifnotsilent
