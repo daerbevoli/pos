@@ -1,7 +1,7 @@
 """Runs blocking ErpService calls off the Qt UI thread.
 
 ErpService methods are synchronous `requests` calls (several sequential
-round trips for some flows) — calling them directly from a slot freezes the
+round trips for some flows), calling them directly from a slot freezes the
 UI for as long as Odoo takes to respond. QThread.finished/failed signals are
 queued back onto the thread that owns the receiving QObject (the UI thread),
 so slots connected to them run safely there.
@@ -14,7 +14,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 logger = logging.getLogger(__name__)
 
 class InvoiceSendWorker(QThread):
-    """Creates + posts the ERP invoice from `invoice_data`, then sends it —
+    """Creates + posts the ERP invoice from `invoice_data`, then sends it
     the full create_post_invoice() + send_invoice() round trip, all off the
     UI thread. `succeeded` only fires once the invoice has actually gone out
     (now, or by an earlier attempt), since the slot locks the sale on it."""

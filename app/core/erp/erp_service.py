@@ -9,8 +9,6 @@ from app.utils.validators import normalize_vat
 
 logger = logging.getLogger(__name__)
 
-# The customer fields the POS keeps: (key in generate_invoice_data()'s "to",
-# res.partner field). The country goes separately, as an id.
 _PARTNER_FIELDS = (
     ("name", "name"),
     ("street", "street"),
@@ -22,8 +20,7 @@ _PARTNER_FIELDS = (
 
 
 def _partner_values(customer_info: dict) -> dict:
-    """The res.partner values the POS has for the customer, leaving out the
-    ones it has no value for — Odoo's own value stays then."""
+    """The res.partner values the POS has for the customer, leaving out the ones it has no value for"""
     values = {}
     for key, field in _PARTNER_FIELDS:
         value = (customer_info.get(key) or "").strip()
@@ -38,9 +35,7 @@ def _partner_values(customer_info: dict) -> dict:
 _LOG_BODY_MAX = 2000
 
 class ERPError(Exception):
-    """
-    ERP Error thrown at connection problem, bad HTTP request or error in received HTTP data
-    """
+    """ERP Error thrown at connection problem, bad HTTP request or error in received HTTP data"""
 
 
 def _clip(value) -> str:
@@ -49,10 +44,7 @@ def _clip(value) -> str:
 
 
 class ErpService:
-    """
-    Client that connect to the Odoo database via the external JSON-2 API.
-    JSON-2
-    """
+    """Client that connect to the Odoo database via the external RPC JSON-2 API"""
     def __init__(self, url: str, db: str, api_key: str, timeout: int = 15):
         self.base_url = f"{url}/json/2"
         self.db = db
@@ -98,9 +90,7 @@ class ErpService:
         return data
 
     def connect(self) -> bool:
-        """
-        Validate JSON-2 API access. Verify access by calling a lightweight endpoint.
-        """
+        """Validate JSON-2 API access. Verify access by calling a lightweight endpoint"""
         user_context = self._call(
             model="res.users",
             method="context_get",
@@ -188,7 +178,7 @@ class ErpService:
 
     def create_invoice_lines(self, invoice_lines: list[InvoiceLine]) -> list:
         """
-        Create invoice lines based on totals.
+        Create invoice lines based on invoiceLines data object and return it
         :param invoice_lines: the separate line items of the invoice
         :return: lines
         """
@@ -254,7 +244,7 @@ class ErpService:
 
     def _sync_partner(self, partner_id: int, customer_info: dict, country_id: int | None):
         """Overwrites the Odoo partner's fields that differ from the POS's
-        non-empty values — the POS is the ground truth."""
+        non-empty values, the POS is the ground truth."""
         wanted = _partner_values(customer_info)
         current = self.read(model="res.partner", ids=[partner_id],
                             fields=[field for _, field in _PARTNER_FIELDS] + ["country_id"])[0]
@@ -270,8 +260,7 @@ class ErpService:
     def create_post_invoice(self, invoice_data: dict) -> tuple[int, bool]:
         """
         Creates and posts the invoice. One already in Odoo under the same
-        number (ref) — e.g. from an earlier attempt that got created but
-        failed to send — isn't created again: it's logged and picked up as
+        number (ref) isn't created again: it's logged and picked up as
         it is (posted first if still a draft), so a retry can finish the job.
         :param invoice_data: data of invoice, see generate_invoice_data()
         :return: (invoice id, whether Odoo has already sent it)
@@ -280,7 +269,7 @@ class ErpService:
             invoice_data["inv_num"], invoice_data["inv_date"], invoice_data["due_date"],
             invoice_data["to"], invoice_data["items"],
         )
-        # "out_refund" for a credit note (CN-…), see generate_invoice_data()
+        # "out_refund" for a credit note (CN-…)
         move_type = invoice_data.get("move_type", "out_invoice")
 
         if not inv_num or not inv_date:
@@ -319,7 +308,7 @@ class ErpService:
     def _resume_invoice(self, invoice_id: int, inv_num: str) -> tuple[int, bool]:
         """The invoice already in Odoo under this reference, taken as it is:
         logged, not compared with the POS nor created again. A draft is
-        posted so it can be sent; a cancelled one can't be sent at all."""
+        posted so it can be sent; a canceled one can't be sent at all."""
         move = self.read(
             model="account.move",
             ids=[invoice_id],
@@ -340,7 +329,7 @@ class ErpService:
 
         :param invoice_id: id of the account.move to send
         :param use_peppol: Peppol is mandatory: a partner that isn't on
-            Peppol gets nothing, not even the email — it has to be sent by
+            Peppol gets nothing, not even the email, it has to be sent by
             hand. Off (development), Peppol isn't used or checked at all.
         :param use_email: email goes along when the partner has an address;
             without one it's left out, and that's logged.
