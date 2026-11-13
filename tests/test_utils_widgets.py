@@ -157,6 +157,17 @@ def test_category_button_sets_object_name_and_focus_policy(qtbot):
     assert btn.focusPolicy() == Qt.FocusPolicy.NoFocus
 
 
+def test_category_button_size_ignores_label_length(qtbot):
+    short = CategoryButton("Cola", "productBtn")
+    long = CategoryButton("Biologische volle melk halfvolle extra romig 1L\n€2.49", "productBtn")
+    qtbot.addWidget(short)
+    qtbot.addWidget(long)
+    assert long.sizeHint() == short.sizeHint()
+    assert long.minimumSizeHint() == short.minimumSizeHint()
+    long.resize(110, 60)
+    long.grab()  # paints the wrapped/shrunk label without error
+
+
 # ── TapToDismissOverlay ──────────────────────────────────────────────────
 
 def test_overlay_hidden_initially(qtbot):
