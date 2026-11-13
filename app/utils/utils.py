@@ -1,6 +1,7 @@
 import logging
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import (
     QFrame,
     QLabel,
@@ -8,6 +9,8 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QStyledItemDelegate,
+    QStyleOptionButton,
+    QStylePainter,
     QTableWidget,
     QVBoxLayout,
     QWidget,
@@ -109,6 +112,43 @@ class CategoryButton(QPushButton):
         self.setMinimumHeight(FUNCTION_BUTTON_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    # Size never depends on the label, so a long name can't widen its column.
+    def sizeHint(self) -> QSize:
+        return QSize(0, FUNCTION_BUTTON_HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, FUNCTION_BUTTON_HEIGHT)
+
+    MIN_FONT_PX = 10
+    _PADDING = 4
+
+    def paintEvent(self, event):
+        """The button without its text, then the text wrapped inside it with
+        the font shrunk (down to MIN_FONT_PX) until it fits: at word breaks
+        if possible, else anywhere (one very long word). Clipped beyond that."""
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        if not self.text():
+            return
+        area = self.rect().adjusted(self._PADDING, self._PADDING, -self._PADDING, -self._PADDING)
+        font = self.font()
+        start = font.pixelSize() if font.pixelSize() > 0 else round(font.pointSizeF() * 4 / 3)
+        for wrap in (Qt.TextFlag.TextWordWrap, Qt.TextFlag.TextWrapAnywhere):
+            flags = Qt.AlignmentFlag.AlignCenter | wrap
+            for size in range(start, self.MIN_FONT_PX - 1, -1):
+                font.setPixelSize(size)
+                painter.setFont(font)
+                if area.contains(painter.boundingRect(area, flags, self.text())):
+                    break
+            else:
+                continue
+            break
+        painter.setPen(self.palette().color(QPalette.ColorRole.ButtonText))
+        painter.drawText(area, flags, self.text())
 
 
 
