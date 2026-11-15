@@ -82,7 +82,6 @@ class ZReportsDialog(QDialog):
     def _print_selected(self):
         row = self.table.currentIndex().row()
         if row == -1 or row not in self._row_ids:
-            self.overlay.show_message("Select a Z report first.")
             return
         with get_session() as session:
             z_report = session.get(ZReport, self._row_ids[row])
@@ -92,4 +91,4 @@ class ZReportsDialog(QDialog):
             except PrinterError as e:
                 self.overlay.show_message(f"Printing failed:\n{e}", kind="error")
                 return
-        self.overlay.show_message(f"{number} printed.")
+        logger.info(f"{number} printed.")

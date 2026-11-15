@@ -203,7 +203,7 @@ class POSScreen(QWidget):
         """Blocks cart-mutating actions while a partial payment is outstanding.
         Returns True (and shows an overlay) if the action should be blocked."""
         if self.payment_in_progress:
-            self._show_overlay("Finish or remove the pending payment first", kind="error")
+            self._show_overlay("Finish or remove the pending payment first")
             return True
         return False
 
@@ -634,7 +634,7 @@ class POSScreen(QWidget):
         if self.sale_finished:
             self._unfreeze_ticket()
         if text == "-" and not self.isAdmin:
-            self._show_overlay("Only admin", kind="error")
+            self._show_overlay("Only admin")
             return
         if text in (".", ","):
             self._insert_decimal_point()
@@ -683,12 +683,12 @@ class POSScreen(QWidget):
             # treat anything over 6 characters (incl. the decimal point) as
             # an attempted scan and block it until the amount is filled in.
             if len(query) > 6:
-                self._show_overlay("Enter the pending amount before scanning another item", kind="info")
+                self._show_overlay("Enter the pending amount before scanning another item")
                 self.cart_input.clear()
                 return True
             amount = self._read_amount_input()
             if amount is None or amount <= 0:
-                self._show_overlay("Enter a valid amount", kind="info")
+                self._show_overlay("Enter a valid amount")
                 return True
             if pending_entry.quantity is None:
                 pending_entry.quantity = -amount if self.cart.is_refund else amount
@@ -737,7 +737,7 @@ class POSScreen(QWidget):
         with get_session() as session:
             product = ProductService.get_by_barcode(session, code)
             if product is None:
-                self._show_overlay("Unknown barcode", kind="error")
+                self._show_overlay("Unknown barcode")
                 return
             if typed:
                 quantity = self._typed_quantity(typed, product)
@@ -818,7 +818,7 @@ class POSScreen(QWidget):
             return
         entry = self.cart.entries[idx]
         if self.payment_in_progress and not isinstance(entry, PaymentEntry):
-            self._show_overlay("Finish or remove the pending payment first", kind="error")
+            self._show_overlay("Finish or remove the pending payment first")
             return
         # A line already saved on the reopened sale gets a reversal appended
         # (it can't just leave the record); anything else is deleted — see
@@ -846,10 +846,10 @@ class POSScreen(QWidget):
             return
         value = self._read_amount_input()
         if value is None:
-            self._show_overlay("Enter a number first", kind="info")
+            self._show_overlay("Enter a number first")
             return
         if apply(value) is None:
-            self._show_overlay("Nothing to discount", kind="info")
+            self._show_overlay("Nothing to discount")
             return
         self.cart_input.clear()
         self._refresh_cart(select_last=True)
@@ -859,7 +859,7 @@ class POSScreen(QWidget):
         """Blocks subtotal/payment while a line still awaits its weight or
         price. Returns True (and shows an overlay) if the action should be blocked."""
         if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
-            self._show_overlay("Fill in pending amount first", kind="error")
+            self._show_overlay("Fill in pending amount first")
             return True
         return False
 
@@ -869,7 +869,6 @@ class POSScreen(QWidget):
         if self._guard_payment_in_progress():
             return
         if not self.cart.entries:
-            self._show_overlay("Cart empty", kind="info")
             return
         # Allow subtotal if the current section has at least a CartItem or DiscountEntry
         section_has_content = False
@@ -1104,7 +1103,7 @@ class POSScreen(QWidget):
             self._show_overlay("No sale")
             return False
         if not any(isinstance(e, CartItem) for e in self.cart.entries):
-            self._show_overlay("Add items before payment", kind="error")
+            self._show_overlay("Add items before payment")
             return False
         return not self._guard_pending_items()
 
@@ -1116,7 +1115,7 @@ class POSScreen(QWidget):
         # refund of 0.00 has nothing to pay out. (A reopened refund may
         # settle at 0.00: that cancels it.)
         if payout > 0 or (payout == 0 and self._current_sale_id is None):
-            self._show_overlay("Nothing to refund", kind="error")
+            self._show_overlay("Nothing to refund")
             return
         if self._save_and_freeze([{"method": method, "amount": payout}], payout, method):
             self.cart_input.clear()
@@ -1131,12 +1130,12 @@ class POSScreen(QWidget):
         # A zero tender is fine when nothing is due (e.g. every line of a
         # reopened ticket was reversed) — it settles the ticket at 0.00.
         if tendered < 0 or (tendered == 0 and remaining > 0.005):
-            self._show_overlay("Enter an amount first", kind="error")
+            self._show_overlay("Enter an amount first")
             return None
         # Only cash can be overpaid (and give change): a card or other
         # non-cash leg covers at most what's still due.
         if method != "cash" and tendered > due + 0.005:
-            self._show_overlay(f"{method.title()} can't exceed the amount due ({due:.2f})", kind="error")
+            self._show_overlay(f"{method.title()} can't exceed the amount due ({due:.2f})")
             return None
         return tendered
 
@@ -1293,20 +1292,18 @@ class POSScreen(QWidget):
         with get_session() as session:
             sale = SalesService.get_by_id(session, self._current_sale_id)
             if not sale:
-                self._show_overlay("Sale not found", kind="error")
+                self._show_overlay("Sale not found")
                 return
             # Unable to open sale or refund if not in the same mode
             if sale.is_refund and not self.cart.is_refund:
-                self._show_overlay("Refund can only be opened in refund mode", kind="error")
+                self._show_overlay("Refund can only be opened in refund mode")
                 return
             if not sale.is_refund and self.cart.is_refund:
-                self._show_overlay("Sale can only be opened outside refund mode", kind="error")
+                self._show_overlay("Sale can only be opened outside refund mode")
                 return
 
             if sale.invoice is not None and sale.invoice.sent_at is not None:
-                self._show_overlay(
-                    "This invoice had already been sent", kind="error",
-                )
+                self._show_overlay("This invoice had already been sent")
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
             self._attach_sale_client(sale)
@@ -1361,27 +1358,27 @@ class POSScreen(QWidget):
 
     def _previous_sale(self):
         if self.cart_active and not self.sale_finished:
-            self._show_overlay("Sale active", kind="info")
+            self._show_overlay("Sale active")
             return
         sale_ids = self._todays_sale_ids()
         idx = self._browse_index(sale_ids)
         if idx <= 0:
-            self._show_overlay("No earlier sales", kind="info")
+            self._show_overlay("No earlier sales")
             return
         self._show_sale_at(sale_ids[idx - 1])
         self.cart_table.setFocus()
 
     def _next_sale(self):
         if self.cart_active and not self.sale_finished:
-            self._show_overlay("Sale active", kind="info")
+            self._show_overlay("Sale active")
             return
         if not self.sale_finished:
-            self._show_overlay("No later sales", kind="info")
+            self._show_overlay("No later sales")
             return
         sale_ids = self._todays_sale_ids()
         idx = self._browse_index(sale_ids)
         if idx >= len(sale_ids) - 1:
-            self._show_overlay("No later sales", kind="info")
+            self._show_overlay("No later sales")
             return
         self._show_sale_at(sale_ids[idx + 1])
         self.cart_table.setFocus()
@@ -1395,7 +1392,7 @@ class POSScreen(QWidget):
         with get_session() as session:
             sale = SalesService.get_by_id(session, self._current_sale_id)
             if not sale:
-                self._show_overlay("Sale not found", kind="error")
+                self._show_overlay("Sale not found")
                 return
             self.cart.entries = Cart.from_snapshot(sale.cart_snapshot).entries
             self._attach_sale_client(sale)
@@ -1414,12 +1411,11 @@ class POSScreen(QWidget):
 
     def _print_ticket(self):
         if self._current_sale_id is None:
-            self._show_overlay("No ticket to print", kind="error")
             return
         with get_session() as session:
             sale = SalesService.get_by_id(session, self._current_sale_id)
             if not sale:
-                self._show_overlay("Sale not found", kind="error")
+                self._show_overlay("Sale not found")
                 return
             try:
                 ReceiptService.print_receipt(session, sale)
@@ -1434,12 +1430,11 @@ class POSScreen(QWidget):
         if self._invoice_send_in_progress:
             return
         if self._current_sale_id is None:
-            self._show_overlay("No ticket to send", kind="info")
             return
         if self.reopened_ticket:
             # Sending locks the sale, so the payment that saves these edits
             # would then be refused.
-            self._show_overlay("Pay the reopened ticket before sending it", kind="error")
+            self._show_overlay("Pay the reopened ticket before sending it")
             return
 
         with get_session() as session:
@@ -1447,12 +1442,12 @@ class POSScreen(QWidget):
             invoice = sale.invoice if sale is not None else None
 
             if not invoice:
-                self._show_overlay("This sale has no invoice", kind="error")
+                self._show_overlay("This sale has no invoice")
                 return
 
             if invoice.sent_at is not None:
                 sent_str = format_local(invoice.sent_at, "%d-%m-%Y %H:%M")
-                self._show_overlay(f"Already sent at {sent_str}", kind="info")
+                self._show_overlay(f"Already sent at {sent_str}")
                 return
 
             erp_config = get_erp_data(session)
@@ -1570,7 +1565,7 @@ class POSScreen(QWidget):
         A lone "-" is let through: it means "take one off", which
         _typed_quantity() resolves once the product is known."""
         if query and query != "-" and not any(ch in "123456789" for ch in query):
-            self._show_overlay("Enter a valid amount", kind="error")
+            self._show_overlay("Enter a valid amount")
             self.cart_input.clear()
             return True
         return False
@@ -1586,7 +1581,7 @@ class POSScreen(QWidget):
         amount is the price."""
         if query == "-":
             if product.unit in WEIGHT_UNITS or product.is_open_price:
-                self._show_overlay("Enter a valid amount", kind="error")
+                self._show_overlay("Enter a valid amount")
                 self.cart_input.clear()
                 return None
             return -1
@@ -1615,7 +1610,7 @@ class POSScreen(QWidget):
                 client = ClientService.get_by_id(session, client_id)
             is_domestic = not client or client.country == BELGIUM
             if self.reopened_ticket and is_domestic != self.cart.is_domestic:
-                self._show_overlay("This sale's VAT can't change: refund it and ring it up again", kind="error")
+                self._show_overlay("Invoice client cannot change")
                 return
             if self.sale_finished:
                 self._unfreeze_ticket()
@@ -1636,7 +1631,7 @@ class POSScreen(QWidget):
         if self._guard_payment_in_progress():
             return
         if self._selected_pending_item() is not None:
-            self._show_overlay("Enter the pending amount before adding another item", kind="info")
+            self._show_overlay("Enter the pending amount before adding another item")
             return
 
         query = self.cart_input.text().strip()
@@ -1653,7 +1648,7 @@ class POSScreen(QWidget):
                 return
             open_price = self._read_amount_input() if product.is_open_price and quantity_typed else None
             if open_price == 0:
-                self._show_overlay("Enter a valid amount", kind="info")
+                self._show_overlay("Enter a valid amount")
                 return
             if self.sale_finished:
                 self._unfreeze_ticket()
@@ -1695,7 +1690,6 @@ class POSScreen(QWidget):
         never over an open ticket. MainWindow switches to a free tab first (see
         MainWindow._show_sale()), so the refusal is only a safety net."""
         if self.tab_has_open_ticket(self._active_tab):
-            self._show_overlay(f"V {self._active_tab} is occupied — finish or clear its ticket first",
-                               kind="error")
+            self._show_overlay(f"V {self._active_tab} is occupied, finish or clear its ticket first")
             return
         self._show_sale_at(sale_id)

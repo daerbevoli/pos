@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_rf_cn(self):
         """RF / CN is pressed on the Settings screen but acts on a POS ticket,
-        so go back to POS first — overlays then show where the cashier is
+        so go back to POS first, overlays then show where the cashier is
         looking. The mode can't flip under an open ticket (see
         POSScreen.set_rf_cn()), so if the active V-tab has one, leave it
         untouched and switch the mode on the first free V-tab instead."""

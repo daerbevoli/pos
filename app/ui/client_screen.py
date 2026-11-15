@@ -358,23 +358,23 @@ class ClientDetailPanel(QFrame):
 
     def _validate(self) -> bool:
         if not self.name.text().strip():
-            self._show_overlay("Client name is required.")
+            self._show_overlay("Client name is required")
             return False
         if not self.street.text().strip():
-            self._show_overlay("Street is required.")
+            self._show_overlay("Street is required")
             return False
         if not self.zip_code.text().strip():
-            self._show_overlay("Zip is required.")
+            self._show_overlay("Zip is required")
             return False
         if not self.city.text().strip():
-            self._show_overlay("City is required.")
+            self._show_overlay("City is required")
             return False
         vat = self._full_vat()
         if vat == self.vat_prefix_label.text():  # nothing past the country code
-            self._show_overlay("VAT number is required.")
+            self._show_overlay("VAT number is required")
             return False
         if not is_valid_vat(vat, self.country.currentData()):
-            self._show_overlay(f"VAT number {vat} is not valid.", kind="error")
+            self._show_overlay(f"VAT number {vat} is not valid")
             return False
         return True
 
