@@ -73,6 +73,21 @@ def test_search_limits_to_50(db_session):
     assert len(ProductService.search(db_session, "Item")) == 50
 
 
+def test_table_rows_filters_category_before_the_search_limit(db_session):
+    from app.models.models import Category
+    drinks = Category(name="Drinks")
+    db_session.add(drinks)
+    db_session.commit()
+    for i in range(60):
+        _make_product(db_session, name=f"Item{i:03d}", barcode=f"{i:06d}")
+    _make_product(db_session, name="Item cola", barcode="999999", category_id=drinks.id,
+                  stock_quantity=1, min_stock_level=5)
+    rows = ProductService.table_rows(db_session, "Item", category_id=drinks.id)
+    assert [(r.name, r.category_name) for r in rows] == [("Item cola", "Drinks")]
+    assert len(ProductService.table_rows(db_session, "Item")) == 50
+    assert len(ProductService.table_rows(db_session)) == 61
+
+
 def test_update_modifies_fields(db_session):
     p = _make_product(db_session, name="Old")
     updated = ProductService.update(db_session, p.id, name="New", price=9.99)

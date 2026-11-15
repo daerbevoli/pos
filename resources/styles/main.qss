@@ -310,7 +310,7 @@ QPushButton#okBtn:hover {
     background-color: #e3d83e;
 }
 
-QTableWidget::item:selected {
+QTableView::item:selected {
     background-color: #076293
 }
 
@@ -513,7 +513,7 @@ QLabel#inlineStatus {
 
 
 /* ── Inventory table (alternate-row fix) ─────────────────── */
-QTableWidget#inventoryTable {
+QTableView#inventoryTable {
     background-color: #ffffff;
     alternate-background-color: #f4f1ec;
     color: #1c2430;

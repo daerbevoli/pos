@@ -12,8 +12,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
 )
 
@@ -23,7 +21,7 @@ from app.core.sale.receipt_service import PrinterError, ReceiptService
 from app.core.sale.report_service import XZReportService
 from app.models.models import ZReport
 from app.utils.clock import format_local
-from app.utils.utils import FunctionButton, TapToDismissOverlay
+from app.utils.utils import FunctionButton, RowTableModel, SelectionKeepingView, TapToDismissOverlay
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +42,9 @@ class ZReportsDialog(QDialog):
     def _build_ui(self):
         root = QVBoxLayout(self)
 
-        self.table = QTableWidget(0, 5)
+        self.table = SelectionKeepingView()
         self.table.setObjectName("reportTable")
-        self.table.setHorizontalHeaderLabels(["Z report", "From", "To", "Transactions", "Total"])
+        self.table.setModel(RowTableModel(["Z report", "From", "To", "Transactions", "Total"], self))
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -54,6 +52,7 @@ class ZReportsDialog(QDialog):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(True)
+        header.setResizeContentsPrecision(0)  # measure the visible rows, not the first 1000
         root.addWidget(self.table, 1)
 
         self.btn_close = QPushButton("Close")
@@ -75,17 +74,13 @@ class ZReportsDialog(QDialog):
                  f"{z.final_amount:.2f}")
                 for z in reports
             ]
-        self.table.setRowCount(len(rows))
-        self._row_ids = {}
-        for row, (z_id, *cells) in enumerate(rows):
-            for col, text in enumerate(cells):
-                self.table.setItem(row, col, QTableWidgetItem(text))
-            self._row_ids[row] = z_id
+        self.table.model().set_rows((cells, None) for _, *cells in rows)
+        self._row_ids = {row: z_id for row, (z_id, *_) in enumerate(rows)}
         if rows:
             self.table.selectRow(0)
 
     def _print_selected(self):
-        row = self.table.currentRow()
+        row = self.table.currentIndex().row()
         if row == -1 or row not in self._row_ids:
             self.overlay.show_message("Select a Z report first.")
             return

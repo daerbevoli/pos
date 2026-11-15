@@ -22,8 +22,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
@@ -47,7 +46,7 @@ from app.ui.dialogs.client_listing_dialog import ClientListingDialog
 from app.ui.dialogs.file_dialog import FileDialog
 from app.ui.dialogs.import_progress_dialog import ImportProgressDialog
 from app.ui.widgets.form_fields import FieldRow
-from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
+from app.utils.utils import FunctionButton, RowTableModel, SelectionKeepingView, TapToDismissOverlay
 from app.utils.validators import is_valid_vat, normalize_vat
 
 logger = logging.getLogger(__name__)
@@ -430,6 +429,7 @@ class ClientDetailPanel(QFrame):
                 self.parent_screen.selected_client.emit(self.current_client_id, self.name.text())
             self.parent_screen.table.clearSelection()
             self._clear()
+            self.parent_screen.search_input.clear()
             self.parent_screen.navigate.emit(SCREENS["pos"])
 
     def _on_cancel(self):
@@ -456,6 +456,7 @@ class ClientDetailPanel(QFrame):
         was_display = self._mode == "display"
         self._on_cancel()
         if was_display:
+            self.parent_screen.search_input.clear()
             self.parent_screen.navigate.emit(SCREENS["pos"])
 
     def _on_deactivate(self):
@@ -558,11 +559,10 @@ class ClientScreen(QWidget):
         layout.setSpacing(SPACING_MD)
 
         # ── Client table (constructed early: ClientDetailPanel references it) ─
-        self.table = SelectionKeepingTable(0, 6)
+        self.table_model = RowTableModel(["Name", "Address", "Country", "VAT", "Phone", "Email"], self)
+        self.table = SelectionKeepingView()
         self.table.setObjectName("inventoryTable")
-        self.table.setHorizontalHeaderLabels([
-            "Name", "Address", "Country", "VAT", "Phone", "Email"
-        ])
+        self.table.setModel(self.table_model)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -570,16 +570,17 @@ class ClientScreen(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setResizeContentsPrecision(0)  # measure the visible rows, not the first 1000
         # "Address" column below shows the combined street/zip/city — see
         # Client.full_address; the underlying fields stay structured for ERP export.
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         # Tapping a row must not pull focus out of the search box; rows are
         # navigated via the ↑/↓ buttons or arrow keys in the search box instead.
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.itemSelectionChanged.connect(self._on_row_selected)
+        self.table.selectionModel().selectionChanged.connect(self._on_row_selected)
 
         # ── Client detail panel (always visible) ───────────────────────────
         self.detail_panel = ClientDetailPanel(self)
@@ -623,9 +624,10 @@ class ClientScreen(QWidget):
             # client (re-selecting its row when it's still listed) instead of
             # letting _on_row_selected clear the detail panel.
             keep_id = self.detail_panel.current_client_id
-            self.table.blockSignals(True)
-            self._populate_table(clients, session)
-            self.table.blockSignals(False)
+            selection = self.table.selectionModel()
+            selection.blockSignals(True)
+            self._populate_table(clients)
+            selection.blockSignals(False)
             if (keep_id is not None and not self._select_client_row(keep_id)
                     and self.detail_panel._mode == "display"):
                 # Filtered out of the list: keep showing it, with fresh data
@@ -638,26 +640,15 @@ class ClientScreen(QWidget):
             self.summary_label.setText(f"{len(clients)} client(s) shown")
         self.search_input.setFocus()
 
-    def _populate_table(self, clients, session):
-        self.table.setRowCount(0)
-        self._client_cache = {}
-        for c in clients:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self._client_cache[row] = c.id
-
-            self.table.setItem(row, 0, QTableWidgetItem(c.name or ""))
-            self.table.setItem(row, 1, QTableWidgetItem(c.full_address))
-            self.table.setItem(row, 2, QTableWidgetItem(COUNTRY_NAMES.get(c.country, c.country or "")))
-            self.table.setItem(row, 3, QTableWidgetItem(c.vatNumber or ""))
-            self.table.setItem(row, 4, QTableWidgetItem(c.phone or ""))
-            self.table.setItem(row, 5, QTableWidgetItem(c.email or ""))
-
-            if not c.is_active:
-                for col in range(self.table.columnCount()):
-                    item = self.table.item(row, col)
-                    item.setForeground(QColor(*COLOR_ROW_INACTIVE_TEXT))
-                    item.setBackground(QColor(*COLOR_ROW_INACTIVE_BG))
+    def _populate_table(self, clients):
+        inactive = {Qt.ItemDataRole.ForegroundRole: QColor(*COLOR_ROW_INACTIVE_TEXT),
+                    Qt.ItemDataRole.BackgroundRole: QColor(*COLOR_ROW_INACTIVE_BG)}
+        self._client_cache = {row: c.id for row, c in enumerate(clients)}
+        self.table_model.set_rows((
+            (c.name or "", c.full_address, COUNTRY_NAMES.get(c.country, c.country or ""),
+             c.vatNumber or "", c.phone or "", c.email or ""),
+            None if c.is_active else inactive,
+        ) for c in clients)
 
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
@@ -721,13 +712,13 @@ class ClientScreen(QWidget):
         nothing is selected yet)."""
         if self.detail_panel._mode != "display":
             return
-        count = self.table.rowCount()
+        count = self.table_model.rowCount()
         if count == 0:
             return
         selected = self.table.selectionModel().selectedRows()
         row = 0 if not selected else max(0, min(count - 1, selected[0].row() + direction))
         self.table.selectRow(row)
-        self.table.scrollToItem(self.table.item(row, 0))
+        self.table.scrollTo(self.table_model.index(row, 0))
 
     def eventFilter(self, obj, event):
         # Up/Down in the search box move the table selection, so the cursor

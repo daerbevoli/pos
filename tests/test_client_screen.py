@@ -8,6 +8,7 @@ hit an isolated in-memory database.
 import csv
 
 import pytest
+from PyQt6.QtCore import QModelIndex, Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from app.ui.client_screen import ClientScreen
@@ -36,7 +37,7 @@ def _add_client(**overrides):
 # ── Table / search ───────────────────────────────────────────────────────
 
 def test_empty_state(screen):
-    assert screen.table.rowCount() == 0
+    assert screen.table.model().rowCount() == 0
     assert screen.summary_label.text() == "0 client(s) shown"
 
 
@@ -45,8 +46,8 @@ def test_refresh_populates_table(screen):
     _add_client(name="Beta Corp", vatNumber="V2")
     screen.refresh()
 
-    assert screen.table.rowCount() == 2
-    names = {screen.table.item(r, 0).text() for r in range(screen.table.rowCount())}
+    assert screen.table.model().rowCount() == 2
+    names = {screen.table.model().index(r, 0).data() for r in range(screen.table.model().rowCount())}
     assert names == {"Acme", "Beta Corp"}
     assert screen.summary_label.text() == "2 client(s) shown"
 
@@ -57,8 +58,8 @@ def test_search_filters_table(screen, qtbot):
     screen.refresh()
 
     screen.search_input.setText("Fruit")
-    assert screen.table.rowCount() == 1
-    assert screen.table.item(0, 0).text() == "Fruit Market"
+    assert screen.table.model().rowCount() == 1
+    assert screen.table.model().index(0, 0).data() == "Fruit Market"
 
 
 def test_deactivated_clients_excluded_from_default_view(screen):
@@ -66,7 +67,7 @@ def test_deactivated_clients_excluded_from_default_view(screen):
     with get_session() as session:
         ClientService.deactivate(session, cid)
     screen.refresh()
-    assert screen.table.rowCount() == 0
+    assert screen.table.model().rowCount() == 0
 
 
 # ── Row selection ────────────────────────────────────────────────────────
@@ -89,7 +90,7 @@ def test_clearing_current_cell_clears_panel(screen):
     screen.table.selectRow(0)
     assert screen.detail_panel.current_client_id is not None
 
-    screen.table.setCurrentCell(-1, -1)
+    screen.table.setCurrentIndex(QModelIndex())
     assert screen.detail_panel.current_client_id is None
 
 
@@ -335,7 +336,7 @@ def test_deactivate_client_confirmed_deactivates(screen, monkeypatch):
     with get_session() as session:
         client = ClientService.get_by_id(session, cid)
     assert client.is_active is False
-    assert screen.table.rowCount() == 0
+    assert screen.table.model().rowCount() == 0
 
 
 def test_deactivate_client_cancelled_keeps_active(screen, monkeypatch):
@@ -401,13 +402,13 @@ def test_show_inactive_lists_inactive_greyed(screen):
     with get_session() as session:
         ClientService.deactivate(session, cid)
     screen.refresh()
-    assert screen.table.rowCount() == 1
+    assert screen.table.model().rowCount() == 1
 
     screen.show_inactive_check.setChecked(True)
-    assert screen.table.rowCount() == 2
-    rows = {screen.table.item(r, 0).text(): r for r in range(2)}
-    live_color = screen.table.item(rows["Live"], 0).foreground().color()
-    retired_color = screen.table.item(rows["Retired"], 0).foreground().color()
+    assert screen.table.model().rowCount() == 2
+    rows = {screen.table.model().index(r, 0).data(): r for r in range(2)}
+    live_color = screen.table.model().index(rows["Live"], 0).data(Qt.ItemDataRole.ForegroundRole)
+    retired_color = screen.table.model().index(rows["Retired"], 0).data(Qt.ItemDataRole.ForegroundRole)
     assert retired_color != live_color
 
 
@@ -416,10 +417,10 @@ def test_show_inactive_applies_to_search(screen):
     with get_session() as session:
         ClientService.deactivate(session, cid)
     screen.search_input.setText("Ret")
-    assert screen.table.rowCount() == 0
+    assert screen.table.model().rowCount() == 0
 
     screen.show_inactive_check.setChecked(True)
-    assert screen.table.rowCount() == 1
+    assert screen.table.model().rowCount() == 1
 
 
 # ── CSV import ───────────────────────────────────────────────────────────
@@ -569,3 +570,30 @@ def test_deactivate_pressed_while_editing_does_nothing(screen, monkeypatch):
     assert asked == []
     with get_session() as session:
         assert ClientService.get_by_id(session, cid).is_active is True
+
+
+def test_clear_drops_search_and_selection(screen, qtbot):
+    _add_client(name="Fruit Market", vatNumber="V1")
+    _add_client(name="Bakery", vatNumber="V2")
+    screen.search_input.setText("Fruit")
+    screen.table.selectRow(0)
+    assert screen.detail_panel.current_client_id is not None
+
+    with qtbot.waitSignal(screen.navigate):
+        screen.detail_panel._on_clear()
+    assert screen.search_input.text() == ""
+    assert screen.table.selectionModel().selectedRows() == []
+    assert screen.detail_panel.current_client_id is None
+    assert screen.table.model().rowCount() == 2
+
+
+def test_ok_drops_search(screen, qtbot):
+    _add_client(name="Fruit Market", vatNumber="V1")
+    _add_client(name="Bakery", vatNumber="V2")
+    screen.search_input.setText("Fruit")
+    screen.table.selectRow(0)
+
+    with qtbot.waitSignal(screen.navigate):
+        screen.detail_panel._on_ok()
+    assert screen.search_input.text() == ""
+    assert screen.table.model().rowCount() == 2

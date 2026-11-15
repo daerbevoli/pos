@@ -75,6 +75,7 @@ class CustomerDisplay(QWidget):
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.cart_table.verticalHeader().setVisible(False)
+        self.cart_table.verticalHeader().setMinimumSectionSize(0)  # else Windows raises rows to 24px, see POSScreen
         self.cart_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.cart_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.cart_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

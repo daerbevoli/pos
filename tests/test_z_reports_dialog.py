@@ -35,10 +35,10 @@ def test_lists_every_z_report_newest_first(dialog):
     _add_z("Z-0001", 10.0)
     _add_z("Z-0002", 25.5)
     d = dialog()
-    assert d.table.rowCount() == 2
-    assert d.table.item(0, 0).text() == "Z-0002"
-    assert d.table.item(0, 4).text() == "25.50"
-    assert d.table.currentRow() == 0  # newest preselected
+    assert d.table.model().rowCount() == 2
+    assert d.table.model().index(0, 0).data() == "Z-0002"
+    assert d.table.model().index(0, 4).data() == "25.50"
+    assert d.table.currentIndex().row() == 0  # newest preselected
 
 
 def test_print_reprints_the_selected_one_as_a_copy(dialog, monkeypatch):

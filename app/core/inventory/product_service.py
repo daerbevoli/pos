@@ -79,6 +79,37 @@ class ProductService:
         )
 
     @staticmethod
+    def table_rows(session: Session, query: str = "", category_id: int | None = None,
+                   include_inactive: bool = False) -> list:
+        """The inventory table's rows as plain column tuples, not Product
+        objects: building thousands of ORM objects made every refresh slow.
+        Matches search() (with a query) or get_all() (without); the category
+        is filtered in SQL, before search()'s 50-row limit."""
+        q = session.query(
+            Product.id, Product.barcode, Product.name, Category.name.label("category_name"),
+            Product.price, Product.is_open_price, Product.tax, Product.stock_quantity,
+            Product.min_stock_level, Product.unit, Product.is_active,
+        ).outerjoin(Category, Product.category_id == Category.id)
+        if not include_inactive:
+            q = q.filter(Product.is_active == True)
+        if category_id:
+            q = q.filter(Product.category_id == category_id)
+        if query:
+            q = (q.filter(Product.barcode.contains(query, autoescape=True)
+                          | Product.name.contains(query, autoescape=True))
+                 .order_by(Product.barcode).limit(50))
+        else:
+            q = q.order_by(Product.name)
+        # Run as plain Core SQL: the ORM's per-row processing doubled the time for thousands of rows.
+        return session.connection().execute(q.statement).all()
+
+    @staticmethod
+    def longest_barcode(session: Session) -> str:
+        """The longest barcode of any product (inactive ones too), "" when none."""
+        return (session.query(Product.barcode).filter(Product.barcode.isnot(None))
+                .order_by(func.length(Product.barcode).desc()).limit(1).scalar() or "")
+
+    @staticmethod
     def create(session: Session, **kwargs) -> Product:
         product = Product(**kwargs)
         session.add(product)

@@ -12,7 +12,7 @@ POS shortcut grid instead; tapping a product there shows it in the panel.
 import csv
 import logging
 
-from PyQt6.QtCore import QEvent, QLocale, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QEvent, QLocale, QModelIndex, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -30,8 +30,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
@@ -62,13 +61,78 @@ from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.ui.widgets.form_fields import FieldRow, PickerDisplay
 from app.ui.widgets.shortcut_grid import ShortcutGrid
-from app.utils.utils import FunctionButton, SelectionKeepingTable, TapToDismissOverlay
+from app.utils.utils import FunctionButton, SelectionKeepingView, TapToDismissOverlay
 
 logger = logging.getLogger(__name__)
 
 # Export column order; the import reads columns by header name, so an
 # exported CSV re-imports cleanly.
-ARTICLE_CSV_FIELDS = ["barcode", "name", "price", "is_open_price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
+# Qt's text margins inside a table cell, plus slack so text isn't elided.
+CELL_TEXT_PAD = 16
+
+ARTICLE_CSV_FIELDS =["barcode", "name", "price", "is_open_price", "tax", "unit", "stock_quantity", "min_stock_level", "category"]
+
+
+class ProductTableModel(QAbstractTableModel):
+    """The product list as plain rows. A view asks only for the cells it
+    draws, so thousands of products cost one Python tuple each instead of
+    seven QTableWidgetItems."""
+
+    HEADERS = ["Barcode", "Name", "Category", "Price", "Tax", "Stock", "Unit"]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows: list = []  # ProductService.table_rows() rows, formatted only when drawn
+
+    def set_products(self, products):
+        """Replaces all rows with ProductService.table_rows() results."""
+        self.beginResetModel()
+        self._rows = products
+        self.endResetModel()
+
+    def product_id(self, row: int) -> int:
+        return self._rows[row].id
+
+    def row_of(self, product_id: int) -> int:
+        """The product's row, or -1 when it isn't listed."""
+        return next((r for r, p in enumerate(self._rows) if p.id == product_id), -1)
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        p = self._rows[index.row()]
+        col = index.column()
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                return p.barcode or ""
+            if col == 1:
+                return p.name
+            if col == 2:
+                return p.category_name or "—"
+            if col == 3:
+                return "Open price" if p.is_open_price else f"€{p.price:.2f}"
+            if col == 4:
+                return f"{p.tax}"
+            if col == 5:
+                return f"{p.stock_quantity:.1f}"
+            return p.unit
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if not p.is_active:
+                return QColor(*COLOR_ROW_INACTIVE_TEXT)
+            if col == 5 and p.stock_quantity <= p.min_stock_level:  # same rule as Product.is_low_stock
+                return QColor(Qt.GlobalColor.red)
+        if role == Qt.ItemDataRole.BackgroundRole and not p.is_active:
+            return QColor(*COLOR_ROW_INACTIVE_BG)
+        return None
 
 
 class ArticleDetailPanel(QFrame):
@@ -471,6 +535,7 @@ class ArticleDetailPanel(QFrame):
         self.show()
 
     def _clear(self):
+        self.parent_screen.search_input.clear()
         self.current_product_id = None
         self._mode = "display"
         self._reset_fields_to_placeholder()
@@ -569,10 +634,7 @@ class ArticleDetailPanel(QFrame):
                     self._show_overlay("Product inactive.", kind="info")
                     return
                 self.parent_screen.selected_product.emit(self.current_product_id)
-            self.parent_screen.table.clearSelection()
-            self._clear()
-            self.parent_screen.refresh()
-            self.parent_screen.navigate.emit(SCREENS["pos"])
+            self.parent_screen.leave()
 
     def _on_cancel(self):
         if self._mode == "new":
@@ -594,10 +656,11 @@ class ArticleDetailPanel(QFrame):
         self.parent_screen.search_input.setFocus()
 
     def _on_clear(self):
-        was_display = self._mode == "display"
-        self._on_cancel()
-        if was_display:
-            self.parent_screen.navigate.emit(SCREENS["pos"])
+        if self._mode != "display":
+            self._on_cancel()
+            return
+        self.parent_screen._set_shortcut_mode(False)
+        self.parent_screen.leave()
 
     def _on_deactivate(self):
         if self.current_product_id is None or self._mode != "display":
@@ -769,6 +832,7 @@ class InventoryScreen(QWidget):
         # While on, the POS shortcut grid stands in for the product table, so
         # the most-repriced products are a tap away — see _set_shortcut_mode().
         self._shortcut_mode = False
+        self._leaving = False  # see leave()
         self._build_ui()
         self.refresh()
 
@@ -779,23 +843,30 @@ class InventoryScreen(QWidget):
         layout.setSpacing(SPACING_MD)
 
         # ── Product table (constructed early: ArticleDetailPanel references it) ─
-        self.table = SelectionKeepingTable(0, 7)
+        self.table_model = ProductTableModel(self)
+        self.table = SelectionKeepingView()
         self.table.setObjectName("inventoryTable")
-        self.table.setHorizontalHeaderLabels([
-            "Barcode", "Name", "Category", "Price", "Tax", "Stock", "Unit"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setModel(self.table_model)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # Barcode: sized in refresh()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name takes the rest
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.ensurePolished()  # font from the stylesheet, before measuring
+        header.resizeSection(2, max(header.sectionSizeHint(2),
+                                    20 * self.table.fontMetrics().averageCharWidth() + CELL_TEXT_PAD))
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Tax
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Unit
+        # ResizeToContents measures the first 1000 rows on every reload; the visible ones are enough
+        header.setResizeContentsPrecision(0)
+        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         # Tapping a row must not pull focus out of the search box (a scan
         # right after would be lost); rows are navigated via the ↑/↓ buttons
         # or arrow keys in the search box instead.
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.itemSelectionChanged.connect(self._on_row_selected)
+        self.table.selectionModel().selectionChanged.connect(self._on_row_selected)
 
         # ── Article detail panel (always visible) ─────────────────────────────
         self.detail_panel = ArticleDetailPanel(self)
@@ -845,8 +916,6 @@ class InventoryScreen(QWidget):
         self.summary_label = QLabel()
         layout.addWidget(self.summary_label)
 
-        self._product_cache = {}
-
     def _show_picker_page(self):
         if hasattr(self, "table_stack"):
             self.table_stack.setCurrentWidget(self.detail_panel.picker_page)
@@ -888,7 +957,25 @@ class InventoryScreen(QWidget):
                 self.category_filter.hide()
                 self.show_inactive_check.hide()
 
+    def leave(self):
+        """Back to the POS with the selection and search cleared. The list
+        isn't reloaded for that now but when the screen is next shown
+        (showEvent): reloading thousands of articles delayed the switch."""
+        self._leaving = True
+        try:
+            self.table.clearSelection()
+            self.detail_panel._clear()
+        finally:
+            self._leaving = False
+        self.navigate.emit(SCREENS["pos"])
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh()  # also picks up stock changed by sales since the last visit
+
     def refresh(self):
+        if self._leaving:
+            return
         with get_session() as session:
             # Refresh category filter
             cats = ProductService.get_all_categories(session)
@@ -905,27 +992,23 @@ class InventoryScreen(QWidget):
             self.category_filter.blockSignals(False)
 
             # Get products
-            query = self.search_input.text().strip()
-            include_inactive = self.show_inactive_check.isChecked()
-            if query:
-                products = ProductService.search(session, query, include_inactive=include_inactive)
-            else:
-                products = ProductService.get_all(session, active_only=not include_inactive)
+            header = self.table.horizontalHeader()
+            header.resizeSection(0, max(header.sectionSizeHint(0), CELL_TEXT_PAD + self.table.fontMetrics()
+                                        .horizontalAdvance(ProductService.longest_barcode(session))))
 
-            cat_id = self.category_filter.currentData()
-            if cat_id:
-                products = [p for p in products if p.category_id == cat_id]
-
-            # if self.low_stock_btn.isChecked():
-            #     products = [p for p in products if p.is_low_stock]
+            products = ProductService.table_rows(
+                session, self.search_input.text().strip(),
+                category_id=self.category_filter.currentData(),
+                include_inactive=self.show_inactive_check.isChecked())
 
             # Rebuilding the table drops its selection; keep the selected
             # product (re-selecting its row when it's still listed) instead of
             # letting _on_row_selected clear the detail panel.
             keep_id = self.detail_panel.current_product_id
-            self.table.blockSignals(True)
-            self._populate_table(products, session)
-            self.table.blockSignals(False)
+            selection = self.table.selectionModel()
+            selection.blockSignals(True)
+            self.table_model.set_products(products)
+            selection.blockSignals(False)
             if (keep_id is not None and not self._select_product_row(keep_id)
                     and self.detail_panel._mode == "display"):
                 # Filtered out of the list: keep showing it, with fresh data
@@ -943,42 +1026,15 @@ class InventoryScreen(QWidget):
         self.search_input.setFocus()
 
 
-    def _populate_table(self, products, session):
-        self.table.setRowCount(0)
-        self._product_cache = {}
-        for p in products:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self._product_cache[row] = p.id
-
-            self.table.setItem(row, 0, QTableWidgetItem(p.barcode or ""))
-            self.table.setItem(row, 1, QTableWidgetItem(p.name))
-            cat_name = p.category.name if p.category else "—"
-            self.table.setItem(row, 2, QTableWidgetItem(cat_name))
-            price_text = "Open price" if p.is_open_price else f"€{p.price:.2f}"
-            self.table.setItem(row, 3, QTableWidgetItem(price_text))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{p.tax}"))
-            stock_item = QTableWidgetItem(f"{p.stock_quantity:.1f}")
-            if p.is_low_stock:
-                stock_item.setForeground(Qt.GlobalColor.red)
-            self.table.setItem(row, 5, stock_item)
-            self.table.setItem(row, 6, QTableWidgetItem(p.unit))
-
-            if not p.is_active:
-                for col in range(self.table.columnCount()):
-                    item = self.table.item(row, col)
-                    item.setForeground(QColor(*COLOR_ROW_INACTIVE_TEXT))
-                    item.setBackground(QColor(*COLOR_ROW_INACTIVE_BG))
-
     # ── Detail panel wiring ─────────────────────────────────────────────────
 
     def _on_row_selected(self):
         selected = self.table.selectionModel().selectedRows()
         row = selected[0].row() if selected else -1
-        if row < 0 or row not in self._product_cache:
+        if row < 0:
             self.detail_panel._clear()
             return
-        product_id = self._product_cache[row]
+        product_id = self.table_model.product_id(row)
         with get_session() as session:
             product = ProductService.get_by_id(session, product_id)
             if product:
@@ -1028,11 +1084,11 @@ class InventoryScreen(QWidget):
     def _select_product_row(self, product_id: int) -> bool:
         """Selects product_id's row in the table if it's in the current
         (possibly filtered) view. Returns whether it found one."""
-        for row, pid in self._product_cache.items():
-            if pid == product_id:
-                self.table.selectRow(row)
-                return True
-        return False
+        row = self.table_model.row_of(product_id)
+        if row < 0:
+            return False
+        self.table.selectRow(row)
+        return True
 
     def _move_selection(self, direction: int):
         """Selects the row above/below the current one (the first row when
@@ -1040,13 +1096,13 @@ class InventoryScreen(QWidget):
         showing instead of the table."""
         if self.detail_panel._mode != "display" or self.table_stack.currentWidget() is not self.table:
             return
-        count = self.table.rowCount()
+        count = self.table_model.rowCount()
         if count == 0:
             return
         selected = self.table.selectionModel().selectedRows()
         row = 0 if not selected else max(0, min(count - 1, selected[0].row() + direction))
         self.table.selectRow(row)
-        self.table.scrollToItem(self.table.item(row, 0))
+        self.table.scrollTo(self.table_model.index(row, 0))
 
     def eventFilter(self, obj, event):
         # Up/Down in the search box move the table selection, so the cursor

@@ -143,7 +143,7 @@ def test_discounts_and_mistakes_skip_missing_or_bad_snapshot():
 def test_initial_state_shows_zero_summary(screen):
     assert screen.cr_label.text() == "0.00"
     assert screen.ctrans_label.text() == "0"
-    assert screen.sales_table.rowCount() == 0
+    assert screen.sales_table.model().rowCount() == 0
 
 
 def test_load_report_populates_summary_and_table(screen):
@@ -158,7 +158,7 @@ def test_load_report_populates_summary_and_table(screen):
     assert screen.ctrans_label.text() == "2"
     assert screen.cc_label.text() == "20.00"
     assert screen.crcr_label.text() == "10.00"
-    assert screen.sales_table.rowCount() == 2
+    assert screen.sales_table.model().rowCount() == 2
 
 
 def test_load_report_shows_slash_for_non_invoice_client(screen):
@@ -166,7 +166,7 @@ def test_load_report_shows_slash_for_non_invoice_client(screen):
         product = _make_product(session)
     _finalize_sale(product)
     screen._load_report()
-    assert screen.sales_table.item(0, 2).text() == "/"
+    assert screen.sales_table.model().index(0, 2).data() == "/"
 
 
 def test_load_report_shows_client_name_for_invoices(screen):
@@ -178,8 +178,8 @@ def test_load_report_shows_client_name_for_invoices(screen):
     _finalize_sale(product, client_id=client_id)
 
     screen._load_report()
-    assert screen.sales_table.item(0, 2).text() == "Acme Corp"
-    assert screen.sales_table.item(0, 3).text() == "BE001"
+    assert screen.sales_table.model().index(0, 2).data() == "Acme Corp"
+    assert screen.sales_table.model().index(0, 3).data() == "BE001"
 
 
 def test_load_report_shows_invoiced_client_name_as_issued_even_after_rename(screen):
@@ -197,8 +197,8 @@ def test_load_report_shows_invoiced_client_name_as_issued_even_after_rename(scre
 
     screen._load_report()
 
-    assert screen.sales_table.item(0, 2).text() == "Original Name"
-    assert screen.sales_table.item(0, 3).text() == "VORIG"
+    assert screen.sales_table.model().index(0, 2).data() == "Original Name"
+    assert screen.sales_table.model().index(0, 3).data() == "VORIG"
 
 
 def test_vat_breakdown_by_rate(screen):
@@ -259,7 +259,7 @@ def test_invoices_only_filters_out_regular_sales(screen):
     screen._invoices_only()
 
     assert screen.invoices_only is True
-    assert screen.sales_table.rowCount() == 1
+    assert screen.sales_table.model().rowCount() == 1
 
 
 def test_invoices_only_toggle_back(screen):
@@ -268,10 +268,10 @@ def test_invoices_only_toggle_back(screen):
     _finalize_sale(product)
 
     screen._invoices_only()
-    assert screen.sales_table.rowCount() == 0
+    assert screen.sales_table.model().rowCount() == 0
     screen._invoices_only()
     assert screen.invoices_only is False
-    assert screen.sales_table.rowCount() == 1
+    assert screen.sales_table.model().rowCount() == 1
 
 
 def test_preset_ranges():
@@ -328,7 +328,7 @@ def test_confirm_without_a_selected_row_does_not_show_any_sale(screen, qtbot):
         product = _make_product(session)
     _finalize_sale(product)
     screen._load_report()
-    assert screen.sales_table.currentRow() == -1  # nothing selected after a fresh load
+    assert screen.sales_table.currentIndex().row() == -1  # nothing selected after a fresh load
 
     received = []
     screen.sale_selected.connect(received.append)
@@ -348,7 +348,7 @@ def test_confirm_with_a_selected_row_shows_that_sale(screen, qtbot):
     screen._load_report()
 
     row_for_newer = next(r for r, sid in screen._sales_row_ids.items() if sid == newer.id)
-    screen.sales_table.setCurrentCell(row_for_newer, 0)
+    screen.sales_table.setCurrentIndex(screen.sales_table.model().index(row_for_newer, 0))
 
     with qtbot.waitSignal(screen.sale_selected, timeout=1000) as blocker:
         screen._confirm()
@@ -365,12 +365,12 @@ def test_display_sale_clears_current_row_after_emitting(screen, qtbot):
     screen._load_report()
 
     row = next(iter(screen._sales_row_ids))
-    screen.sales_table.setCurrentCell(row, 0)
+    screen.sales_table.setCurrentIndex(screen.sales_table.model().index(row, 0))
 
     with qtbot.waitSignal(screen.sale_selected, timeout=1000):
         screen._display_sale()
 
-    assert screen.sales_table.currentRow() == -1
+    assert screen.sales_table.currentIndex().row() == -1
 
     received = []
     screen.sale_selected.connect(received.append)
@@ -389,10 +389,10 @@ def test_display_sale_emits_the_row_actual_sale_id(screen, qtbot):
     newer = _finalize_sale(product, quantity=1)
 
     screen._load_report()
-    assert screen.sales_table.rowCount() == 2
+    assert screen.sales_table.model().rowCount() == 2
 
     for row, expected_id in screen._sales_row_ids.items():
-        screen.sales_table.setCurrentCell(row, 0)
+        screen.sales_table.setCurrentIndex(screen.sales_table.model().index(row, 0))
         with qtbot.waitSignal(screen.sale_selected, timeout=1000) as blocker:
             screen._display_sale()
         assert blocker.args == [expected_id]
@@ -609,7 +609,7 @@ def test_x_report_number_matches_the_z_report_that_closes_its_period(patched_db)
 def _select_sale_row(screen, sale_id):
     screen._load_report()
     row = next(r for r, sid in screen._sales_row_ids.items() if sid == sale_id)
-    screen.sales_table.setCurrentCell(row, 0)
+    screen.sales_table.setCurrentIndex(screen.sales_table.model().index(row, 0))
 
 
 def test_mark_sent_confirmed_locks_the_invoice(screen, monkeypatch):
@@ -667,11 +667,11 @@ def test_invoices_view_still_lists_invoices_after_z_report(screen):
 
     screen._invoices_only()
 
-    assert screen.sales_table.rowCount() == 1
-    assert screen.sales_table.item(0, 0).text() == invoice.invoice_number
-    assert screen.sales_table.item(0, 2).text() == "Acme"
-    assert screen.sales_table.item(0, 4).text() == "1"
-    assert screen.sales_table.item(0, 5).text() == "CASH"  # from the invoice's own payment snapshot
+    assert screen.sales_table.model().rowCount() == 1
+    assert screen.sales_table.model().index(0, 0).data() == invoice.invoice_number
+    assert screen.sales_table.model().index(0, 2).data() == "Acme"
+    assert screen.sales_table.model().index(0, 4).data() == "1"
+    assert screen.sales_table.model().index(0, 5).data() == "CASH"  # from the invoice's own payment snapshot
     assert screen.ctrans_label.text() == "1"
     assert screen._sales_row_ids == {}
 
@@ -684,7 +684,7 @@ def test_purged_invoice_cannot_be_opened_on_pos(screen, qtbot, monkeypatch):
     with get_session() as session:
         XZReportService.close_z_report(session)
     screen._invoices_only()
-    screen.sales_table.setCurrentCell(0, 0)
+    screen.sales_table.setCurrentIndex(screen.sales_table.model().index(0, 0))
     overlays, selected, navigated = [], [], []
     monkeypatch.setattr(screen, "_show_overlay", lambda message, **k: overlays.append(message))
     screen.sale_selected.connect(selected.append)
@@ -703,7 +703,7 @@ def test_mark_sent_works_on_invoice_without_sale(screen, monkeypatch):
         session.get(Invoice, invoice.id).sale_id = None
         session.commit()
     screen._invoices_only()
-    screen.sales_table.setCurrentCell(0, 0)
+    screen.sales_table.setCurrentIndex(screen.sales_table.model().index(0, 0))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
 
     screen._mark_invoice_sent()
@@ -720,17 +720,17 @@ def test_invoices_filter_survives_range_dropdown_and_load(screen):
 
     screen._invoices_only()
     assert screen.invoices_btn.isChecked()
-    assert screen.sales_table.rowCount() == 1
+    assert screen.sales_table.model().rowCount() == 1
 
     from app.ui.reports_screen import RANGE_THIS_WEEK
     screen.range_combo.setCurrentIndex(RANGE_THIS_WEEK)
-    assert screen.sales_table.rowCount() == 1
+    assert screen.sales_table.model().rowCount() == 1
     screen._load_report()
-    assert screen.sales_table.rowCount() == 1
+    assert screen.sales_table.model().rowCount() == 1
 
     screen._invoices_only()
     assert not screen.invoices_btn.isChecked()
-    assert screen.sales_table.rowCount() == 2
+    assert screen.sales_table.model().rowCount() == 2
 
 
 def test_invoice_vat_breakdown_survives_z_report(screen):

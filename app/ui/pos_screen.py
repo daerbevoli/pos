@@ -276,7 +276,11 @@ class POSScreen(QWidget):
         self.cart_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.cart_table.horizontalHeader().hide()
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.cart_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.cart_table.verticalHeader().hide()
+        # Qt raises every row to this style/font-dependent minimum (24px on Windows),
+        # which overrode CART_ROW_HEIGHT and the 3px divider rows there.
+        self.cart_table.verticalHeader().setMinimumSectionSize(0)
         # Per-pixel so scrolling to the last row lands it fully at the bottom edge.
         self.cart_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
         self.cart_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

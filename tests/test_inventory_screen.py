@@ -5,6 +5,7 @@ and ArticleDetailPanel (new/edit/delete/picker/stock-adjustment/export/import fl
 import csv
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
 from app.constants.screens import SCREENS
@@ -31,10 +32,14 @@ def _add_product(**overrides):
         return p.id
 
 
+def _cell(screen, row, col, role=Qt.ItemDataRole.DisplayRole):
+    return screen.table_model.index(row, col).data(role)
+
+
 # ── Table / filters ──────────────────────────────────────────────────────
 
 def test_empty_state(screen):
-    assert screen.table.rowCount() == 0
+    assert screen.table_model.rowCount() == 0
     assert screen.summary_label.text() == "0 product(s) shown"
 
 
@@ -48,7 +53,7 @@ def test_refresh_populates_table(screen):
     _add_product(name="Milk", barcode="111")
     _add_product(name="Bread", barcode="222")
     screen.refresh()
-    assert screen.table.rowCount() == 2
+    assert screen.table_model.rowCount() == 2
 
 
 def test_search_filters_table(screen):
@@ -57,8 +62,8 @@ def test_search_filters_table(screen):
     screen.refresh()
 
     screen.search_input.setText("Cola")
-    assert screen.table.rowCount() == 1
-    assert screen.table.item(0, 1).text() == "Cola"
+    assert screen.table_model.rowCount() == 1
+    assert _cell(screen, 0, 1) == "Cola"
 
 
 def test_category_filter_restricts_products(screen):
@@ -71,8 +76,8 @@ def test_category_filter_restricts_products(screen):
 
     idx = screen.category_filter.findData(cat_id)
     screen.category_filter.setCurrentIndex(idx)
-    assert screen.table.rowCount() == 1
-    assert screen.table.item(0, 1).text() == "InCat"
+    assert screen.table_model.rowCount() == 1
+    assert _cell(screen, 0, 1) == "InCat"
 
 
 # ── Row selection ────────────────────────────────────────────────────────
@@ -361,13 +366,13 @@ def test_show_inactive_lists_inactive_greyed(screen):
     with get_session() as session:
         ProductService.deactivate(session, pid)
     screen.refresh()
-    assert screen.table.rowCount() == 1
+    assert screen.table_model.rowCount() == 1
 
     screen.show_inactive_check.setChecked(True)
-    assert screen.table.rowCount() == 2
-    names = {screen.table.item(r, 1).text(): r for r in range(2)}
-    live_color = screen.table.item(names["Live"], 1).foreground().color()
-    retired_color = screen.table.item(names["Retired"], 1).foreground().color()
+    assert screen.table_model.rowCount() == 2
+    names = {_cell(screen, r, 1): r for r in range(2)}
+    live_color = _cell(screen, names["Live"], 1, Qt.ItemDataRole.ForegroundRole)
+    retired_color = _cell(screen, names["Retired"], 1, Qt.ItemDataRole.ForegroundRole)
     assert retired_color != live_color
 
 
@@ -376,10 +381,10 @@ def test_show_inactive_applies_to_search(screen):
     with get_session() as session:
         ProductService.deactivate(session, pid)
     screen.search_input.setText("Ret")
-    assert screen.table.rowCount() == 0
+    assert screen.table_model.rowCount() == 0
 
     screen.show_inactive_check.setChecked(True)
-    assert screen.table.rowCount() == 1
+    assert screen.table_model.rowCount() == 1
 
 
 # ── Barcode scan ─────────────────────────────────────────────────────────
@@ -1013,3 +1018,27 @@ def test_scan_in_new_mode_overwrites_barcode_from_any_field(screen, qtbot):
 
 def test_handle_barcode_scan_ignored_in_display_mode(screen):
     assert screen.handle_barcode_scan("5410000000012") is False
+
+
+def test_barcode_column_fits_the_longest_barcode(screen):
+    _add_product(name="Short", barcode="12")
+    _add_product(name="Long", barcode="1234567890123456789")
+    screen.refresh()
+    width = screen.table.horizontalHeader().sectionSize(0)
+    assert width >= screen.table.fontMetrics().horizontalAdvance("1234567890123456789")
+
+
+
+def test_leaving_defers_the_list_reload_to_the_next_show(screen, qtbot):
+    _add_product(name="Cola", barcode="111")
+    _add_product(name="Milk", barcode="222")
+    screen.search_input.setText("Cola")
+    assert screen.table_model.rowCount() == 1
+
+    with qtbot.waitSignal(screen.navigate):
+        screen.detail_panel._on_clear()
+    assert screen.search_input.text() == ""
+    assert screen.table_model.rowCount() == 1  # not reloaded on the way out
+
+    screen.show()
+    assert screen.table_model.rowCount() == 2

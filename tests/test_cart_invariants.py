@@ -3,8 +3,8 @@ Agreement checks between every place a ticket's money is worked out: the
 till total, the per-line amounts saved on the sale (Cart.net_lines), and
 the invoice lines sent to the ERP (invoice_lines).
 
-Besides hand-written cases, random tickets are built from a seeded
-random.Random (reproducible: a failure names its seed) out of the same
+Besides hand-written cases, random tickets are built (tools/sales_factory.py)
+from a seeded random.Random (reproducible: a failure names its seed) out of the same
 steps a cashier can take — items, promos, item/subtotal discounts, a
 non-Belgian client, refund mode, then reopening the sale to reverse or
 remove lines.
@@ -18,12 +18,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.sale.cart import Cart, CartItem, DiscountEntry, SubtotalMarker
+from app.constants.vat import VAT_RATES
 from app.core.sale.sales_service import invoice_lines
+from tools.sales_factory import PRICES, fake_promo, random_ticket
 
 SEEDS = range(500)
-
-PRICES = (0.99, 1.5, 2.49, 3.2, 10.0, 12.1, 19.99)
-TAX_RATES = (0, 6, 12, 21)
 
 
 def _product(pid, price, tax=21, unit="pcs", promo=None):
@@ -33,80 +32,17 @@ def _product(pid, price, tax=21, unit="pcs", promo=None):
     )
 
 
-def _promo(discount_type, value):
-    """Stands in for a PromoItem: Cart.add_product reads .promo.name,
-    .discount_type and .discount_value."""
-    return SimpleNamespace(promo=SimpleNamespace(name="PROMO"), discount_type=discount_type,
-                           discount_value=value)
-
-
 def _random_ticket(seed: int) -> Cart:
-    """A ticket built the way a cashier could: rung up, optionally saved and
-    reopened (via its snapshot, like the POS does), then edited."""
+    """A ticket as finally paid (see tools/sales_factory.random_ticket), from
+    made-up products with a random price, VAT rate and unit."""
     rng = random.Random(seed)
     next_pid = iter(range(1, 1000))
 
-    def add_item():
-        promo = None
-        roll = rng.random()
-        if roll < 0.2:
-            promo = _promo("percent", rng.choice((10, 25, 50)))
-        elif roll < 0.3:
-            promo = _promo("fixed", 0.5)
+    def pick_product(rng):
         unit = "kg" if rng.random() < 0.2 else "pcs"
-        quantity = rng.choice((0.25, 0.5, 1.2, 2.0)) if unit == "kg" else rng.randint(1, 4)
-        cart.add_product(
-            _product(next(next_pid), rng.choice(PRICES), rng.choice(TAX_RATES), unit, promo),
-            quantity=quantity,
-        )
+        return _product(next(next_pid), rng.choice(PRICES), rng.choice(VAT_RATES), unit)
 
-    def random_step():
-        roll = rng.random()
-        if roll < 0.55:
-            add_item()
-        elif roll < 0.7:
-            cart.apply_percent_discount(rng.choice((5, 10, 25, 50)))
-        elif roll < 0.8:
-            cart.apply_amount_discount(rng.choice((0.5, 1.0, 2.0, 5.0)))
-        elif any(isinstance(e, (CartItem, DiscountEntry)) for e in cart.entries[-1:]):
-            cart.add_subtotal()
-
-    cart = Cart()
-    if rng.random() < 0.3:
-        cart.retax_for_client(False)
-    cart.is_refund = rng.random() < 0.15
-
-    add_item()
-    for _ in range(rng.randint(0, 7)):
-        random_step()
-    if cart.is_domestic and rng.random() < 0.15:
-        cart.retax_for_client(False)  # Client pressed after ringing items up
-
-    if rng.random() < 0.6:
-        # Saved, then reopened: lines come back from the snapshot, locked.
-        is_domestic, is_refund = cart.is_domestic, cart.is_refund
-        cart = Cart.from_snapshot(cart.to_snapshot())
-        cart.is_domestic, cart.is_refund = is_domestic, is_refund
-        for entry in cart.entries:
-            if isinstance(entry, CartItem):
-                entry.locked = True
-        for _ in range(rng.randint(1, 5)):
-            roll = rng.random()
-            reversible = [e for e in cart.entries if isinstance(e, CartItem) and e.locked
-                          and not e.is_reversal and not e.has_reversal]
-            removable = [e for e in cart.entries if isinstance(e, CartItem) and not e.locked]
-            # The Error key on a discount or subtotal row, e.g. one that was
-            # already on the saved sale.
-            markers = [e for e in cart.entries if isinstance(e, (DiscountEntry, SubtotalMarker))]
-            if roll < 0.45 and reversible:
-                cart.reverse(rng.choice(reversible))
-            elif roll < 0.6 and removable:
-                cart.remove_entry(rng.choice(removable))
-            elif roll < 0.75 and markers:
-                cart.remove_entry(rng.choice(markers))
-            else:
-                random_step()
-    return cart
+    return random_ticket(rng, pick_product)[1]
 
 
 def _describe(cart: Cart) -> str:
@@ -149,6 +85,27 @@ def test_stacked_item_and_subtotal_discounts_on_invoice():
     assert round(sum(l.line_total_excl_tax for l in lines), 2) == 11.46
 
 
+def test_two_subtotal_discounts_stack_exactly_with_rounding_on_the_lines():
+    """3 broccoli at 1.50 + 15 kg carrot at 0.99 = 19.35, subtotal, 10% off
+    twice: the second comes off what's left (1.94 then 1.74, 19% not 20%).
+    Each discount's shares sum to it exactly; the cent rounding shows only
+    in the per-line % (18.89 / 19.06 instead of 19.00)."""
+    cart = Cart()
+    cart.add_product(_product(1, 1.5, tax=6), quantity=3)
+    cart.add_product(_product(2, 0.99, tax=6, unit="kg"), quantity=15)
+    cart.add_subtotal()
+    first = cart.apply_percent_discount(10)
+    second = cart.apply_percent_discount(10)
+
+    assert (first.amount, [a.amount for a in first.allocations]) == (1.94, [0.45, 1.49])
+    assert (second.amount, [a.amount for a in second.allocations]) == (1.74, [0.40, 1.34])
+    assert cart.total == 15.67
+    assert round(sum(_nets(cart)), 2) == cart.total
+
+    lines = invoice_lines(_invoice_for(cart))
+    assert [(l.discount_percent, l.line_total_excl_tax) for l in lines] == [(18.89, 3.44), (19.06, 11.34)]
+
+
 def test_reversing_a_discounted_line_also_voids_its_discount():
     cart = Cart()
     cart.add_product(_product(1, 10.0))
@@ -177,7 +134,7 @@ def test_percent_promo_for_foreign_client_is_the_domestic_price_net_of_vat():
     domestic, foreign = Cart(), Cart()
     foreign.retax_for_client(False)
     for cart in (domestic, foreign):
-        cart.add_product(_product(1, 12.1, tax=21, promo=_promo("percent", 20)))
+        cart.add_product(_product(1, 12.1, tax=21, promo=fake_promo("percent", 20)))
 
     assert foreign.total == round(domestic.total / 1.21, 2)
 
@@ -186,7 +143,7 @@ def test_fixed_promo_for_foreign_client_is_the_domestic_price_net_of_vat():
     domestic, foreign = Cart(), Cart()
     foreign.retax_for_client(False)
     for cart in (domestic, foreign):
-        cart.add_product(_product(1, 12.1, tax=21, promo=_promo("fixed", 2.0)))
+        cart.add_product(_product(1, 12.1, tax=21, promo=fake_promo("fixed", 2.0)))
 
     assert foreign.total == round(domestic.total / 1.21, 2)
 
@@ -195,13 +152,13 @@ def test_fixed_promo_for_foreign_client_within_a_cent_per_unit_for_every_price_a
     """Price and promo are each netted of VAT and rounded on their own, so
     the line can be a cent per unit off domestic / (1 + rate) — never more."""
     for price in PRICES:
-        for rate in TAX_RATES:
+        for rate in VAT_RATES:
             for value in (0.1, 0.5, 2.0):
                 for quantity in (1, 3):
                     domestic, foreign = Cart(), Cart()
                     foreign.retax_for_client(False)
                     for cart in (domestic, foreign):
-                        cart.add_product(_product(1, price, tax=rate, promo=_promo("fixed", value)),
+                        cart.add_product(_product(1, price, tax=rate, promo=fake_promo("fixed", value)),
                                          quantity=quantity)
                     expected = domestic.total / (1 + rate / 100)
                     assert abs(foreign.total - expected) <= 0.01 * quantity + 0.005, (
@@ -213,10 +170,10 @@ def test_attaching_a_foreign_client_after_ringing_up_reprices_the_promo(kind, va
     """The usual order: items first, Client button after. The promo line
     must follow the line's new price, same as when the client came first."""
     after, before = Cart(), Cart()
-    after.add_product(_product(1, 12.1, tax=21, promo=_promo(kind, value)))
+    after.add_product(_product(1, 12.1, tax=21, promo=fake_promo(kind, value)))
     after.retax_for_client(False)
     before.retax_for_client(False)
-    before.add_product(_product(1, 12.1, tax=21, promo=_promo(kind, value)))
+    before.add_product(_product(1, 12.1, tax=21, promo=fake_promo(kind, value)))
 
     assert after.total == before.total == expected
     assert _nets(after) == _nets(before)
@@ -224,7 +181,7 @@ def test_attaching_a_foreign_client_after_ringing_up_reprices_the_promo(kind, va
 
 def test_switching_back_to_a_domestic_client_restores_the_promo():
     cart = Cart()
-    cart.add_product(_product(1, 12.1, tax=21, promo=_promo("percent", 20)))
+    cart.add_product(_product(1, 12.1, tax=21, promo=fake_promo("percent", 20)))
     cart.retax_for_client(False)
     cart.retax_for_client(True)
 

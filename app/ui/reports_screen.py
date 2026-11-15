@@ -7,7 +7,7 @@ Reports Screen
 import json
 from datetime import date, timedelta
 
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QModelIndex, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QTableView,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -49,7 +50,7 @@ from app.models.models import Invoice, Sale
 from app.ui.dialogs.z_report_progress_dialog import ZReportProgressDialog
 from app.ui.dialogs.z_reports_dialog import ZReportsDialog
 from app.utils.clock import format_local
-from app.utils.utils import FunctionButton, TapToDismissOverlay
+from app.utils.utils import FunctionButton, RowTableModel, TapToDismissOverlay
 
 # Range dropdown entries, in order (the index is the combo box index).
 RANGE_TODAY, RANGE_THIS_WEEK, RANGE_THIS_MONTH, RANGE_LAST_MONTH, RANGE_MANUAL = range(5)
@@ -234,11 +235,11 @@ class ReportsScreen(QWidget):
 
         # ── Sales table ───────────────────────────────────────────────────────
         self._sales_row_ids: dict[int, int] = {}  # table row -> DB Sale.id, rebuilt each _load_report()
-        self.sales_table = QTableWidget(0, 8)
+        self.sales_table = QTableView()
         self.sales_table.setObjectName("reportTable")
-        self.sales_table.setHorizontalHeaderLabels([
+        self.sales_table.setModel(RowTableModel([
             "Sale #", "Date & Time", "Client name", "VAT number", "Items", "Payment", "Total", "Updated"
-        ])
+        ], self))
         self.sales_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -247,9 +248,12 @@ class ReportsScreen(QWidget):
         self.sales_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        # measure the visible rows, not the first 1000
+        self.sales_table.horizontalHeader().setResizeContentsPrecision(0)
         self.sales_table.verticalHeader().setVisible(False)
-        self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.sales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.sales_table.verticalHeader().setDefaultSectionSize(REPORT_ROW_HEIGHT)
+        self.sales_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.sales_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
 
         layout.addWidget(self.sales_table, stretch=1)
 
@@ -326,7 +330,7 @@ class ReportsScreen(QWidget):
         end = self.date_to.date().toPyDate()
 
         with get_session() as session:
-            self.sales_table.setRowCount(0)
+            self._sales_rows = []
             self._sales_row_ids = {}
             self._invoice_row_ids = {}
 
@@ -352,6 +356,8 @@ class ReportsScreen(QWidget):
                 totals = XZReportService.compute_totals(session, sales)
                 revenue = totals["final_amount"]
                 transaction_count = totals["transaction_count"]
+
+            self.sales_table.model().set_rows(self._sales_rows)
 
             avg = revenue / transaction_count if transaction_count else 0
             payment_totals = {leg["method"]: leg["amount"] for leg in totals["payment_breakdown"]}
@@ -394,8 +400,7 @@ class ReportsScreen(QWidget):
         """One sales_table row for a sale and/or its invoice. Either may be
         missing: a plain sale has no invoice, and an invoice whose sale a Z
         report purged has no sale — it's shown from its own frozen snapshot."""
-        row = self.sales_table.rowCount()
-        self.sales_table.insertRow(row)
+        row = len(self._sales_rows)
         if sale is not None:
             self._sales_row_ids[row] = sale.id
         if invoice is not None:
@@ -426,16 +431,12 @@ class ReportsScreen(QWidget):
 
         values = [number, fmt(created), client_name, vat_num, str(item_count), payment,
                   f"{final_amount:.2f}", fmt(updated_at)]
-        for col, value in enumerate(values):
-            self.sales_table.setItem(row, col, QTableWidgetItem(value))
-
+        roles = None
         if invoice is not None and invoice.sent_at is not None:
             sent_font = QFont()
             sent_font.setBold(True)
-            for col in range(self.sales_table.columnCount()):
-                self.sales_table.item(row, col).setFont(sent_font)
-
-        self.sales_table.setRowHeight(row, REPORT_ROW_HEIGHT)
+            roles = {Qt.ItemDataRole.FontRole: sent_font}
+        self._sales_rows.append((values, roles))
 
     def _print_x_report(self):
         with get_session() as session:
@@ -470,7 +471,7 @@ class ReportsScreen(QWidget):
         """Manually lock the selected invoice as sent — for one delivered
         outside the ERP flow. Same effect as a successful send: it can no
         longer be reopened/edited, and stops blocking the Z report."""
-        row = self.sales_table.currentRow()
+        row = self.sales_table.currentIndex().row()
         if row == -1:
             self._show_overlay("Select invoice first.")
             return
@@ -508,7 +509,7 @@ class ReportsScreen(QWidget):
         QMessageBox.warning(self, "Z Report Blocked", "\n\n".join(parts))
 
     def _confirm(self):
-        if self.sales_table.currentRow() != -1 and not self._display_sale():
+        if self.sales_table.currentIndex().row() != -1 and not self._display_sale():
             return
         self.navigate.emit(SCREENS["pos"])
 
@@ -533,14 +534,14 @@ class ReportsScreen(QWidget):
     def _display_sale(self) -> bool:
         """Show the selected row's sale on the POS. False (nothing shown) for
         an invoice whose sale a Z report has already purged."""
-        row = self.sales_table.currentRow()
+        row = self.sales_table.currentIndex().row()
         sale_id = self._sales_row_ids.get(row)
         if sale_id is None and row in self._invoice_row_ids:
             self._show_overlay("Z report cleared. View invoice in ERP.")
             return False
         if sale_id is not None:
             self.sale_selected.emit(sale_id)
-        self.sales_table.setCurrentCell(-1, -1)
+        self.sales_table.setCurrentIndex(QModelIndex())
         return True
 
     def _show_overlay(self, message: str, kind: str = "info"):

@@ -1,6 +1,6 @@
 import logging
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import (
     QFrame,
@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionButton,
     QStylePainter,
+    QTableView,
     QTableWidget,
     QVBoxLayout,
     QWidget,
@@ -47,6 +48,51 @@ class SelectionKeepingTable(QTableWidget):
         if self.itemAt(event.position().toPoint()) is None:
             return
         super().mousePressEvent(event)
+
+
+class SelectionKeepingView(QTableView):
+    """SelectionKeepingTable for a model-backed view: clicking empty space
+    below the rows keeps the selected row selected."""
+
+    def mousePressEvent(self, event):
+        if not self.indexAt(event.position().toPoint()).isValid():
+            return
+        super().mousePressEvent(event)
+
+
+class RowTableModel(QAbstractTableModel):
+    """Read-only rows of cell texts for a QTableView. The view asks only for
+    the cells it draws, so thousands of rows cost one tuple each instead of
+    a QTableWidgetItem per cell."""
+
+    def __init__(self, headers, parent=None):
+        super().__init__(parent)
+        self._headers = list(headers)
+        self._rows: list[tuple[tuple[str, ...], dict]] = []
+
+    def set_rows(self, rows):
+        """rows: (cell texts, {item data role: value} for every cell of the
+        row, or None), replacing all current rows."""
+        self.beginResetModel()
+        self._rows = [(tuple(cells), roles or {}) for cells, roles in rows]
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self._headers)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self._headers[section]
+        return None
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        cells, roles = self._rows[index.row()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return cells[index.column()]
+        return roles.get(role)
 
 
 class TicketTable(SelectionKeepingTable):
