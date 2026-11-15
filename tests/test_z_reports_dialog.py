@@ -53,15 +53,15 @@ def test_print_reprints_the_selected_one_as_a_copy(dialog, monkeypatch):
     d._print_selected()
 
     assert printed == [("Z-0001", True)]
-    assert d.shown == [("Z-0001 printed.", "info")]
+    assert d.shown == []  # success is only logged
 
 
-def test_print_without_z_reports_asks_for_a_selection(dialog, monkeypatch):
+def test_print_without_z_reports_does_nothing(dialog, monkeypatch):
     printed = []
     monkeypatch.setattr(ReceiptService, "print_z_report", lambda *a, **k: printed.append(a))
     d = dialog()
     d._print_selected()
-    assert printed == [] and d.shown == [("Select a Z report first.", "info")]
+    assert printed == [] and d.shown == []
 
 
 def test_printer_failure_is_shown(dialog, monkeypatch):

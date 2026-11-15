@@ -195,7 +195,7 @@ def test_new_client_vat_of_just_the_country_code_counts_as_empty(screen):
 
     panel._on_ok()
 
-    assert panel.overlay.message_label.text() == "VAT number is required."
+    assert panel.overlay.message_label.text() == "VAT number is required"
     with get_session() as session:
         assert ClientService.get_all(session) == []
 

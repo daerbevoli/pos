@@ -1281,7 +1281,7 @@ def test_reopened_receipt_cannot_switch_to_a_foreign_client(screen):
 
     assert screen.is_invoice is False
     assert screen.cart.total == 12.10
-    assert "VAT" in screen.overlay.message_label.text()
+    assert screen.overlay.message_label.text() == "Invoice client cannot change"
 
 
 def test_reopened_receipt_can_become_an_invoice_for_a_domestic_client(screen):
