@@ -4,7 +4,17 @@ import pytest
 from PIL import Image
 
 from app.core.sale.cart import Cart, CartItem, SubtotalMarker
-from app.core.sale.receipt_service import LOGO_MAX_WIDTH_PX, _print_company_info, _print_line_items, _print_logo
+from app.core.sale.receipt_service import (
+    LOGO_MAX_WIDTH_PX,
+    RULE_BOLD_PX,
+    _print_company_info,
+    _print_line_items,
+    _print_logo,
+)
+
+
+def _printed_images(printer):
+    return [c.args[0] for c in printer.image.call_args_list]
 
 
 def _printed_text(printer):
@@ -14,7 +24,8 @@ def _printed_text(printer):
 def test_logo_missing_file_prints_text_header(tmp_path):
     printer = mock.Mock()
     _print_logo(printer, {"logo_path": str(tmp_path / "nope.png"), "store_name": "Corner Shop"})
-    printer.image.assert_not_called()
+    # Only the bold separator under the header, no logo.
+    assert [img.size for img in _printed_images(printer)] == [(LOGO_MAX_WIDTH_PX, RULE_BOLD_PX)]
     assert "Corner Shop" in _printed_text(printer)
 
 
@@ -23,7 +34,8 @@ def test_logo_corrupt_file_prints_text_header_instead_of_failing(tmp_path):
     bad.write_bytes(b"not an image")
     printer = mock.Mock()
     _print_logo(printer, {"logo_path": str(bad), "store_name": "Corner Shop"})
-    printer.image.assert_not_called()
+    # Only the bold separator under the header, no logo.
+    assert [img.size for img in _printed_images(printer)] == [(LOGO_MAX_WIDTH_PX, RULE_BOLD_PX)]
     assert "Corner Shop" in _printed_text(printer)
 
 
@@ -32,8 +44,9 @@ def test_logo_valid_file_is_scaled_to_paper_width(tmp_path):
     Image.new("RGB", (200, 50), "white").save(path)
     printer = mock.Mock()
     _print_logo(printer, {"logo_path": str(path)})
-    img = printer.image.call_args.args[0]
-    assert img.size == (LOGO_MAX_WIDTH_PX, 144)
+    logo, rule = _printed_images(printer)
+    assert logo.size == (LOGO_MAX_WIDTH_PX, 144)
+    assert rule.size == (LOGO_MAX_WIDTH_PX, RULE_BOLD_PX)
 
 
 def test_logo_printer_failure_still_propagates(tmp_path):

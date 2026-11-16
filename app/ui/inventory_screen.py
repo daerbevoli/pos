@@ -973,6 +973,19 @@ class InventoryScreen(QWidget):
         super().showEvent(event)
         self.refresh()  # also picks up stock changed by sales since the last visit
 
+    def hideEvent(self, event):
+        """Leaving the screen (back button, another screen, V-tab switch)
+        resets the category filter and "Show inactive"; the list follows on
+        the next showEvent. Spontaneous hides (window minimized) keep them."""
+        super().hideEvent(event)
+        if not event.spontaneous():
+            self.category_filter.blockSignals(True)
+            self.category_filter.setCurrentIndex(0)  # "All Categories"
+            self.category_filter.blockSignals(False)
+            self.show_inactive_check.blockSignals(True)
+            self.show_inactive_check.setChecked(False)
+            self.show_inactive_check.blockSignals(False)
+
     def refresh(self):
         if self._leaving:
             return
@@ -1119,14 +1132,23 @@ class InventoryScreen(QWidget):
         return self.detail_panel.handle_barcode_scan(code)
 
     def _on_barcode_scan(self):
+        """Enter in the search box: open the article whose barcode, or else
+        whose name (ignoring case), matches the text exactly. Several
+        articles with that name, or none: the search stays, listing what
+        matches. Only digits with no match get the "unknown barcode" overlay."""
         if self.detail_panel._mode != "display":
             return
-        barcode = self.search_input.text().strip()
-        if not barcode:
+        text = self.search_input.text().strip()
+        if not text:
             return
+        include_inactive = self.show_inactive_check.isChecked()
         with get_session() as session:
-            product = ProductService.get_by_barcode(
-                session, barcode, include_inactive=self.show_inactive_check.isChecked())
+            product = ProductService.get_by_barcode(session, text, include_inactive=include_inactive)
+            if product is None:
+                by_name = ProductService.find_by_name(session, text, include_inactive=include_inactive)
+                if len(by_name) > 1 or (not by_name and not text.isdigit()):
+                    return
+                product = by_name[0] if by_name else None
 
         self.search_input.blockSignals(True)
         self.search_input.clear()
@@ -1134,7 +1156,7 @@ class InventoryScreen(QWidget):
         self.refresh()
 
         if not product:
-            self.detail_panel._show_overlay(f"No product found for barcode '{barcode}'.")
+            self.detail_panel._show_overlay(f"Unknown barcode '{text}'.")
             return
         if not self._select_product_row(product.id):
             self.detail_panel.show_product(product)

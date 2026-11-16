@@ -34,6 +34,17 @@ def test_regular_label_is_unchanged_without_promo():
     assert "^FO30,210^A0N,40,40^FD€ 2.50^FS" in zpl
 
 
+def test_label_without_barcode_prints_double_size_price():
+    zpl = _build_zpl("Bread", "", "€ 2.50", "pcs")
+    assert "^BC" not in zpl and "^BY" not in zpl
+    assert "^FO30,150^A0N,80,80^FD€ 2.50^FS" in zpl
+
+
+def test_label_without_barcode_long_price_is_narrowed_to_fit():
+    zpl = _build_zpl("Cheese", "", "€ 24.99", "kg")
+    assert "^A0N,80,53^FD€ 24.99 / kg^FS" in zpl  # 12 chars: 388 / (12 * 0.6) -> 53
+
+
 def test_promo_label_has_promo_text_old_and_new_price():
     zpl = _build_zpl("Cola", "541234567890", "€ 2.50", "pcs", promo={"price": "€ 2.00"})
     assert "^FO20,203^ADN,36,20^FDPROMO^FS" in zpl  # left, different font, no box

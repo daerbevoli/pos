@@ -65,6 +65,15 @@ class ProductService:
         return query.first()
 
     @staticmethod
+    def find_by_name(session: Session, name: str, include_inactive: bool = False) -> list[Product]:
+        """Products whose name is exactly `name`, ignoring case. A list:
+        names aren't unique, unlike barcodes."""
+        query = session.query(Product).filter(func.lower(Product.name) == name.strip().lower())
+        if not include_inactive:
+            query = query.filter(Product.is_active == True)
+        return query.order_by(Product.id).all()
+
+    @staticmethod
     def search(session: Session, query: str, include_inactive: bool = False) -> list[Product]:
         """Products whose name or barcode contains `query`."""
         q = session.query(Product).filter(

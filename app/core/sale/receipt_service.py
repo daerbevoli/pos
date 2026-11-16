@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 LINE_WIDTH = 48  # 80mm paper at font A (12x24 dots -> 576px / 12)
 DRAWER_PIN = 2  # 2 = connector pin 2 (common default), 5 = connector pin 5
 LOGO_MAX_WIDTH_PX = 576  # 80mm paper at 203dpi
+RULE_THIN_PX = 2   # receipt separators
+RULE_BOLD_PX = 5   # under the logo / above the footer
 
 QTY_COL = 5
 NAME_COL = 23
@@ -120,10 +122,21 @@ def _open(vendor_id: str, product_id: str):
         raise PrinterError(f"Could not connect to receipt printer: {e}") from e
 
 
+def _rule(printer, thickness: int = RULE_THIN_PX):
+    """A solid separator across the full paper width. Printed as a bitmap
+    because a row of '-' characters always leaves gaps between glyphs."""
+    printer.set(align="left")
+    printer.image(Image.new("1", (LOGO_MAX_WIDTH_PX, thickness), 0))
+
+
+def _bold_rule(printer):
+    _rule(printer, RULE_BOLD_PX)
+
+
 def _print_text_header(printer, settings: dict):
     printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
     printer.text(f"{settings.get('store_name', '')}\n")
-    printer.text("-" * LINE_WIDTH + "\n")
+    _bold_rule(printer)
     printer.set(align="left")
 
 
@@ -156,7 +169,7 @@ def _print_logo(printer, settings: dict):
     # Outside the try above on purpose: a printer failure here is a real
     # print failure and must fail the receipt, not fall back silently.
     printer.image(img, center=True)
-    printer.text("-" * LINE_WIDTH + "\n")
+    _bold_rule(printer)
     printer.set(align="left")
 
 
@@ -174,7 +187,7 @@ def _print_receipt_header(printer, sale: Sale):
         printer.set(bold=True)
         printer.text("THIS IS NOT AN INVOICE\n")
         printer.set(bold=False)
-    printer.text("-" * LINE_WIDTH + "\n")
+    _rule(printer)
 
 
 def _wrap_name(name: str) -> list[str]:
@@ -185,7 +198,7 @@ def _wrap_name(name: str) -> list[str]:
 def _print_line_items(printer, cart: Cart):
     printer.set(bold=True)
     printer.text(f"{'#':<{QTY_COL}}{'Description':<{NAME_COL}}{'Price':>{UNIT_COL}}{'Total':>{TOTAL_COL}}\n")
-    printer.text("-" * LINE_WIDTH + "\n")
+    _rule(printer)
     printer.set(bold=False)
     subtotals = iter(cart.subtotals())
     for entry in cart.entries:
@@ -237,7 +250,7 @@ def _print_line_items(printer, cart: Cart):
             for extra in label_lines[1:]:
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")
             printer.set(bold=False)
-    printer.text("-" * LINE_WIDTH + "\n")
+    _rule(printer)
 
 
 TOTAL_ROW_WIDTH = LINE_WIDTH // 2  # columns available at the TOTAL row's 2x character width
@@ -257,10 +270,10 @@ def _print_payment_breakdown(printer, sale: Sale):
         printer.text(f"{entry['method'].capitalize():<{LABEL_COL}}{entry['amount']:>{TOTAL_COL}.2f}\n")
     if sale.change_given:
         printer.text(f"{'Change':<{LABEL_COL}}{-sale.change_given:>{TOTAL_COL}.2f}\n")
-    printer.text("-" * LINE_WIDTH + "\n")
 
 
 def _print_footer(printer, footer_text: str):
+    _bold_rule(printer)
     printer.set(align="center")
     if footer_text:
         printer.text(f"\n{footer_text}\n")
@@ -282,13 +295,13 @@ AMT_COL = (LINE_WIDTH - RATE_COL) // 3  # 14 — Base / Tax / Total (incl.) colu
 def _print_report_header(printer, title: str, report_number, period_start, period_end):
     printer.set(align="left", bold=True, width=1, height=1, custom_size=True)
     printer.text(_left_right(title, str(report_number)))
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
     printer.set(align="left", bold=False, width=1, height=1, custom_size=True)
     printer.text(
         f"{format_local(period_start, '%d/%m/%Y %H:%M')}\n{format_local(period_end, '%d/%m/%Y %H:%M')}\n"
     )
     printer.set(align="left")
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
 
 def _print_report_totals(printer, totals: dict):
@@ -304,11 +317,11 @@ def _print_report_totals(printer, totals: dict):
         amounts[leg["method"]] = amounts.get(leg["method"], 0.0) + leg["amount"]
     for method, amount in amounts.items():
         printer.text(f"{method.capitalize():<{LABEL_COL}}{amount:>{TOTAL_COL}.2f}\n")
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
     printer.set(bold=True)
     printer.text(f"{'Transactions':<{LABEL_COL}}{totals['transaction_count']:>{TOTAL_COL}}\n")
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
     printer.text(f"{'Rate':<{RATE_COL}}{'Base':>{AMT_COL}}{'Tax':>{AMT_COL}}{'Total':>{AMT_COL}}\n")
     vat_rows = totals["vat_breakdown"].items()
@@ -325,7 +338,7 @@ def _print_report_totals(printer, totals: dict):
             f"{rate + '%':<{RATE_COL}}{amounts['base']:>{AMT_COL}.2f}"
             f"{amounts['tax']:>{AMT_COL}.2f}{amounts['total']:>{AMT_COL}.2f}\n"
         )
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
     _print_categories(printer, totals)
 
@@ -344,7 +357,7 @@ def _print_categories(printer, totals: dict):
         printer.text(
             f"{name:<{CAT_NAME_COL}}{qty:>{CAT_QTY_COL}g}{amount:>{CAT_AMT_COL}.2f}\n"
         )
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
 
 def _print_discounts(printer, totals: dict):
@@ -357,7 +370,7 @@ def _print_discounts(printer, totals: dict):
     printer.set(bold=True)
     printer.text(f"{'Total':<{LABEL_COL}}{-(discounts['manual'] + discounts['promo']):>{TOTAL_COL}.2f}\n")
     printer.set(bold=False)
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
 
 def _print_mistakes(printer, totals: dict):
@@ -375,7 +388,7 @@ def _print_mistakes(printer, totals: dict):
     printer.set(bold=True)
     printer.text(f"{'Total':<{CAT_NAME_COL + CAT_QTY_COL}}{-total:>{CAT_AMT_COL}.2f}\n")
     printer.set(bold=False)
-    printer.text("-" * LINE_WIDTH + "\n")
+    printer.text("\n")
 
 
 def _print_b2b_info(printer, invoice: Invoice):
@@ -384,7 +397,7 @@ def _print_b2b_info(printer, invoice: Invoice):
     printer.text(f"{invoice.full_address}\n")
     printer.text(f"{invoice.client_vat_number}\n")
     printer.set(bold=False)
-    printer.text("-" * LINE_WIDTH + "\n")
+    _rule(printer)
 
 
 class ReceiptService:

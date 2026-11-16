@@ -400,10 +400,46 @@ def test_barcode_scan_known_barcode_selects_row(screen):
     assert screen.search_input.text() == ""
 
 
+def test_enter_exact_name_any_case_selects_row(screen):
+    _add_product(name="Green Tea", barcode="111")
+    _add_product(name="Green Tea Large", barcode="222")
+    screen.refresh()
+
+    screen.search_input.setText("green tea")
+    screen._on_barcode_scan()
+
+    assert screen.detail_panel.name.text() == "Green Tea"
+    assert screen.search_input.text() == ""
+
+
+def test_enter_name_shared_by_several_keeps_search(screen):
+    _add_product(name="Apple", barcode="111")
+    _add_product(name="APPLE", barcode="222")
+    screen.refresh()
+
+    screen.search_input.setText("apple")
+    screen._on_barcode_scan()
+
+    assert screen.search_input.text() == "apple"
+    assert screen.detail_panel.overlay.isHidden()
+
+
 def test_barcode_scan_unknown_barcode_shows_overlay(screen, qtbot):
-    screen.search_input.setText("nonexistent")
+    screen.search_input.setText("5400000000000")
     screen._on_barcode_scan()
     assert not screen.detail_panel.overlay.isHidden()
+
+
+def test_enter_unknown_name_shows_no_overlay(screen):
+    _add_product(name="Green Tea", barcode="111")
+    screen.refresh()
+
+    screen.search_input.setText("nonexistent")
+    screen._on_barcode_scan()
+
+    assert screen.detail_panel.overlay.isHidden()
+    assert screen.search_input.text() == "nonexistent"
+    assert screen.table_model.rowCount() == 0
 
 
 def test_barcode_scan_ignored_while_editing(screen):

@@ -36,6 +36,16 @@ def test_get_by_barcode_only_active(db_session):
     assert ProductService.get_by_barcode(db_session, "123456") is None
 
 
+def test_find_by_name_exact_ignoring_case(db_session):
+    p = _make_product(db_session, name="Green Tea")
+    _make_product(db_session, name="Green Tea Large")
+    assert ProductService.find_by_name(db_session, " green TEA ") == [p]
+
+    ProductService.deactivate(db_session, p.id)
+    assert ProductService.find_by_name(db_session, "green tea") == []
+    assert ProductService.find_by_name(db_session, "green tea", include_inactive=True) == [p]
+
+
 def test_get_all_active_only_default(db_session):
     active = _make_product(db_session, name="Active")
     inactive = _make_product(db_session, name="Inactive")

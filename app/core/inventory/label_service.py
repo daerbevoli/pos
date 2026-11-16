@@ -94,6 +94,7 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
     Builds a ZPL label: name at top, barcode in middle, price at bottom.
     Label size: 56mm x 32mm @ 203dpi (448 x 256 dots).
     The barcode prints as EAN-13, UPC-A or EAN-8 when it is one, else Code 128.
+    Without a barcode, the regular price prints at double size instead.
 
     With `promo` ({"price": new price text}), the bottom row becomes
     "PROMO" on the left in a different font (^AD at 2x, vs the regular
@@ -101,7 +102,14 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
     struck through above the promo price — leaving the middle empty.
     """
     unit_data = f" / {unit}" if unit in {"kg", "g", "l", "ml"} else ""
-    if promo is None:
+    if promo is None and not barcode:
+        # No barcode: the price takes the freed space at double height,
+        # narrowed (^A0 is ~0.6 x width per char) only if it would run off.
+        text = f"{price}{unit_data}"
+        width = min(80, int((LABEL_WIDTH_DOTS - 60) / (len(text) * 0.6)))
+        barcode_y = None
+        bottom = f"^FO30,150^A0N,80,{width}^FD{text}^FS"
+    elif promo is None:
         barcode_y = 100
         bottom = f"^FO30,210^A0N,40,40^FD{price}{unit_data}^FS"
     else:
@@ -131,7 +139,7 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
             
             ^FO30,15^A0N,30,30^FB408,2,4,L,0^FD{name}^FS
             
-            {_zpl_barcode(barcode, barcode_y)}
+            {_zpl_barcode(barcode, barcode_y) if barcode else ""}
             {bottom}
             
             ^PQ1
