@@ -28,6 +28,7 @@ DRAWER_PIN = 2  # 2 = connector pin 2 (common default), 5 = connector pin 5
 LOGO_MAX_WIDTH_PX = 576  # 80mm paper at 203dpi
 RULE_THIN_PX = 2   # receipt separators
 RULE_BOLD_PX = 5   # under the logo / above the footer
+RECEIPT_LINE_SPACING = 40  # in 1/180 inch; the printer default is 30 (1/6 inch)
 
 QTY_COL = 5
 NAME_COL = 23
@@ -437,6 +438,7 @@ class ReceiptService:
         settings = SettingsService.get_all(session)
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
+            printer.line_spacing(RECEIPT_LINE_SPACING)
             _print_logo(printer, settings)
             if sale.invoice:
                 _print_b2b_info(printer, sale.invoice)
@@ -446,6 +448,7 @@ class ReceiptService:
             _print_payment_breakdown(printer, sale)
             _print_footer(printer, settings.get("receipt_footer", ""))
             _print_company_info(printer, settings)
+            printer.line_spacing()  # back to the default for reports / other prints
 
             printer.cut(mode="PART")
             logger.info("Receipt printed for sale %s%s", sale.sale_number,

@@ -135,7 +135,7 @@ QTableWidget#cartTable::item {
 
 /* Item in sale window */
 QTableWidget#cartTable::item:selected {
-    background-color: #0975B0;
+    background-color: #3A91C0;
     color: #1c2430;
 }
 
