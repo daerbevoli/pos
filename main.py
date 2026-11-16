@@ -74,10 +74,10 @@ def main():
 
     # Launch main window
     window = MainWindow()
-    # if "--windowed" in sys.argv:
-    window.show()      # development: normal window with title bar
-    # else:
-    #     window.showFullScreen()  # till: no title bar / close buttons, covers the taskbar
+    if getattr(sys, "frozen", False):
+        window.showFullScreen()  # installed .exe (till): no title bar / close buttons, covers the taskbar
+    else:
+        window.show()            # python main.py (development): normal window with title bar
 
     exit_code = app.exec()
     logger.info("POS exiting (code %s)", exit_code)

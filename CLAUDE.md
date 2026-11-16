@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 .venv\Scripts\Activate.ps1      # Windows (Python 3.14; Linux/Mac: source .venv/bin/activate). CI uses the same version (build.yml)
 pip install -r requirements.txt # app deps AND test deps (pytest, pytest-qt) live in one file — no requirements-dev.txt
-python main.py                  # run the app (currently always a normal window: the full-screen switch in main.py is commented out)
+python main.py                  # run the app in a normal window (the PyInstaller build, sys.frozen, opens full screen)
 
 pytest                          # run full suite (no pytest.ini/pyproject.toml — plain pytest discovery of tests/)
 pytest tests/test_sales_service.py            # single file
