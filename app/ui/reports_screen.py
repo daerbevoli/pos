@@ -37,7 +37,7 @@ from app.constants import (
 )
 from app.constants.screens import SCREENS
 from app.core.database import get_session
-from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.receipt_service import PrinterError, PrinterNotResponding, ReceiptService
 from app.core.sale.report_service import (
     XZReportService,
     invoice_category_breakdown,
@@ -443,6 +443,8 @@ class ReportsScreen(QWidget):
             try:
                 totals = XZReportService.generate_x_report(session)
                 ReceiptService.print_x_report(session, totals)
+            except PrinterNotResponding as e:
+                self._show_overlay(str(e), kind="info")
             except PrinterError as e:
                 self._show_overlay(f"Printer error: {e}", kind="error")
 

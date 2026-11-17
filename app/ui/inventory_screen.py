@@ -52,7 +52,7 @@ from app.core.inventory.inventory_report_service import InventoryReportService
 from app.core.inventory.label_service import LabelPrinterService
 from app.core.inventory.label_sheet_service import build_label_sheet_pdf
 from app.core.inventory.product_service import STOCK_MAX, STOCK_MIN, ProductService
-from app.core.sale.receipt_service import PrinterError
+from app.core.sale.receipt_service import PrinterError, PrinterNotResponding
 
 # from app.ui.dialogs.stock_adjustment_dialog import StockAdjustmentDialog  # see _adjust_stock
 from app.ui.dialogs.file_dialog import FileDialog
@@ -424,7 +424,7 @@ class ArticleDetailPanel(QFrame):
             current = self._tax_val
             cols = 4
         elif picker_key == "unit":
-            options = [(v, v) for v in ["pcs", "kg", "g", "liter", "ml", "pack", "box"]]
+            options = [(v, v) for v in ["pcs", "kg", "g", "l", "ml", "pack", "box"]]  # measured ones: WEIGHT_UNITS
             current = self._unit_val
             cols = 4
         else:  # category
@@ -686,7 +686,7 @@ class ArticleDetailPanel(QFrame):
             try:
                 LabelPrinterService.print_product_label(session, product)
             except PrinterError as e:
-                self._show_overlay(str(e), kind="error")
+                self._show_overlay(str(e), kind="info" if isinstance(e, PrinterNotResponding) else "error")
                 return
 
     def _on_print_barcodes(self):

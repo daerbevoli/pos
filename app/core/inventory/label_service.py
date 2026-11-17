@@ -8,7 +8,14 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.core.sale.receipt_service import PrinterError, _get_backend, _parse_id
+from app.core.sale.cart import WEIGHT_UNITS, CartItem
+from app.core.sale.receipt_service import (
+    USB_WRITE_TIMEOUT_MS,
+    PrinterError,
+    _get_backend,
+    _parse_id,
+    _print_failed,
+)
 from app.core.settings_service import SettingsService
 from app.models.models import Product
 from app.utils.barcodes import barcode_symbology
@@ -70,6 +77,15 @@ def _open(vendor_id: str, product_id: str):
 BARCODE_X = 60  # left edge of the barcode, in dots
 
 
+def _fd(text: str) -> str:
+    """A ZPL field-data command for free text. ^ and ~ start ZPL commands
+    even inside ^FD, so a product name like "50^% cacao" would garble the
+    label: ^FH turns on hex escapes (_XX) and the three special characters
+    are sent escaped, "_" first so the escapes themselves aren't re-escaped."""
+    escaped = text.replace("_", "_5F").replace("^", "_5E").replace("~", "_7E")
+    return f"^FH^FD{escaped}"
+
+
 def _zpl_barcode(barcode: str, y: int) -> str:
     """The ZPL barcode field for `barcode`, in the symbology that scans back
     as the same digits (see app.utils.barcodes). The EAN/UPC commands get the
@@ -86,7 +102,7 @@ def _zpl_barcode(barcode: str, y: int) -> str:
     # code would otherwise run off the label.
     symbols = (len(barcode) + 1) // 2 if barcode.isdigit() else len(barcode)
     module = 2 if (11 * symbols + 35) * 2 <= LABEL_WIDTH_DOTS - BARCODE_X else 1
-    return f"^FO{BARCODE_X},{y}^BY{module}^BCN,45,Y,N,N,A^FD{barcode}^FS"
+    return f"^FO{BARCODE_X},{y}^BY{module}^BCN,45,Y,N,N,A{_fd(barcode)}^FS"
 
 
 def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | None = None) -> str:
@@ -101,17 +117,17 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
     ^A0), and on the right, flush with the label edge, the old price
     struck through above the promo price — leaving the middle empty.
     """
-    unit_data = f" / {unit}" if unit in {"kg", "g", "l", "ml"} else ""
+    unit_data = f" / {unit}" if unit in WEIGHT_UNITS else ""
     if promo is None and not barcode:
         # No barcode: the price takes the freed space at double height,
         # narrowed (^A0 is ~0.6 x width per char) only if it would run off.
         text = f"{price}{unit_data}"
         width = min(80, int((LABEL_WIDTH_DOTS - 60) / (len(text) * 0.6)))
         barcode_y = None
-        bottom = f"^FO30,150^A0N,80,{width}^FD{text}^FS"
+        bottom = f"^FO30,150^A0N,80,{width}{_fd(text)}^FS"
     elif promo is None:
         barcode_y = 100
-        bottom = f"^FO30,210^A0N,40,40^FD{price}{unit_data}^FS"
+        bottom = f"^FO30,210^A0N,40,40{_fd(price + unit_data)}^FS"
     else:
         barcode_y = 88  # moved up to make room for the taller promo row
         # Both prices are right-aligned (^FB ...,R) in one block; move or
@@ -124,9 +140,9 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
         strike_width = len(price) * 12  # ~12 dots/char at ^A0 24pt
         bottom = f"""
                 ^FO20,203^ADN,36,20^FDPROMO^FS
-                ^FO{price_x},178^FB{price_block_width},1,0,R,0^A0N,24,24^FD{price}^FS
+                ^FO{price_x},178^FB{price_block_width},1,0,R,0^A0N,24,24{_fd(price)}^FS
                 ^FO{price_right - strike_width},189^GB{strike_width},3,3^FS
-                ^FO{price_x},206^FB{price_block_width},1,0,R,0^A0N,44,34^FD{promo["price"]}{unit_data}^FS
+                ^FO{price_x},206^FB{price_block_width},1,0,R,0^A0N,44,34{_fd(promo["price"] + unit_data)}^FS
                 """
 
     return f"""
@@ -137,7 +153,7 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
             ^MNY
             ^MD15
             
-            ^FO30,15^A0N,30,30^FB408,2,4,L,0^FD{name}^FS
+            ^FO30,15^A0N,30,30^FB408,2,4,L,0{_fd(name)}^FS
             
             {_zpl_barcode(barcode, barcode_y) if barcode else ""}
             {bottom}
@@ -148,17 +164,18 @@ def _build_zpl(name: str, barcode: str, price: str, unit: str, promo: dict | Non
 
 
 def promo_label_data(product: Product, currency: str) -> dict | None:
-    """{"price"} for the product's running promo, or None. The
-    promo price uses the same rule as the till (CartItem.discount_amount):
-    percent off, or a fixed amount off per unit, never below 0."""
+    """{"price"} for the product's running promo, or None. The promo price
+    is computed by the till itself (CartItem.discount_amount, for one unit),
+    so the shelf never shows a price the till doesn't charge: rounding the
+    discount (till) vs rounding the new price differs by a cent on many prices."""
     promo_item = product.active_promo_item
     if promo_item is None:
         return None
-    value = promo_item.discount_value
-    if promo_item.discount_type == "percent":
-        new_price = round(product.price * (1 - value / 100), 2)
-    else:
-        new_price = round(max(product.price - value, 0.0), 2)
+    one_unit = CartItem(
+        product_id=0, product_name="", product_barcode="", unit_price=product.price, quantity=1,
+        promo_type=promo_item.discount_type, discount=promo_item.discount_value,
+    )
+    new_price = round(product.price - one_unit.discount_amount, 2)
     return {"price": f"{currency} {new_price:.2f}"}
 
 
@@ -169,10 +186,9 @@ class LabelPrinterService:
         dev, out_ep = _open(vendor_id, product_id)
         logger.debug("Sending ZPL to label printer:%s", zpl)
         try:
-            out_ep.write(zpl.encode("utf-8"))
+            out_ep.write(zpl.encode("utf-8"), USB_WRITE_TIMEOUT_MS)
         except Exception as e:
-            logger.exception("Failed to print label")
-            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+            raise _print_failed(e, "Printer connected but failed to print", "Failed to print label") from e
         finally:
             import usb.util
             usb.util.dispose_resources(dev)

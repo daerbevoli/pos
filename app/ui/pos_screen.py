@@ -66,7 +66,7 @@ from app.core.database import get_session
 from app.core.erp.erp_service import ErpService
 from app.core.erp.erp_worker import InvoiceSendWorker
 from app.core.inventory.product_service import ProductService
-from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.receipt_service import PrinterError, PrinterNotResponding, ReceiptService
 from app.core.sale.sales_service import (
     SalesService,
     clear_open_ticket,
@@ -1420,7 +1420,7 @@ class POSScreen(QWidget):
             try:
                 ReceiptService.print_receipt(session, sale)
             except PrinterError as e:
-                self._show_overlay(str(e), kind="error")
+                self._show_overlay(str(e), kind="info" if isinstance(e, PrinterNotResponding) else "error")
 
 
     def _send_invoice(self):
@@ -1503,7 +1503,7 @@ class POSScreen(QWidget):
             try:
                 ReceiptService.open_drawer(session)
             except PrinterError as e:
-                self._show_overlay(str(e), kind="error")
+                self._show_overlay(str(e), kind="info" if isinstance(e, PrinterNotResponding) else "error")
 
     def _get_selected_entry_index(self) -> int | None:
         """Index into cart.entries for the selected row; None for divider/non-entry rows."""

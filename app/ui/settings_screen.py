@@ -43,7 +43,7 @@ from app.core.database import get_session
 from app.core.erp.erp_service import ErpService
 from app.core.inventory.label_service import LabelPrinterService
 from app.core.inventory.product_service import ProductService
-from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.receipt_service import PrinterError, PrinterNotResponding, ReceiptService
 from app.core.settings_service import SettingsService
 from app.ui.dialogs.backup_dialog import BackupDialog
 from app.ui.dialogs.category_dialog import CategoryDialog
@@ -735,6 +735,8 @@ class SettingsScreen(QWidget):
     def _test_print(self):
         try:
             ReceiptService.test_print(self.receipt_vendor.text(), self.receipt_product.text())
+        except PrinterNotResponding as e:
+            self._show_overlay(str(e), kind="info")
         except PrinterError:
             self._show_overlay("Test Print Failed", kind="error")
         else:
@@ -743,6 +745,8 @@ class SettingsScreen(QWidget):
     def _test_print_label(self):
         try:
             LabelPrinterService.test_print(self.label_vendor.text(), self.label_product.text())
+        except PrinterNotResponding as e:
+            self._show_overlay(str(e), kind="info")
         except PrinterError:
             self._show_overlay("Test Print Failed", kind="error")
         else:

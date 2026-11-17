@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.inventory.label_service import _build_zpl, _zpl_barcode, promo_label_data
+from app.core.sale.cart import CartItem
 
 
 def _product(price=2.50, promo=None):
@@ -27,31 +28,72 @@ def test_fixed_promo_price_never_below_zero():
     assert promo_label_data(_product(0.50, _promo("fixed", 1.00)), "€")["price"] == "€ 0.00"
 
 
+def test_promo_price_matches_what_the_till_charges():
+    """Regression: the label rounded the new price, the till rounds the
+    discount; e.g. 0.05 at 10% off showed 0.05 on the shelf, 0.04 at the till."""
+    for cents in range(1, 2000):
+        price = cents / 100
+        for pct in (5, 10, 15, 20, 25, 30, 33, 40, 50):
+            till = CartItem(product_id=1, product_name="x", product_barcode="", unit_price=price,
+                            quantity=1, promo_type="percent", discount=pct)
+            label = promo_label_data(_product(price, _promo("percent", pct)), "€")["price"]
+            assert label == f"€ {round(price - till.discount_amount, 2):.2f}", (price, pct)
+
+
+def test_zpl_special_characters_in_text_are_escaped():
+    """^ and ~ start ZPL commands even inside field data."""
+    zpl = _build_zpl("50^% ~cacao_bio", "", "€ 2.50", "pcs")
+    assert "^FH^FD50_5E% _7Ecacao_5Fbio^FS" in zpl
+    assert "^%" not in zpl and "~c" not in zpl
+
+
+def test_label_printer_timeout_is_a_check_the_printer_warning(monkeypatch, caplog):
+    """Same as the receipt printer: out of labels / head open gives a plain
+    message and a warning, not an ERROR that lights the error badge."""
+    import usb.core
+    import usb.util
+    from app.core.inventory import label_service
+    out_ep = SimpleNamespace(write=lambda *a: (_ for _ in ()).throw(usb.core.USBTimeoutError("timed out")))
+    monkeypatch.setattr(label_service, "_open", lambda *a: (object(), out_ep))
+    monkeypatch.setattr(usb.util, "dispose_resources", lambda dev: None)
+
+    with pytest.raises(label_service.PrinterError, match="^Check the printer$") as exc:
+        label_service.LabelPrinterService.test_print("0x0a5f", "0x0001")
+    assert type(exc.value).__name__ == "PrinterNotResponding"
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+
+def test_litre_shows_on_label():
+    """Regression: the picker saved "liter" but WEIGHT_UNITS had "l", so litre
+    products were labelled, rung up and printed as pieces."""
+    assert "€ 1.99 / l" in _build_zpl("Milk", "", "€ 1.99", "l")
+
+
 def test_regular_label_is_unchanged_without_promo():
     zpl = _build_zpl("Cola", "5410000000002", "€ 2.50", "pcs")
     assert "PROMO" not in zpl
     assert "^FO60,100^BY3" in zpl
-    assert "^FO30,210^A0N,40,40^FD€ 2.50^FS" in zpl
+    assert "^FO30,210^A0N,40,40^FH^FD€ 2.50^FS" in zpl
 
 
 def test_label_without_barcode_prints_double_size_price():
     zpl = _build_zpl("Bread", "", "€ 2.50", "pcs")
     assert "^BC" not in zpl and "^BY" not in zpl
-    assert "^FO30,150^A0N,80,80^FD€ 2.50^FS" in zpl
+    assert "^FO30,150^A0N,80,80^FH^FD€ 2.50^FS" in zpl
 
 
 def test_label_without_barcode_long_price_is_narrowed_to_fit():
     zpl = _build_zpl("Cheese", "", "€ 24.99", "kg")
-    assert "^A0N,80,53^FD€ 24.99 / kg^FS" in zpl  # 12 chars: 388 / (12 * 0.6) -> 53
+    assert "^A0N,80,53^FH^FD€ 24.99 / kg^FS" in zpl  # 12 chars: 388 / (12 * 0.6) -> 53
 
 
 def test_promo_label_has_promo_text_old_and_new_price():
     zpl = _build_zpl("Cola", "541234567890", "€ 2.50", "pcs", promo={"price": "€ 2.00"})
     assert "^FO20,203^ADN,36,20^FDPROMO^FS" in zpl  # left, different font, no box
     assert "^FR" not in zpl
-    assert "^FO180,178^FB200,1,0,R,0^A0N,24,24^FD€ 2.50^FS" in zpl  # old price, right-aligned
+    assert "^FO180,178^FB200,1,0,R,0^A0N,24,24^FH^FD€ 2.50^FS" in zpl  # old price, right-aligned
     assert "^FO308,189^GB72,3,3^FS" in zpl                          # strike line ends where the price does (x=380)
-    assert "^FO180,206^FB200,1,0,R,0^A0N,44,34^FD€ 2.00^FS" in zpl  # promo price, right-aligned
+    assert "^FO180,206^FB200,1,0,R,0^A0N,44,34^FH^FD€ 2.00^FS" in zpl  # promo price, right-aligned
     assert zpl.count("^XA") == 1 and zpl.strip().endswith("^XZ")
 
 
@@ -65,8 +107,8 @@ def test_promo_label_puts_unit_only_on_the_new_price():
     ("5410000000002", "^BY3^BEN,45,Y,N^FD541000000000^FS"),   # EAN-13: printer adds the check digit
     ("036000291452", "^BY3^BUN,45,Y,N,Y^FD03600029145^FS"),   # UPC-A, not EAN-13 data
     ("96385074", "^BY3^B8N,45,Y,N^FD9638507^FS"),             # EAN-8
-    ("5410000000003", "^BY2^BCN,45,Y,N,N,A^FD5410000000003^FS"),  # bad check digit: printed as is
-    ("ABC-123", "^BY2^BCN,45,Y,N,N,A^FDABC-123^FS"),
+    ("5410000000003", "^BY2^BCN,45,Y,N,N,A^FH^FD5410000000003^FS"),  # bad check digit: printed as is
+    ("ABC-123", "^BY2^BCN,45,Y,N,N,A^FH^FDABC-123^FS"),
 ])
 def test_label_barcode_scans_back_as_the_stored_code(barcode, field):
     """Regression: barcode[:12] went out as EAN-13 whatever the code was."""

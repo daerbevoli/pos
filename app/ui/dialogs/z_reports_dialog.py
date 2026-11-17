@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 
 from app.constants import DIALOG_BUTTON_HEIGHT, Z_REPORTS_DIALOG_MIN_SIZE
 from app.core.database import get_session
-from app.core.sale.receipt_service import PrinterError, ReceiptService
+from app.core.sale.receipt_service import PrinterError, PrinterNotResponding, ReceiptService
 from app.core.sale.report_service import XZReportService
 from app.models.models import ZReport
 from app.utils.clock import format_local
@@ -88,6 +88,9 @@ class ZReportsDialog(QDialog):
             number = z_report.report_number
             try:
                 ReceiptService.print_z_report(session, z_report, reprint=True)
+            except PrinterNotResponding as e:
+                self.overlay.show_message(str(e), kind="info")
+                return
             except PrinterError as e:
                 self.overlay.show_message(f"Printing failed:\n{e}", kind="error")
                 return

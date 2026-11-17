@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# Units sold by measured amount ("l" = litre); anything else is sold per piece.
+# Must match the units the inventory unit picker saves (inventory_screen.py).
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
 @dataclass

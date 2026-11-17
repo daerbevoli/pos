@@ -1,6 +1,6 @@
 """
 Printer Service
-Talks to the USB thermal receipt printer (ESC/POS) for tickets, invoices,
+Talks to the USB thermal receipt printer (ESC/POS) for tickets,
 test pages, and the cash drawer kick. Vendor/product IDs come from Settings.
 """
 
@@ -24,6 +24,7 @@ from app.utils.clock import format_local
 logger = logging.getLogger(__name__)
 
 LINE_WIDTH = 48  # 80mm paper at font A (12x24 dots -> 576px / 12)
+USB_WRITE_TIMEOUT_MS = 5000 # printer timeout
 DRAWER_PIN = 2  # 2 = connector pin 2 (common default), 5 = connector pin 5
 LOGO_MAX_WIDTH_PX = 576  # 80mm paper at 203dpi
 
@@ -38,6 +39,24 @@ _backend = None
 
 class PrinterError(Exception):
     """Raised when the receipt printer can't be reached or fails to print."""
+
+
+class PrinterNotResponding(PrinterError):
+    """The printer stopped taking data within USB_WRITE_TIMEOUT_MS: out of
+    paper or cover open, usually. Part of normal shop life, so the screens
+    show it as an info overlay and it's logged as a warning (no error badge)."""
+
+
+def _print_failed(e: Exception, message: str, what: str, *args) -> PrinterError:
+    """The PrinterError to raise for `e`, caught while printing; logs it.
+    Call from the except block (logger.exception needs the live exception)."""
+    import usb.core
+
+    if isinstance(e, usb.core.USBTimeoutError):
+        logger.warning(what + ": printer not responding (paper / cover?)", *args)
+        return PrinterNotResponding("Check the printer")
+    logger.exception(what, *args)
+    return PrinterError(f"{message}: {e}")
 
 
 def _bundled_libusb_dll() -> str:
@@ -114,7 +133,7 @@ def _open(vendor_id: str, product_id: str):
         logger.error("Receipt printer not usable: %s", e)
         raise
     try:
-        return Usb(vid, pid, timeout=0, in_ep=0x81, out_ep=0x01)
+        return Usb(vid, pid, timeout=USB_WRITE_TIMEOUT_MS, in_ep=0x81, out_ep=0x01)
     except (usb.core.USBError, EscposError) as e:
         logger.error("Could not connect to receipt printer USB %s:%s: %s", vendor_id, product_id, e)
         raise PrinterError(f"Could not connect to receipt printer: {e}") from e
@@ -182,9 +201,21 @@ def _wrap_name(name: str) -> list[str]:
     return textwrap.wrap(name, width=NAME_COL, break_long_words=True, break_on_hyphens=False) or [""]
 
 
+def _print_row(printer, qty: str, name: str, price: str, total: str, bold: bool = False):
+    """One line-item row in the 4 receipt columns; a long name wraps onto extra lines under the name column."""
+    if bold:
+        printer.set(bold=True)
+    first, *rest = _wrap_name(name)
+    printer.text(f"{qty:<{QTY_COL}}{first:<{NAME_COL}}{price:>{UNIT_COL}}{total:>{TOTAL_COL}}\n")
+    for extra in rest:
+        printer.text(f"{'':<{QTY_COL}}{extra}\n")
+    if bold:
+        printer.set(bold=False)
+
+
 def _print_line_items(printer, cart: Cart):
-    printer.set(bold=True)
-    printer.text(f"{'#':<{QTY_COL}}{'Description':<{NAME_COL}}{'Price':>{UNIT_COL}}{'Total':>{TOTAL_COL}}\n")
+    printer.set(bold=True)  # the header and the rule under it
+    _print_row(printer, "#", "Description", "Price", "Total")
     printer.text("-" * LINE_WIDTH + "\n")
     printer.set(bold=False)
     subtotals = iter(cart.subtotals())
@@ -192,51 +223,24 @@ def _print_line_items(printer, cart: Cart):
         if isinstance(entry, CartItem):
             if entry.quantity is None:
                 continue
-            prefix = "VOID " if entry.is_reversal else ""
-            weight_text = None
+            name = ("VOID " if entry.is_reversal else "") + entry.product_name
+            total = f"{entry.line_total:.2f}"
             if entry.unit in WEIGHT_UNITS:
-                # One weighed article, not `quantity` units of it — the
+                # One weighed article, not `quantity` units of it, the
                 # subtotal counts articles, and the actual weight prints
                 # on its own centered line below the article.
                 qty = "-1" if entry.quantity < 0 else "1"
-                weight_text = f"{abs(entry.quantity):g}{entry.unit}"
-                unit_price = f"{entry.unit_price:.2f}/{entry.unit}"
+                _print_row(printer, qty, name, f"{entry.unit_price:.2f}/{entry.unit}", total)
+                printer.text(f"{abs(entry.quantity):g}{entry.unit}".center(LINE_WIDTH // 2) + "\n")
             else:
-                qty = f"{entry.quantity:g}"
-                unit_price = f"{entry.unit_price:.2f}"
-            name = prefix + entry.product_name
-            name_lines = _wrap_name(name)
-            printer.text(
-                f"{qty:<{QTY_COL}}{name_lines[0]:<{NAME_COL}}"
-                f"{unit_price:>{UNIT_COL}}{entry.line_total:>{TOTAL_COL}.2f}\n"
-            )
-            for extra in name_lines[1:]:
-                printer.text(f"{'':<{QTY_COL}}{extra}\n")
-            if weight_text:
-                printer.text(weight_text.center(LINE_WIDTH // 2) + "\n")
+                _print_row(printer, f"{entry.quantity:g}", name, f"{entry.unit_price:.2f}", total)
         elif isinstance(entry, SubtotalMarker):
             count, total = next(subtotals)
-            qty_str = f"{count:g}"
-            printer.set(bold=True)
-            printer.text(
-                f"{qty_str:<{QTY_COL}}{'SUBTOTAL':<{NAME_COL}}{'':>{UNIT_COL}}"
-                f"{total:>{TOTAL_COL}.2f}\n"
-            )
-            printer.set(bold=False)
+            _print_row(printer, f"{count:g}", "SUBTOTAL", "", f"{total:.2f}", bold=True)
         elif isinstance(entry, DiscountEntry):
-            printer.set(bold=True)
-            label_lines = _wrap_name(entry.label)
-            # amount is usually positive (deducts); a promo entry undoing a
-            # reversed line's discount is negative (adds back) — sign comes
-            # from amount itself rather than a hardcoded "-" so both print right.
-            sign = "-" if entry.amount >= 0 else "+"
-            printer.text(
-                f"{'':<{QTY_COL-1}} {label_lines[0]:<{NAME_COL}}{'':>{UNIT_COL}}"
-                f"{sign + f'{abs(entry.amount):.2f}':>{TOTAL_COL}}\n"
-            )
-            for extra in label_lines[1:]:
-                printer.text(f"{'':<{QTY_COL}}{extra}\n")
-            printer.set(bold=False)
+            # amount is positive when it deducts (prints "-") and negative when
+            # it gives a discount back (prints "+"), e.g. a promo undone by a VOID.
+            _print_row(printer, "", entry.label, "", f"{-entry.amount:+.2f}", bold=True)
     printer.text("-" * LINE_WIDTH + "\n")
 
 
@@ -401,8 +405,8 @@ class ReceiptService:
             printer.cut(mode="PART")
             logger.info("Receipt printer test page printed (USB %s:%s)", vendor_id, product_id)
         except Exception as e:
-            logger.exception("Receipt printer test page failed (USB %s:%s)", vendor_id, product_id)
-            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+            raise _print_failed(e, "Printer connected but failed to print",
+                                "Receipt printer test page failed (USB %s:%s)", vendor_id, product_id) from e
         finally:
             printer.close()
 
@@ -414,8 +418,7 @@ class ReceiptService:
             printer.cashdraw(DRAWER_PIN)
             logger.info("Cash drawer opened")
         except Exception as e:
-            logger.exception("Could not open cash drawer")
-            raise PrinterError(f"Could not open cash drawer: {e}") from e
+            raise _print_failed(e, "Could not open cash drawer", "Could not open cash drawer") from e
         finally:
             printer.close()
 
@@ -437,11 +440,9 @@ class ReceiptService:
             printer.cut(mode="PART")
             logger.info("Receipt printed for sale %s%s", sale.sale_number,
                         f" (invoice {sale.invoice.invoice_number})" if sale.invoice else "")
-        except PrinterError:
-            raise
         except Exception as e:
-            logger.exception("Failed to print receipt for sale %s", sale.sale_number)
-            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+            raise _print_failed(e, "Printer connected but failed to print",
+                                "Failed to print receipt for sale %s", sale.sale_number) from e
         finally:
             printer.close()
 
@@ -461,11 +462,8 @@ class ReceiptService:
 
             printer.cut(mode="PART")
             logger.info("X-report %s printed", totals["report_number"])
-        except PrinterError:
-            raise
         except Exception as e:
-            logger.exception("Failed to print X-report")
-            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+            raise _print_failed(e, "Printer connected but failed to print", "Failed to print X-report") from e
         finally:
             printer.close()
 
@@ -502,10 +500,8 @@ class ReceiptService:
 
             printer.cut(mode="PART")
             logger.info("Z-report %s %s", z_report.report_number, "reprinted" if reprint else "printed")
-        except PrinterError:
-            raise
         except Exception as e:
-            logger.exception("Failed to print Z-report %s", z_report.report_number)
-            raise PrinterError(f"Printer connected but failed to print: {e}") from e
+            raise _print_failed(e, "Printer connected but failed to print",
+                                "Failed to print Z-report %s", z_report.report_number) from e
         finally:
             printer.close()

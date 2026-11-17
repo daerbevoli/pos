@@ -72,6 +72,49 @@ def test_subtotal_lines_print_their_own_block():
     assert lines == [["1", "SUBTOTAL", "10.00"], ["2", "SUBTOTAL", "5.00"]]
 
 
+def test_receipt_printer_writes_have_a_timeout(monkeypatch):
+    """Regression: timeout=0 is "no limit" in pyusb, so a printer that stops
+    taking data (out of paper, cover open) hung the POS for good."""
+    import escpos.printer
+    import app.core.sale.receipt_service as receipt_service
+    usb = mock.Mock()
+    monkeypatch.setattr(receipt_service, "_get_backend", mock.Mock())
+    monkeypatch.setattr(escpos.printer, "Usb", usb)
+
+    receipt_service._open("0x04b8", "0x0e28")
+
+    assert 0 < usb.call_args.kwargs["timeout"] <= 10_000
+
+
+def _failing_printer(monkeypatch, error):
+    import app.core.sale.receipt_service as receipt_service
+    printer = mock.Mock()
+    printer.cashdraw.side_effect = error
+    monkeypatch.setattr(receipt_service, "_open", mock.Mock(return_value=printer))
+    monkeypatch.setattr(receipt_service.SettingsService, "get_all", mock.Mock(return_value={}))
+    return receipt_service
+
+
+def test_printer_timeout_is_a_check_the_printer_warning(monkeypatch, caplog):
+    """Out of paper / cover open is normal shop life: no ERROR (error badge), a plain message."""
+    import usb.core
+    receipt_service = _failing_printer(monkeypatch, usb.core.USBTimeoutError("timed out"))
+
+    with pytest.raises(receipt_service.PrinterNotResponding, match="^Check the printer$"):
+        receipt_service.ReceiptService.open_drawer(None)
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+    assert [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_other_printer_failure_stays_an_error(monkeypatch, caplog):
+    receipt_service = _failing_printer(monkeypatch, RuntimeError("boom"))
+
+    with pytest.raises(receipt_service.PrinterError, match="boom") as exc:
+        receipt_service.ReceiptService.open_drawer(None)
+    assert not isinstance(exc.value, receipt_service.PrinterNotResponding)
+    assert [r for r in caplog.records if r.levelname == "ERROR"]
+
+
 @pytest.fixture
 def fresh_backend(monkeypatch):
     """Undo _get_backend()'s module-level cache and usb.core.find patch."""

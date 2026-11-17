@@ -2,9 +2,7 @@
 X / Z Report Service
 X report: read-only snapshot of the till sales currently in the table (i.e.
 everything since the last Z report). Z report: persists that snapshot as a
-sequentially-numbered ZReport row, then purges every Sale/SaleItem row of
-the period — the ZReport row becomes the sole permanent record of the till
-sales (invoices are unaffected).
+sequentially-numbered ZReport row and becomes the sole permanent record of the till sales (invoices are unaffected).
 
 Both cover till sales only (S-/RF-, see till_sales()): a sale invoiced as
 I-/CN- is booked through the ERP, so counting it here too would book it twice.

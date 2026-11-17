@@ -105,7 +105,7 @@ def test_write_csv(db_session, tmp_path):
     with open(path, newline="", encoding="utf-8") as f:
         written = list(csv.reader(f))
     assert written[0] == LISTING_HEADERS
-    assert written[1] == ["Acme", "BE0123456789", "12.10", "10.00", "0.00", "0.00", "0.00", "10.00", "1"]
+    assert written[1] == ["Acme", "BE0123456789", "12.10", "10.00", "0.00", "0.00", "10.00", "0.00", "1"]  # per-rate columns follow VAT_RATES: 0, 6, 21, 12
 
 
 def test_write_pdf(db_session, tmp_path):
