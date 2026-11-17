@@ -26,9 +26,6 @@ logger = logging.getLogger(__name__)
 LINE_WIDTH = 48  # 80mm paper at font A (12x24 dots -> 576px / 12)
 DRAWER_PIN = 2  # 2 = connector pin 2 (common default), 5 = connector pin 5
 LOGO_MAX_WIDTH_PX = 576  # 80mm paper at 203dpi
-RULE_THIN_PX = 2   # receipt separators
-RULE_BOLD_PX = 5   # under the logo / above the footer
-RECEIPT_LINE_SPACING = 40  # in 1/180 inch; the printer default is 30 (1/6 inch)
 
 QTY_COL = 5
 NAME_COL = 23
@@ -123,21 +120,10 @@ def _open(vendor_id: str, product_id: str):
         raise PrinterError(f"Could not connect to receipt printer: {e}") from e
 
 
-def _rule(printer, thickness: int = RULE_THIN_PX):
-    """A solid separator across the full paper width. Printed as a bitmap
-    because a row of '-' characters always leaves gaps between glyphs."""
-    printer.set(align="left")
-    printer.image(Image.new("1", (LOGO_MAX_WIDTH_PX, thickness), 0))
-
-
-def _bold_rule(printer):
-    _rule(printer, RULE_BOLD_PX)
-
-
 def _print_text_header(printer, settings: dict):
     printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
     printer.text(f"{settings.get('store_name', '')}\n")
-    _bold_rule(printer)
+    printer.text("-" * LINE_WIDTH + "\n")
     printer.set(align="left")
 
 
@@ -170,7 +156,7 @@ def _print_logo(printer, settings: dict):
     # Outside the try above on purpose: a printer failure here is a real
     # print failure and must fail the receipt, not fall back silently.
     printer.image(img, center=True)
-    _bold_rule(printer)
+    printer.text("-" * LINE_WIDTH + "\n")
     printer.set(align="left")
 
 
@@ -188,7 +174,7 @@ def _print_receipt_header(printer, sale: Sale):
         printer.set(bold=True)
         printer.text("THIS IS NOT AN INVOICE\n")
         printer.set(bold=False)
-    _rule(printer)
+    printer.text("-" * LINE_WIDTH + "\n")
 
 
 def _wrap_name(name: str) -> list[str]:
@@ -199,7 +185,7 @@ def _wrap_name(name: str) -> list[str]:
 def _print_line_items(printer, cart: Cart):
     printer.set(bold=True)
     printer.text(f"{'#':<{QTY_COL}}{'Description':<{NAME_COL}}{'Price':>{UNIT_COL}}{'Total':>{TOTAL_COL}}\n")
-    _rule(printer)
+    printer.text("-" * LINE_WIDTH + "\n")
     printer.set(bold=False)
     subtotals = iter(cart.subtotals())
     for entry in cart.entries:
@@ -251,7 +237,7 @@ def _print_line_items(printer, cart: Cart):
             for extra in label_lines[1:]:
                 printer.text(f"{'':<{QTY_COL}}{extra}\n")
             printer.set(bold=False)
-    _rule(printer)
+    printer.text("-" * LINE_WIDTH + "\n")
 
 
 TOTAL_ROW_WIDTH = LINE_WIDTH // 2  # columns available at the TOTAL row's 2x character width
@@ -271,10 +257,10 @@ def _print_payment_breakdown(printer, sale: Sale):
         printer.text(f"{entry['method'].capitalize():<{LABEL_COL}}{entry['amount']:>{TOTAL_COL}.2f}\n")
     if sale.change_given:
         printer.text(f"{'Change':<{LABEL_COL}}{-sale.change_given:>{TOTAL_COL}.2f}\n")
+    printer.text("-" * LINE_WIDTH + "\n")
 
 
 def _print_footer(printer, footer_text: str):
-    _bold_rule(printer)
     printer.set(align="center")
     if footer_text:
         printer.text(f"\n{footer_text}\n")
@@ -398,7 +384,7 @@ def _print_b2b_info(printer, invoice: Invoice):
     printer.text(f"{invoice.full_address}\n")
     printer.text(f"{invoice.client_vat_number}\n")
     printer.set(bold=False)
-    _rule(printer)
+    printer.text("-" * LINE_WIDTH + "\n")
 
 
 class ReceiptService:
@@ -438,7 +424,6 @@ class ReceiptService:
         settings = SettingsService.get_all(session)
         printer = _open(settings.get("receipt_printer_vendor_id", ""), settings.get("receipt_printer_product_id", ""))
         try:
-            printer.line_spacing(RECEIPT_LINE_SPACING)
             _print_logo(printer, settings)
             if sale.invoice:
                 _print_b2b_info(printer, sale.invoice)
@@ -448,7 +433,6 @@ class ReceiptService:
             _print_payment_breakdown(printer, sale)
             _print_footer(printer, settings.get("receipt_footer", ""))
             _print_company_info(printer, settings)
-            printer.line_spacing()  # back to the default for reports / other prints
 
             printer.cut(mode="PART")
             logger.info("Receipt printed for sale %s%s", sale.sale_number,
