@@ -89,7 +89,7 @@ class ZReportsDialog(QDialog):
             try:
                 ReceiptService.print_z_report(session, z_report, reprint=True)
             except PrinterNotResponding as e:
-                self.overlay.show_message(str(e), kind="info")
+                self.overlay.show_message(str(e))
                 return
             except PrinterError as e:
                 self.overlay.show_message(f"Printing failed:\n{e}", kind="error")

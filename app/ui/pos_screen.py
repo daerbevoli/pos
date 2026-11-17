@@ -203,7 +203,7 @@ class POSScreen(QWidget):
         """Blocks cart-mutating actions while a partial payment is outstanding.
         Returns True (and shows an overlay) if the action should be blocked."""
         if self.payment_in_progress:
-            self._show_overlay("Finish or remove the pending payment first")
+            self._show_overlay("Finish pending payment first")
             return True
         return False
 
@@ -818,7 +818,7 @@ class POSScreen(QWidget):
             return
         entry = self.cart.entries[idx]
         if self.payment_in_progress and not isinstance(entry, PaymentEntry):
-            self._show_overlay("Finish or remove the pending payment first")
+            self._show_overlay("Finish pending payment first")
             return
         # A line already saved on the reopened sale gets a reversal appended
         # (it can't just leave the record); anything else is deleted — see
@@ -1452,7 +1452,7 @@ class POSScreen(QWidget):
 
             erp_config = get_erp_data(session)
             if not all(erp_config.values()):
-                self._show_overlay("ERP is not configured (Settings → ERP)", kind="error")
+                self._show_overlay("ERP is not configured", kind="error")
                 return
 
             if QMessageBox.question(

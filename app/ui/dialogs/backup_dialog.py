@@ -102,7 +102,7 @@ class BackupPasswordDialog(QDialog):
 
     def _on_ok(self):
         if self.new.text() != self.confirm.text():
-            self.overlay.show_message("The new passwords don't match.", kind="error")
+            self.overlay.show_message("The new passwords don't match", kind="error")
             return
         try:
             BackupService.set_password(self.new.text(), self.current.text() if self.changing else None)
@@ -266,7 +266,7 @@ class BackupDialog(QDialog):
             failed = "\n".join(f"{d}: {e}" for d, e in result.failures.items())
             self.overlay.show_message(f"Backup saved, but not everywhere:\n{failed}", kind="error")
         else:
-            self.overlay.show_message("Backup saved.")
+            self.overlay.show_message("Backup saved")
 
     def _on_backup_failed(self, message: str):
         self._set_busy(False)
@@ -284,7 +284,7 @@ class BackupDialog(QDialog):
 
     def _choose_extra_dir(self):
         if not self.is_admin:
-            self.overlay.show_message("Only admin.")
+            self.overlay.show_message("Only admin")
             return
         path = QFileDialog.getExistingDirectory(self, "Choose backup folder", self.extra_dir.text())
         if path:
@@ -292,7 +292,7 @@ class BackupDialog(QDialog):
 
     def _clear_extra_dir(self):
         if not self.is_admin:
-            self.overlay.show_message("Only admin.")
+            self.overlay.show_message("Only admin")
             return
         self._save_extra_dir("")
 
@@ -305,11 +305,11 @@ class BackupDialog(QDialog):
 
     def _set_password(self):
         if not self.is_admin:
-            self.overlay.show_message("Only admin.")
+            self.overlay.show_message("Only admin")
             return
         if BackupPasswordDialog(self, changing=BackupService.has_password()).exec():
             self._reload()
-            self.overlay.show_message("Backup password saved. New backups are encrypted with it.")
+            self.overlay.show_message("Backup password saved")
 
     def _ask_archive_password(self, wrong: bool) -> str | None:
         """The password the backup was made with; None if cancelled."""
@@ -322,13 +322,13 @@ class BackupDialog(QDialog):
     def _restore_selected(self):
         row = self.table.currentRow()
         if row == -1:
-            self.overlay.show_message("Select a backup first.")
+            self.overlay.show_message("Select a backup first")
             return
         self._restore(self._row_paths[row])
 
     def _restore_from_file(self):
         if not self.is_admin:
-            self.overlay.show_message("Only admin.")
+            self.overlay.show_message("Only admin")
             return
         path, _ = QFileDialog.getOpenFileName(
             self, "Select backup", self.extra_dir.text(), "POS backups (superpos-*.zip)")
@@ -337,7 +337,7 @@ class BackupDialog(QDialog):
 
     def _restore(self, path: str):
         if not self.is_admin:
-            self.overlay.show_message("Only admin.")
+            self.overlay.show_message("Only admin")
             logger.info("Restore refused: not in admin mode")
             return
         # An encrypted backup always needs its password typed, even when it's

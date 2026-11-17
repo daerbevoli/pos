@@ -424,7 +424,7 @@ class ClientDetailPanel(QFrame):
                     client = ClientService.get_by_id(session, self.current_client_id)
                     is_active = client is not None and client.is_active
                 if not is_active:
-                    self._show_overlay("Client inactive.", kind="error")
+                    self._show_overlay("Client inactive")
                     return
                 self.parent_screen.selected_client.emit(self.current_client_id, self.name.text())
             self.parent_screen.table.clearSelection()
@@ -492,7 +492,7 @@ class ClientDetailPanel(QFrame):
                         "active": 1 if c.is_active else 0,
                     })
 
-        self._show_overlay(f"Exported {len(clients)} client(s).")
+        self._show_overlay(f"Exported {len(clients)} client(s)")
 
     def _on_client_listing(self):
         dialog = ClientListingDialog(parent=self)

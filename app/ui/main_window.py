@@ -281,7 +281,7 @@ class MainWindow(QMainWindow):
             return True
         free = next((i for i in range(1, MAX_VTABS + 1) if not is_busy(i)), None)
         if free is None:
-            self.pos_screen.overlay.show_message(message, kind="error")
+            self.pos_screen.overlay.show_message(message)
             return False
         self._switch_vtab(free)
         return True
@@ -390,7 +390,7 @@ class MainWindow(QMainWindow):
         if busy := self._open_ticket_vtabs():
             tabs = ", ".join(f"V {i}" for i in busy)
             self.settings_screen.overlay.show_message(
-                f"Finish or clear the open tickets first ({tabs})", kind="error")
+                f"Finish or clear the open tickets first ({tabs})")
             return
         self._confirm_and_install(setup)
 
@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(
             self, "Update available",
             f"SuperPOS {version} is ready to install.\n"
-            "The POS closes and starts again by itself in about a minute.\nInstall now?")
+            "The POS will close and restart.\nInstall now?")
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:

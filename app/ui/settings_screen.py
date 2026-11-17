@@ -681,7 +681,7 @@ class SettingsScreen(QWidget):
             self._show_overlay(problem)
             return
         if self._ask_code("Repeat new admin code") != code:
-            self._show_overlay("The codes didn't match. Admin code not changed.")
+            self._show_overlay("Codes do not match")
             return
         set_admin_code(code)
         self._show_overlay("Admin code changed")
@@ -736,7 +736,7 @@ class SettingsScreen(QWidget):
         try:
             ReceiptService.test_print(self.receipt_vendor.text(), self.receipt_product.text())
         except PrinterNotResponding as e:
-            self._show_overlay(str(e), kind="info")
+            self._show_overlay(str(e))
         except PrinterError:
             self._show_overlay("Test Print Failed", kind="error")
         else:
@@ -746,7 +746,7 @@ class SettingsScreen(QWidget):
         try:
             LabelPrinterService.test_print(self.label_vendor.text(), self.label_product.text())
         except PrinterNotResponding as e:
-            self._show_overlay(str(e), kind="info")
+            self._show_overlay(str(e))
         except PrinterError:
             self._show_overlay("Test Print Failed", kind="error")
         else:

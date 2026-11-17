@@ -573,7 +573,7 @@ class ArticleDetailPanel(QFrame):
 
     def _validate(self) -> bool:
         if not self.name.text().strip():
-            self._show_overlay("Product name is required.")
+            self._show_overlay("Product name is required")
             return False
         barcode = self.barcode.text().strip()
         if barcode:
@@ -582,8 +582,7 @@ class ArticleDetailPanel(QFrame):
                 # In edit mode the product's own barcode isn't a clash.
                 if owner and owner.id != self.current_product_id:
                     inactive = "" if owner.is_active else " (inactive)"
-                    self._show_overlay(f"Barcode {barcode} is already used by {owner.name}{inactive}.",
-                                       kind="error")
+                    self._show_overlay(f"Barcode {barcode} is already used by {owner.name}{inactive}")
                     return False
         return True
 
@@ -631,7 +630,7 @@ class ArticleDetailPanel(QFrame):
                     product = ProductService.get_by_id(session, self.current_product_id)
                     is_active = product is not None and product.is_active
                 if not is_active:
-                    self._show_overlay("Product inactive.", kind="info")
+                    self._show_overlay("Product inactive")
                     return
                 self.parent_screen.selected_product.emit(self.current_product_id)
             self.parent_screen.leave()
@@ -678,10 +677,10 @@ class ArticleDetailPanel(QFrame):
         with get_session() as session:
             product = ProductService.get_by_id(session, self.current_product_id)
             if not product:
-                self._show_overlay("Product not found.", kind="error")
+                self._show_overlay("Product not found")
                 return
             if product.is_open_price:
-                self._show_overlay("No label for open price.", kind="info")
+                self._show_overlay("No label for open price")
                 return
             try:
                 LabelPrinterService.print_product_label(session, product)
@@ -741,7 +740,7 @@ class ArticleDetailPanel(QFrame):
 
         if as_csv:
             self._show_overlay(f"Inventory saved: {len(snapshot.lines)} article(s), "
-                               f"total €{snapshot.total:.2f}.")
+                               f"total €{snapshot.total:.2f}")
         else:
             # Open in the default PDF viewer so it can be printed straight away.
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
@@ -781,7 +780,7 @@ class ArticleDetailPanel(QFrame):
                         "category": p.category.name if p.category else "",
                     })
 
-        self._show_overlay(f"Exported {len(products)} article(s).")
+        self._show_overlay(f"Exported {len(products)} article(s)")
 
     def _on_import(self):
         file_dialog = FileDialog(parent=self)
@@ -885,7 +884,7 @@ class InventoryScreen(QWidget):
 
         self.category_filter = QComboBox()
         self.category_filter.setFixedHeight(LIST_FILTER_HEIGHT)
-        self.category_filter.addItem("All Categories", None)
+        self.category_filter.addItem("-", None)
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 
@@ -980,7 +979,7 @@ class InventoryScreen(QWidget):
         super().hideEvent(event)
         if not event.spontaneous():
             self.category_filter.blockSignals(True)
-            self.category_filter.setCurrentIndex(0)  # "All Categories"
+            self.category_filter.setCurrentIndex(0)  # "-": nothing listed until a search
             self.category_filter.blockSignals(False)
             self.show_inactive_check.blockSignals(True)
             self.show_inactive_check.setChecked(False)
@@ -995,7 +994,8 @@ class InventoryScreen(QWidget):
             current_cat = self.category_filter.currentData()
             self.category_filter.blockSignals(True)
             self.category_filter.clear()
-            self.category_filter.addItem("All Categories", None)
+            self.category_filter.addItem("-", None)
+            self.category_filter.addItem("All", "all")
             for cat in cats:
                 self.category_filter.addItem(cat.name, cat.id)
             if current_cat:
@@ -1009,9 +1009,12 @@ class InventoryScreen(QWidget):
             header.resizeSection(0, max(header.sectionSizeHint(0), CELL_TEXT_PAD + self.table.fontMetrics()
                                         .horizontalAdvance(ProductService.longest_barcode(session))))
 
-            products = ProductService.table_rows(
-                session, self.search_input.text().strip(),
-                category_id=self.category_filter.currentData(),
+            query = self.search_input.text().strip()
+            category = self.category_filter.currentData()
+            # "-" lists nothing until 3 letters are typed: loading every article
+            # on entry is slow with a large catalogue. "All" lists everything.
+            products = [] if category is None and len(query) < 3 else ProductService.table_rows(
+                session, query, category_id=None if category == "all" else category,
                 include_inactive=self.show_inactive_check.isChecked())
 
             # Rebuilding the table drops its selection; keep the selected

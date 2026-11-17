@@ -45,14 +45,22 @@ def test_empty_state(screen):
 
 def test_category_filter_seeded_with_default_categories(screen):
     labels = [screen.category_filter.itemText(i) for i in range(screen.category_filter.count())]
-    assert labels[0] == "All Categories"
+    assert labels[:2] == ["-", "All"]
     assert "Bakery" in labels
 
 
-def test_refresh_populates_table(screen):
+def test_dash_lists_nothing_until_three_letters_all_lists_everything(screen):
     _add_product(name="Milk", barcode="111")
     _add_product(name="Bread", barcode="222")
     screen.refresh()
+    assert screen.table_model.rowCount() == 0
+    screen.search_input.setText("Mi")
+    assert screen.table_model.rowCount() == 0
+    screen.search_input.setText("Mil")
+    assert screen.table_model.rowCount() == 1
+    screen.category_filter.setCurrentIndex(screen.category_filter.findData("all"))
+    assert screen.table_model.rowCount() == 1  # "All" still applies the search
+    screen.search_input.setText("")
     assert screen.table_model.rowCount() == 2
 
 
@@ -84,7 +92,7 @@ def test_category_filter_restricts_products(screen):
 
 def test_selecting_row_shows_detail_panel(screen):
     _add_product(name="Selectable", price=9.99, barcode="777")
-    screen.refresh()
+    screen.search_input.setText("Selectable")
     screen.table.selectRow(0)
 
     panel = screen.detail_panel
@@ -136,7 +144,7 @@ def test_new_product_without_price_is_open_price(screen):
 
 def test_giving_open_price_product_a_price_makes_it_fixed(screen):
     pid = _add_product(name="Loose", price=0.0, is_open_price=True)
-    screen.refresh()
+    screen.search_input.setText("Loose")
     screen.table.selectRow(0)
     panel = screen.detail_panel
     assert panel.price.text() == "Open price"
@@ -153,7 +161,7 @@ def test_giving_open_price_product_a_price_makes_it_fixed(screen):
 
 def test_clearing_price_makes_product_open_price(screen):
     pid = _add_product(name="Bread", price=2.0)
-    screen.refresh()
+    screen.search_input.setText("Bread")
     screen.table.selectRow(0)
     panel = screen.detail_panel
     panel._start_edit()
@@ -237,7 +245,7 @@ def test_new_product_cancel_discards(screen):
 
 def test_edit_product_updates_existing(screen):
     pid = _add_product(name="Old", price=1.0)
-    screen.refresh()
+    screen.search_input.setText("Old")
     screen.table.selectRow(0)
 
     panel = screen.detail_panel
@@ -255,7 +263,7 @@ def test_edit_product_updates_existing(screen):
 
 def test_edit_product_keeping_own_barcode_saves(screen):
     pid = _add_product(name="Old", barcode="5400000000003")
-    screen.refresh()
+    screen.search_input.setText("Old")
     screen.table.selectRow(0)
 
     panel = screen.detail_panel
@@ -271,7 +279,7 @@ def test_edit_product_keeping_own_barcode_saves(screen):
 def test_edit_product_to_another_products_barcode_is_blocked(screen):
     _add_product(name="Taken", barcode="5400000000004")
     pid = _add_product(name="Mine", barcode="5400000000005")
-    screen.refresh()
+    screen.search_input.setText("Mine")
     assert screen._select_product_row(pid)
 
     panel = screen.detail_panel
@@ -288,7 +296,7 @@ def test_edit_product_keeps_negative_stock(screen):
     """Stock sold below zero must survive an unrelated edit — the stock
     field used to clamp at 0 and silently reset it."""
     pid = _add_product(name="Oversold", stock_quantity=-3)
-    screen.refresh()
+    screen.search_input.setText("Oversold")
     screen.table.selectRow(0)
 
     panel = screen.detail_panel
@@ -343,6 +351,7 @@ def test_reactivate_inactive_product(screen):
     pid = _add_product(name="Back")
     with get_session() as session:
         ProductService.deactivate(session, pid)
+    screen.search_input.setText("Back")
     screen.show_inactive_check.setChecked(True)
 
     screen._reactivate_product(pid)
@@ -361,18 +370,18 @@ def test_reactivate_active_product_is_noop(screen):
 
 
 def test_show_inactive_lists_inactive_greyed(screen):
-    _add_product(name="Live")
-    pid = _add_product(name="Retired")
+    _add_product(name="Tea Live")
+    pid = _add_product(name="Tea Retired")
     with get_session() as session:
         ProductService.deactivate(session, pid)
-    screen.refresh()
+    screen.search_input.setText("Tea")
     assert screen.table_model.rowCount() == 1
 
     screen.show_inactive_check.setChecked(True)
     assert screen.table_model.rowCount() == 2
     names = {_cell(screen, r, 1): r for r in range(2)}
-    live_color = _cell(screen, names["Live"], 1, Qt.ItemDataRole.ForegroundRole)
-    retired_color = _cell(screen, names["Retired"], 1, Qt.ItemDataRole.ForegroundRole)
+    live_color = _cell(screen, names["Tea Live"], 1, Qt.ItemDataRole.ForegroundRole)
+    retired_color = _cell(screen, names["Tea Retired"], 1, Qt.ItemDataRole.ForegroundRole)
     assert retired_color != live_color
 
 
@@ -1077,4 +1086,4 @@ def test_leaving_defers_the_list_reload_to_the_next_show(screen, qtbot):
     assert screen.table_model.rowCount() == 1  # not reloaded on the way out
 
     screen.show()
-    assert screen.table_model.rowCount() == 2
+    assert screen.table_model.rowCount() == 0  # reloaded: empty search lists nothing

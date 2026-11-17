@@ -444,7 +444,7 @@ class ReportsScreen(QWidget):
                 totals = XZReportService.generate_x_report(session)
                 ReceiptService.print_x_report(session, totals)
             except PrinterNotResponding as e:
-                self._show_overlay(str(e), kind="info")
+                self._show_overlay(str(e))
             except PrinterError as e:
                 self._show_overlay(f"Printer error: {e}", kind="error")
 
@@ -459,7 +459,7 @@ class ReportsScreen(QWidget):
 
         reply = QMessageBox.question(
             self, "Print Z Report",
-            "This will print the Z report and clear all sales. This cannot be undone.\nContinue?"
+            "This will print the Z report and close the sale.\nContinue?"
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -475,16 +475,16 @@ class ReportsScreen(QWidget):
         longer be reopened/edited, and stops blocking the Z report."""
         row = self.sales_table.currentIndex().row()
         if row == -1:
-            self._show_overlay("Select invoice first.")
+            self._show_overlay("Select invoice first")
             return
         invoice_id = self._invoice_row_ids.get(row)
         if invoice_id is None:
-            self._show_overlay("Sale is not an invoice.")
+            self._show_overlay("Sale is not an invoice")
             return
         with get_session() as session:
             invoice = session.get(Invoice, invoice_id)
             if invoice.sent_at is not None:
-                self._show_overlay(f"Invoice {invoice.invoice_number} already sent.")
+                self._show_overlay(f"Invoice {invoice.invoice_number} already sent")
                 return
             invoice_number = invoice.invoice_number
 
@@ -539,7 +539,7 @@ class ReportsScreen(QWidget):
         row = self.sales_table.currentIndex().row()
         sale_id = self._sales_row_ids.get(row)
         if sale_id is None and row in self._invoice_row_ids:
-            self._show_overlay("Z report cleared. View invoice in ERP.")
+            self._show_overlay("Z report cleared. View invoice in ERP")
             return False
         if sale_id is not None:
             self.sale_selected.emit(sale_id)

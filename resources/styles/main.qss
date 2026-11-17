@@ -472,7 +472,7 @@ QMessageBox QPushButton {
 QDialog QPushButton#numKey,
 QDialog QPushButton#numKeyDel {
     min-height: 38px;
-    max-height: 16777215px;
+    max-height: 10000px;  /* "unlimited"; not 16777215 (Qt's max): padding+border would overflow it and warn */
 }
 
 QLabel#grandTotal {
