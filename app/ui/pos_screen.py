@@ -539,7 +539,7 @@ class POSScreen(QWidget):
         runs before MainWindow connects tab_updated, so MainWindow calls this
         once after wiring up to show recovered carts' amounts on the tab bar."""
         for slot, s in self._tab_states.items():
-            amount = f"{s.cart.remaining_due:.2f}" if s.cart.entries and not s.sale_finished else ""
+            amount = f"{s.cart.remaining:.2f}" if s.cart.entries and not s.sale_finished else ""
             self.tab_updated.emit(slot, amount)
 
     def emit_rf_cn_mode(self):
@@ -1021,7 +1021,7 @@ class POSScreen(QWidget):
     def _update_totals(self):
         """What follows the cart: the V-tab amount, the Total/Remaining label,
         the customer display and the open-ticket autosave."""
-        remaining = self.cart.remaining_due
+        remaining = self.cart.remaining
         open_ticket = bool(self.cart.entries) and not self.sale_finished
         self.tab_updated.emit(self._active_tab, f"{remaining:.2f}" if open_ticket else "")
         if self.sale_finished:
@@ -1088,7 +1088,7 @@ class POSScreen(QWidget):
         if self.cart.is_refund:
             self._pay_out_refund(method)
             return
-        remaining = self.cart.remaining_due
+        remaining = self.cart.remaining
         tendered = self._read_tender(method, remaining)
         if tendered is None:
             return

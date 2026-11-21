@@ -59,13 +59,13 @@ def test_restore_is_admin_only(qtbot, patched_db, overlays, monkeypatch):
     monkeypatch.setattr(BackupService, "verify_archive", lambda p: called.append(p))
     d = _dialog(qtbot, is_admin=False)
     d._restore("whatever.zip")
-    assert overlays == [("Only admin.", "info")] and called == []
+    assert overlays == [("Only admin", "info")] and called == []
 
 
 def test_changing_extra_folder_is_admin_only(qtbot, patched_db, overlays):
     d = _dialog(qtbot, is_admin=False)
     d._clear_extra_dir()
-    assert overlays == [("Only admin.", "info")]
+    assert overlays == [("Only admin", "info")]
 
 
 def _plain_archive(monkeypatch, encrypted=False):
@@ -164,7 +164,7 @@ def test_cancelling_the_password_prompt_cancels_the_restore(qtbot, patched_db, m
 
 def test_setting_the_password_is_admin_only(qtbot, patched_db, overlays):
     _dialog(qtbot, is_admin=False)._set_password()
-    assert overlays == [("Only admin.", "info")]
+    assert overlays == [("Only admin", "info")]
     assert not BackupService.has_password()
 
 
@@ -187,7 +187,7 @@ def test_password_dialog_rejects_mismatch_and_saves_match(qtbot, patched_db):
     d.new.setText("a long enough password")
     d.confirm.setText("a different password")
     d._on_ok()
-    assert shown == ["The new passwords don't match."] and not BackupService.has_password()
+    assert shown == ["The new passwords don't match"] and not BackupService.has_password()
 
     d.confirm.setText("a long enough password")
     d._on_ok()

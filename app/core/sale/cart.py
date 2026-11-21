@@ -4,7 +4,7 @@ The ticket being rung up, as a flat ordered list of entries that mirrors
 the printed receipt (items, subtotals, discounts, partial payments), plus
 the money rules on it: promos, discounts and how they split over lines,
 reversals, VAT treatment per client, and the JSON snapshot it's saved as.
-No database access — see sales_service.py for saving it.
+No database access.
 """
 import json
 import logging
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Units sold by measured amount ("l" = litre); anything else is sold per piece.
+# Units sold by measured amount; anything else is sold per piece.
 # Must match the units the inventory unit picker saves (inventory_screen.py).
 WEIGHT_UNITS = {"kg", "g", "ml", "l"}
 
@@ -48,7 +48,7 @@ class CartItem(ReceiptEntry):
         return self.quantity is None or (self.is_open_price and self.unit_price == 0.0)
 
     @property
-    def article_count(self) -> float:
+    def article_count(self) -> int | float | None:
         """How many articles this line counts as on a subtotal: its quantity,
         or one for a weighed/measured line (1.25 kg of apples is one
         article), negative on a reversal/refund. Zero while pending."""
@@ -60,15 +60,11 @@ class CartItem(ReceiptEntry):
 
     @property
     def discount_amount(self) -> float:
-        """Discount amount contributed by the attached promo, recomputed live off the
-        current quantity/unit_price so it stays correct even for a pending
-        weight/open-price item whose amount is filled in after this line
-        already exists. Materialized into a real DiscountEntry by
-        Cart.sync_promo_discounts() — not folded into line_total, so the
-        item's own row keeps showing its full, undiscounted price and the
-        promo shows up as its own labeled line, same as a manual discount.
-        Sign-aware so a reversal line (negative quantity) yields a negative
-        discount that exactly undoes the original line's."""
+        """This line's promo discount, recalculated from the current quantity and
+        unit_price (so it updates once a weight or open price is filled in).
+        Cart.sync_promo_discounts() puts it on the receipt as a separate
+        DiscountEntry; line_total stays the full price. Negative on a reversal
+        line, so it cancels the original line's discount."""
         if self.promo_type is None or self.quantity is None:
             return 0.0
         raw = self.unit_price * self.quantity
@@ -109,14 +105,12 @@ class Allocation:
 @dataclass
 class DiscountEntry(ReceiptEntry):
     amount: float   # positive = deducts; negative for a VOID entry (or a refund line's promo) giving it back
-    label: str      # display string, e.g. "10%" or "€5.00" or a promo's name
+    label: str      # display string, e.g. "MANUAL DISCOUNT 10%", "MANUAL DISCOUNT 5.00" or a promo's name
     is_promo: bool = False  # True = synthesized by Cart.sync_promo_discounts(), safe to drop and regenerate
     is_void: bool = False   # True = gives back a manual discount's share of a reversed line, see Cart.reverse()
-    # Which items this discount comes off, and how much off each — fixed when
+    # Which items this discount comes off, and how much off each, fixed when
     # the discount is applied, so later edits (a reversal appended at the end,
     # a line removed) can't move it onto other items. Always sums to amount.
-    # Empty for a discount built without them (older snapshots, tests): its
-    # targets are then worked out from its position, see Cart._resolve().
     allocations: list[Allocation] = field(default_factory=list, compare=False, repr=False)
 
     @property
@@ -126,14 +120,13 @@ class DiscountEntry(ReceiptEntry):
 
 @dataclass
 class PaymentEntry(ReceiptEntry):
-    """A partial tender applied toward the cart total before it's fully paid.
-    Not part of subtotal/total — tracked separately via Cart.paid_total."""
+    """A partial tender applied toward the cart total before it's fully paid. Not part of subtotal/total."""
     method: str
     amount: float
 
 @dataclass(frozen=True)
 class NetLine:
-    """One CartItem's amounts after every discount that applies to it — see
+    """One CartItem's amounts after every discount that applies to it, see
     Cart.net_lines(). All VAT-inclusive except net_excl."""
     item: "CartItem"
     gross: float  # item.line_total: before discounts
@@ -156,10 +149,8 @@ class Cart:
     is_refund: bool = False  # RF/CN mode: every line added goes in with a negative quantity
 
     def _effective_price(self, base_price: float, base_tax_rate: int) -> float:
-        """The price actually charged: the domestic (VAT-incl.) price as-is
-        for a Belgian client, netted of VAT for a non-domestic one — the
-        store's own margin is unaffected either way, only the VAT portion
-        it would otherwise have collected and remitted."""
+        """Price is base price if client domestic or tax rate is 0 %
+        Price is without vat amount = price / 1 + vat if not domestic"""
         if self.is_domestic or base_tax_rate == 0:
             return base_price
         return round(base_price / (1 + base_tax_rate / 100), 2)
@@ -176,55 +167,28 @@ class Cart:
         return round(sum(e.amount for e in self.entries if isinstance(e, PaymentEntry)), 2)
 
     @property
-    def remaining_due(self) -> float:
+    def remaining(self) -> float:
         return round(self.total - self.paid_total, 2)
 
     def _resolve(self) -> tuple[list["CartItem"], dict[int, float], list[tuple["DiscountEntry", list[Allocation]]]]:
-        """(items, id(item) -> net amount, each discount with its allocations).
-
-        A discount uses its stored allocations. One without them is aimed by
-        its position, the rule apply_discount() uses at the moment it's
-        applied: right after an item (skipping earlier discount rows) it
-        comes off that item; right after a SubtotalMarker it's spread over
-        that section's items in proportion to their amounts, the last item
-        taking the rounding remainder (a section holding only discounts
-        stands for the one before it); with nothing before it, over the cart."""
+        """(items, id(item) -> net amount, each discount with its allocations),
+        each discount taking its stored allocations off the items it names."""
         items = [e for e in self.entries if isinstance(e, CartItem)]
         net = {id(item): item.line_total for item in items}
         resolved = []
-        section: list[CartItem] = []
-        target: list[CartItem] = []  # what the next unallocated DiscountEntry applies to
         for entry in self.entries:
-            if isinstance(entry, CartItem):
-                section.append(entry)
-                target = [entry]
-            elif isinstance(entry, SubtotalMarker):
-                # A block holding only discounts re-targets the block
-                # before it, as subtotals() re-totals it.
-                target, section = section or target, []
-            elif isinstance(entry, DiscountEntry):
-                if entry.allocations:
-                    allocations = [a for a in entry.allocations if id(a.item) in net]
-                else:
-                    allocations = _split(entry.amount, target or items, net)
+            if isinstance(entry, DiscountEntry):
+                allocations = [a for a in entry.allocations if id(a.item) in net]
                 for a in allocations:
                     net[id(a.item)] = round(net[id(a.item)] - a.amount, 2)
                 resolved.append((entry, allocations))
         return items, net, resolved
 
-    def _pin_allocations(self):
-        """Stores the position-derived allocations on every discount that has
-        none yet, so the edit about to happen can't re-aim them. Called
-        before every edit that adds, moves or removes lines around a
-        discount, and on loading a snapshot."""
-        for entry, allocations in self._resolve()[2]:
-            if not entry.allocations:
-                entry.allocations = allocations
-
     def _discount_targets(self) -> list["CartItem"]:
         """What a discount added now would come off: the last item, or right
-        after a subtotal the last section's items (see _resolve()). A
-        reversal and the line it voids never take a discount."""
+        after a subtotal the last section's items (a section holding only
+        discounts stands for the one before). A reversal and the line it
+        voids never take a discount."""
         section, target = [], []
         for entry in self.entries:
             if isinstance(entry, CartItem):
@@ -265,7 +229,6 @@ class Cart:
         return self._add_discount(amount, _amount_label(amount))
 
     def _add_discount(self, amount: float, label: str) -> "DiscountEntry":
-        self._pin_allocations()
         _, net, _ = self._resolve()
         entry = DiscountEntry(amount=amount, label=label,
                               allocations=_split(amount, self._discount_targets(), net))
@@ -277,9 +240,7 @@ class Cart:
         on the record and a negative-quantity reversal is appended. Each
         manual discount's share of the original is given back by a VOID
         discount on the reversal, and the original's promo line drops out
-        (sync_promo_discounts skips reversed lines) — so original and
-        reversal net to exactly zero. Returns the reversal line."""
-        self._pin_allocations()
+        (sync_promo_discounts skips reversed lines). Returns the reversal line."""
         item.has_reversal = True
         reversal = CartItem(
             product_id=item.product_id,
@@ -312,16 +273,15 @@ class Cart:
         """What the Error key does to a selected row: "reversed" for a line
         already saved on a reopened sale (see reverse()), "removed" for
         anything else, None if nothing changed (a line reversed already, or
-        a discount on a reversed line — see _covers_reversal()).
+        a discount on a reversed line see _covers_reversal()).
         A promo or VOID discount row stands for the line it belongs to; a
         subtotal takes the discount rows right under it along."""
-        self._pin_allocations()
         if isinstance(entry, SubtotalMarker):
             if any(_covers_reversal(d) for d in self._discounts_under(entry)):
                 return None
             self._delete_subtotal(entry)
             return "removed"
-        if isinstance(entry, DiscountEntry) and (entry.is_promo or entry.is_void) and entry.allocations:
+        if isinstance(entry, DiscountEntry) and (entry.is_promo or entry.is_void):
             entry = entry.allocations[0].item
         elif isinstance(entry, DiscountEntry) and _covers_reversal(entry):
             return None
@@ -448,11 +408,11 @@ class Cart:
         CartItem's *current* discount_amount. Call this after anything that
         could change a promo'd line's amount: add_product() already does,
         but also after +/- quantity, filling in a pending weight/open-price
-        item's amount, reversing a line, or removing one — see callers in
+        item's amount, reversing a line, or removing one see callers in
         pos_screen.py. Safe to call repeatedly: it drops every existing
         is_promo entry first, so it never drifts or duplicates.
 
-        A line with has_reversal set is skipped — once a reopened ticket's
+        A line with has_reversal set is skipped once a reopened ticket's
         line has been voided by an (appended, negative-quantity) reversal,
         its promo discount line disappears rather than getting a second,
         offsetting entry next to it. The reversal line itself never carries
@@ -479,7 +439,6 @@ class Cart:
         discount's share of an item scales with that item's price, so 10%
         stays 10% and a € discount comes off with or without VAT like the
         price it's on."""
-        self._pin_allocations()
         old_gross = {id(e): e.line_total for e in self.entries if isinstance(e, CartItem)}
         self.is_domestic = is_domestic
         for entry in self.entries:
@@ -568,9 +527,8 @@ class Cart:
 
     @classmethod
     def from_snapshot(cls, snapshot: str) -> "Cart":
-        """Rebuild a cart from a string produced by to_snapshot(). Discounts
-        saved before allocations existed get them from their position, as
-        they were charged (see _pin_allocations())."""
+        """Rebuild a cart from a string produced by to_snapshot(). A discount
+        without usable allocations is dropped (see _relink_allocations())."""
         entries: list[ReceiptEntry] = []
         items: list[CartItem] = []
         reversal_links: list[tuple[CartItem, int | None]] = []
@@ -586,15 +544,14 @@ class Cart:
                     quantity=raw["quantity"],
                     unit=raw.get("unit", "pcs"),
                     tax_rate=raw.get("tax_rate", 0),
-                    base_tax_rate=raw.get("base_tax_rate", raw.get("tax_rate", 0)),
-                    base_unit_price=raw.get("base_unit_price", raw["unit_price"]),
+                    base_tax_rate=raw["base_tax_rate"],
+                    base_unit_price=raw["base_unit_price"],
                     is_reversal=raw.get("is_reversal", False),
                     has_reversal=raw.get("has_reversal", False),
                     is_open_price=raw.get("is_open_price", False),
                     promo_name=raw.get("promo_name"),
                     promo_type=raw.get("promo_type"),
-                    # Snapshots saved before the rename still carry "promo_value".
-                    discount=raw.get("discount", raw.get("promo_value", 0.0)),
+                    discount=raw.get("discount", 0.0),
                     locked=raw.get("locked", False),
                 )
                 entries.append(item)
@@ -607,17 +564,14 @@ class Cart:
                     is_void=raw.get("is_void", False),
                 )
                 entries.append(discount)
-                if raw.get("allocations"):
-                    allocation_links.append((discount, raw["allocations"]))
+                allocation_links.append((discount, raw.get("allocations")))
             elif kind == "subtotal":
                 entries.append(SubtotalMarker())
             elif kind == "payment":
                 entries.append(PaymentEntry(method=raw["method"], amount=raw["amount"]))
         _relink_reversals(items, reversal_links)
-        _relink_allocations(items, allocation_links)
-        cart = cls(entries=entries)
-        cart._pin_allocations()
-        return cart
+        unusable = {id(d) for d in _relink_allocations(items, allocation_links)}
+        return cls(entries=[e for e in entries if id(e) not in unusable])
 
 
 _MANUAL_PREFIX = "MANUAL DISCOUNT "
@@ -666,52 +620,38 @@ def _split(amount: float, recipients: list[CartItem], net: dict[int, float]) -> 
     return allocations
 
 
-def _relink_allocations(items: list[CartItem], links: list[tuple[DiscountEntry, list]]):
+def _relink_allocations(items: list[CartItem], links: list[tuple[DiscountEntry, list | None]]) -> list[DiscountEntry]:
     """Restore each discount's allocations after from_snapshot() from their
-    saved item positions. A discount whose positions don't fit the items is
-    left without, and so gets them from its position like an old snapshot."""
+    saved item positions. Returns the discounts that couldn't be restored
+    (missing, not fitting the items, or not adding up to the amount): the
+    caller drops them, as there's no telling which items they came off."""
+    unusable = []
     for discount, raw in links:
         try:
             allocations = [Allocation(items[position], amount) for position, amount in raw]
         except (IndexError, TypeError, ValueError):
-            logger.warning("Snapshot discount %r has unusable allocations %r; aimed by position instead",
-                           discount.label, raw)
+            logger.error("Snapshot discount %r has unusable allocations %r; dropped", discount.label, raw)
+            unusable.append(discount)
             continue
-        if round(sum(a.amount for a in allocations), 2) != round(discount.amount, 2):
-            logger.warning("Snapshot discount %r allocations don't add up to %.2f; aimed by position instead",
-                           discount.label, discount.amount)
+        if not allocations or round(sum(a.amount for a in allocations), 2) != round(discount.amount, 2):
+            logger.error("Snapshot discount %r allocations %r don't add up to %.2f; dropped",
+                         discount.label, raw, discount.amount)
+            unusable.append(discount)
             continue
         discount.allocations = allocations
+    return unusable
 
 
 def _relink_reversals(items: list[CartItem], links: list[tuple[CartItem, int | None]]):
-    """Restore each reversal's reversal_of after from_snapshot(). Uses the
-    saved position when there is one; snapshots saved before it existed
-    fall back to the earliest still-unclaimed reversed line with the same
-    product, price and opposite quantity — identical lines are
-    interchangeable, so whichever one is picked voids the same amount."""
-    claimed: set[int] = set()
+    """Restore each reversal's reversal_of after from_snapshot() from the
+    original's saved position among the items. A reversal whose position is
+    missing or doesn't point at a reversed line is left unlinked (logged):
+    its amount still counts, it just can't be deleted to un-void the original."""
     for reversal, position in links:
-        original = None
         if position is not None and 0 <= position < len(items) and items[position].has_reversal:
-            original = items[position]
+            reversal.reversal_of = items[position]
         else:
-            original = next(
-                (
-                    item for item in items
-                    if item.has_reversal and not item.is_reversal and id(item) not in claimed
-                    and item.product_id == reversal.product_id
-                    and item.unit_price == reversal.unit_price
-                    and item.quantity is not None and reversal.quantity is not None
-                    and item.quantity == -reversal.quantity
-                ),
-                None,
-            )
-        if original is not None:
-            reversal.reversal_of = original
-            claimed.add(id(original))
-        else:
-            logger.warning("Snapshot reversal of %r (qty %s) has no matching original line",
+            logger.warning("Snapshot reversal of %r (qty %s) has no valid link to its original line",
                            reversal.product_name, reversal.quantity)
 
 

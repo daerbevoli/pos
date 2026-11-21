@@ -326,30 +326,28 @@ def test_allocations_survive_a_snapshot_round_trip():
     assert all(e.allocations for e in reloaded.entries if isinstance(e, DiscountEntry))
 
 
-def test_snapshot_from_before_allocations_loads_as_it_was_charged():
-    """No "allocations" key: aimed by position, then pinned, so reversing
-    a line of the reopened sale gives back exactly its share."""
+def test_snapshot_discount_without_allocations_is_dropped():
+    """No "allocations" key: nothing says which items it came off, so it
+    goes rather than leaving the total and the line nets disagreeing."""
     old = ('[{"type": "item", "product_id": 1, "product_name": "A", "product_barcode": "1",'
-           ' "unit_price": 10.0, "quantity": 1, "tax_rate": 21},'
-           ' {"type": "item", "product_id": 2, "product_name": "B", "product_barcode": "2",'
-           ' "unit_price": 5.0, "quantity": 1, "tax_rate": 21},'
-           ' {"type": "subtotal"},'
-           ' {"type": "discount", "amount": 1.5, "label": "MANUAL DISCOUNT 10%"}]')
+           ' "unit_price": 10.0, "quantity": 1, "tax_rate": 21, "base_tax_rate": 21, "base_unit_price": 10.0},'
+           ' {"type": "discount", "amount": 1.5, "label": "MANUAL DISCOUNT 1.50"}]')
 
     cart = Cart.from_snapshot(old)
-    assert _nets(cart) == [9.0, 4.5]
 
-    cart.reverse(cart.entries[1])
-    assert cart.total == 9.0
+    assert not any(isinstance(e, DiscountEntry) for e in cart.entries)
+    assert _nets(cart) == [10.0] and cart.total == 10.0
 
 
-def test_snapshot_with_allocations_that_dont_add_up_falls_back_to_position():
+def test_snapshot_discount_whose_allocations_dont_add_up_is_dropped():
     cart = Cart()
     cart.add_product(_product(1, 10.0))
     cart.apply_amount_discount(1.0)
     snapshot = cart.to_snapshot().replace('"allocations": [[0, 1.0]]', '"allocations": [[0, 7.0]]')
 
-    assert _nets(Cart.from_snapshot(snapshot)) == [9.0]
+    reloaded = Cart.from_snapshot(snapshot)
+
+    assert _nets(reloaded) == [10.0] and reloaded.total == 10.0
 
 
 # ── Random tickets ───────────────────────────────────────────────────────

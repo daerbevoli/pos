@@ -613,7 +613,7 @@ def test_underpayment_creates_partial_payment_entry(screen):
     payments = [e for e in screen.cart.entries if isinstance(e, PaymentEntry)]
     assert len(payments) == 1
     assert payments[0].amount == 5.0
-    assert screen.cart.remaining_due == 15.0
+    assert screen.cart.remaining == 15.0
 
 
 def test_second_partial_payment_merges_same_method(screen):

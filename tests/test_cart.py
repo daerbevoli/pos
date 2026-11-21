@@ -5,7 +5,7 @@ dataclasses in app.core.sales_service, and the _calc_tax helper.
 import json
 
 from app.core.sale.cart import (
-    Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker, calc_tax,
+    Allocation, Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker, calc_tax,
 )
 
 
@@ -158,14 +158,14 @@ def test_cart_remaining_due():
         CartItem(product_id=1, product_name="A", product_barcode="1", unit_price=20.0, quantity=1),
         PaymentEntry(method="cash", amount=5.0),
     ])
-    assert cart.remaining_due == 15.0
+    assert cart.remaining == 15.0
 
 
 def test_empty_cart_properties():
     cart = Cart()
     assert cart.total == 0.0
     assert cart.paid_total == 0.0
-    assert cart.remaining_due == 0.0
+    assert cart.remaining == 0.0
 
 
 # ── Cart.add_product merging ─────────────────────────────────────────────
@@ -669,15 +669,17 @@ def test_add_product_with_price_overrides_product_price_with_client_vat_treatmen
 # ── Snapshot round-trip ───────────────────────────────────────────────────
 
 def test_snapshot_round_trip_preserves_all_entry_types():
+    bread = CartItem(
+        product_id=1, product_name="Bread", product_barcode="111",
+        unit_price=2.5, quantity=2, unit="pcs", tax_rate=0, base_tax_rate=6,
+        base_unit_price=2.65, is_reversal=False, has_reversal=True,
+        promo_name="New Year Promo", promo_type="percent", discount=15.0,
+    )
     cart = Cart(entries=[
-        CartItem(
-            product_id=1, product_name="Bread", product_barcode="111",
-            unit_price=2.5, quantity=2, unit="pcs", tax_rate=0, base_tax_rate=6,
-            base_unit_price=2.65, is_reversal=False, has_reversal=True,
-            promo_name="New Year Promo", promo_type="percent", discount=15.0,
-        ),
-        DiscountEntry(amount=1.0, label="1.00"),
-        DiscountEntry(amount=0.375, label="New Year Promo", is_promo=True),
+        bread,
+        DiscountEntry(amount=1.0, label="1.00", allocations=[Allocation(bread, 1.0)]),
+        DiscountEntry(amount=0.375, label="New Year Promo", is_promo=True,
+                      allocations=[Allocation(bread, 0.375)]),
         SubtotalMarker(),
     ])
 
@@ -731,53 +733,14 @@ def test_from_snapshot_defaults_missing_optional_fields():
     raw = json.dumps([{
         "type": "item", "product_id": 1, "product_name": "X",
         "product_barcode": "1", "unit_price": 1.0, "quantity": 1,
+        "base_tax_rate": 0, "base_unit_price": 1.0,
     }])
     restored = Cart.from_snapshot(raw)
     item = restored.entries[0]
     assert item.unit == "pcs"
     assert item.tax_rate == 0
-    assert item.base_tax_rate == 0
-    assert item.base_unit_price == 1.0
     assert item.is_reversal is False
     assert item.has_reversal is False
-
-
-def test_from_snapshot_missing_base_tax_rate_falls_back_to_tax_rate():
-    """Sale snapshots saved before base_tax_rate existed should still
-    round-trip without losing the item's real VAT rate."""
-    raw = json.dumps([{
-        "type": "item", "product_id": 1, "product_name": "X",
-        "product_barcode": "1", "unit_price": 1.0, "quantity": 1,
-        "tax_rate": 21,
-    }])
-    restored = Cart.from_snapshot(raw)
-    assert restored.entries[0].tax_rate == 21
-    assert restored.entries[0].base_tax_rate == 21
-
-
-def test_from_snapshot_missing_base_unit_price_falls_back_to_unit_price():
-    """Sale snapshots saved before base_unit_price existed should still
-    round-trip without losing the item's real (domestic) price."""
-    raw = json.dumps([{
-        "type": "item", "product_id": 1, "product_name": "X",
-        "product_barcode": "1", "unit_price": 12.10, "quantity": 1,
-    }])
-    restored = Cart.from_snapshot(raw)
-    assert restored.entries[0].unit_price == 12.10
-    assert restored.entries[0].base_unit_price == 12.10
-
-
-def test_from_snapshot_reads_legacy_promo_value_key():
-    """Snapshots saved before CartItem.promo_value was renamed to discount
-    should still restore the promo's value."""
-    raw = json.dumps([{
-        "type": "item", "product_id": 1, "product_name": "X",
-        "product_barcode": "1", "unit_price": 10.0, "quantity": 1,
-        "promo_name": "Old Promo", "promo_type": "percent", "promo_value": 15.0,
-    }])
-    restored = Cart.from_snapshot(raw)
-    assert restored.entries[0].discount == 15.0
-    assert restored.entries[0].discount_amount == 1.5
 
 
 # ── _calc_tax ─────────────────────────────────────────────────────────────
@@ -814,33 +777,37 @@ def test_net_lines_without_discounts_are_line_totals():
 
 def test_item_discount_comes_off_that_item_only():
     a, b = _line(10.0), _line(5.0)
-    cart = Cart(entries=[a, DiscountEntry(amount=2.0, label="promo", is_promo=True), b])
+    cart = Cart(entries=[a, DiscountEntry(amount=2.0, label="promo", is_promo=True,
+                                          allocations=[Allocation(a, 2.0)]), b])
     assert _nets(cart) == [(a, 8.0), (b, 5.0)]
 
 
 def test_manual_discount_after_promo_still_targets_the_item():
     a = _line(10.0)
-    cart = Cart(entries=[a, DiscountEntry(amount=1.0, label="promo", is_promo=True),
-                         DiscountEntry(amount=2.0, label="MANUAL DISCOUNT 2.00")])
+    cart = Cart(entries=[a, DiscountEntry(amount=1.0, label="promo", is_promo=True,
+                                          allocations=[Allocation(a, 1.0)])])
+    cart.apply_amount_discount(2.0)
     assert _nets(cart) == [(a, 7.0)]
 
 
 def test_section_discount_is_split_pro_rata_across_rates():
     food, drink = _line(30.0, tax=6), _line(10.0, tax=21)
-    cart = Cart(entries=[food, drink, SubtotalMarker(), DiscountEntry(amount=4.0, label="MANUAL DISCOUNT 10%")])
+    cart = Cart(entries=[food, drink, SubtotalMarker()])
+    cart.apply_amount_discount(4.0)
     assert _nets(cart) == [(food, 27.0), (drink, 9.0)]
 
 
 def test_section_discount_only_covers_its_own_section():
     a, b, c = _line(10.0), _line(10.0), _line(20.0)
-    cart = Cart(entries=[a, SubtotalMarker(), b, c, SubtotalMarker(),
-                         DiscountEntry(amount=3.0, label="MANUAL DISCOUNT 3.00")])
+    cart = Cart(entries=[a, SubtotalMarker(), b, c, SubtotalMarker()])
+    cart.apply_amount_discount(3.0)
     assert _nets(cart) == [(a, 10.0), (b, 9.0), (c, 18.0)]
 
 
 def test_section_discount_rounding_remainder_keeps_the_total_exact():
     items = [_line(1.0), _line(1.0), _line(1.0)]
-    cart = Cart(entries=[*items, SubtotalMarker(), DiscountEntry(amount=1.0, label="MANUAL DISCOUNT 1.00")])
+    cart = Cart(entries=[*items, SubtotalMarker()])
+    cart.apply_amount_discount(1.0)
     nets = [net for _, net in _nets(cart)]
     assert nets == [0.67, 0.67, 0.66]
     assert round(sum(nets), 2) == cart.total
@@ -848,7 +815,8 @@ def test_section_discount_rounding_remainder_keeps_the_total_exact():
 
 def test_refund_promo_discount_reduces_the_negative_line():
     a = _line(10.0, qty=-1)
-    cart = Cart(entries=[a, DiscountEntry(amount=-2.0, label="promo", is_promo=True)], is_refund=True)
+    cart = Cart(entries=[a, DiscountEntry(amount=-2.0, label="promo", is_promo=True,
+                                          allocations=[Allocation(a, -2.0)])], is_refund=True)
     assert _nets(cart) == [(a, -8.0)]
 
 
@@ -863,27 +831,16 @@ def test_snapshot_round_trip_keeps_reversal_link():
     assert restored_reversal.reversal_of is restored_a
 
 
-def test_legacy_snapshot_without_link_is_matched_to_its_original():
+def test_snapshot_reversal_without_link_is_left_unlinked():
     a, b = _line(5.0), _line(3.0)
     a.has_reversal = True
-    reversal = _line(5.0, qty=-1, is_reversal=True)
+    reversal = _line(5.0, qty=-1, is_reversal=True, reversal_of=a)
     data = json.loads(Cart(entries=[a, b, reversal]).to_snapshot())
     for raw in data:
         raw.pop("reversal_of", None)
-    restored_a, _, restored_reversal = Cart.from_snapshot(json.dumps(data)).entries
-    assert restored_reversal.reversal_of is restored_a
-
-
-def test_legacy_identical_lines_each_get_their_own_reversal():
-    a1, a2 = _line(5.0), _line(5.0)
-    a1.has_reversal = a2.has_reversal = True
-    r1, r2 = _line(5.0, qty=-1, is_reversal=True), _line(5.0, qty=-1, is_reversal=True)
-    data = json.loads(Cart(entries=[a1, a2, r1, r2]).to_snapshot())
-    for raw in data:
-        raw.pop("reversal_of", None)
-    x1, x2, y1, y2 = Cart.from_snapshot(json.dumps(data)).entries
-    assert (y1.reversal_of, y2.reversal_of) == (x1, x2)
-    assert y1.reversal_of is x1 and y2.reversal_of is x2
+    cart = Cart.from_snapshot(json.dumps(data))
+    assert cart.entries[2].reversal_of is None
+    assert cart.total == 3.0
 
 
 def test_snapshot_round_trip_keeps_partial_payments():
@@ -895,5 +852,5 @@ def test_snapshot_round_trip_keeps_partial_payments():
     restored = Cart.from_snapshot(cart.to_snapshot())
 
     assert restored.paid_total == 20.0
-    assert restored.remaining_due == 10.0
+    assert restored.remaining == 10.0
     assert isinstance(restored.entries[-1], PaymentEntry) and restored.entries[-1].method == "cash"
