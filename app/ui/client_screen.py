@@ -278,8 +278,7 @@ class ClientDetailPanel(QFrame):
         self.country.setCurrentIndex(idx if idx >= 0 else self.country.findData(BELGIUM))
 
     def _apply_country_to_vat(self, code: str):
-        """Shows `code`'s VAT prefix and empties the field — changing
-        the country discards whatever VAT number was there for the old one."""
+        """Shows `code`'s VAT prefix and empties the field."""
         self.vat_prefix_label.setText(vat_prefix(code))
         self.vatNumber.clear()
 
@@ -399,7 +398,7 @@ class ClientDetailPanel(QFrame):
                 exclude_id = self.current_client_id if self._mode == "edit" else None
                 clash = ClientService.find_clash(session, data, exclude_id=exclude_id)
                 if clash:
-                    self._show_overlay(clash, kind="error")
+                    self._show_overlay(clash)
                     return
                 if self._mode == "new":
                     client = ClientService.create(session, **data)

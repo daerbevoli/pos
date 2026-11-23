@@ -264,9 +264,9 @@ def test_admin_code_change_typed_twice_takes_effect(screen, monkeypatch):
 
 
 @pytest.mark.parametrize("typed, message", [
-    (["5555", "5556"], "The codes didn't match. Admin code not changed."),
+    (["5555", "5556"], "Codes do not match"),
     (["55"], "The admin code needs at least 4 digits."),
-    (["5555", None], "The codes didn't match. Admin code not changed."),
+    (["5555", None], "Codes do not match"),
 ])
 def test_admin_code_change_refused_keeps_the_old_code(screen, monkeypatch, typed, message):
     from app.core.admin import check_admin_code

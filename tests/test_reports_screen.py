@@ -650,7 +650,7 @@ def test_mark_sent_on_a_plain_sale_does_not_ask(screen, monkeypatch):
 
     screen._mark_invoice_sent()
 
-    assert overlays == ["Sale is not an invoice."] and questions == []
+    assert overlays == ["Sale is not an invoice"] and questions == []
 
 
 # ── Invoices view reads the invoices table ───────────────────────────────
@@ -692,7 +692,7 @@ def test_purged_invoice_cannot_be_opened_on_pos(screen, qtbot, monkeypatch):
 
     screen._confirm()
 
-    assert overlays == ["Z report cleared. View invoice in ERP."] and selected == [] and navigated == []
+    assert overlays == ["Z report cleared. View invoice in ERP"] and selected == [] and navigated == []
 
 
 def test_mark_sent_works_on_invoice_without_sale(screen, monkeypatch):

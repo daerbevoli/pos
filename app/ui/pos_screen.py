@@ -18,7 +18,7 @@ from PyQt6.QtCore import (
     QTimer,
     pyqtSignal,
 )
-from PyQt6.QtGui import QBrush, QColor, QFont, QRegularExpressionValidator
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QRegularExpressionValidator
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -82,10 +82,7 @@ from app.utils.utils import FunctionButton, TapToDismissOverlay, TicketTable
 
 logger = logging.getLogger(__name__)
 
-# How invoices go out (see ErpService.send_invoice()). Peppol off is for
-# development only — TURN IT ON FOR DEPLOYMENT: then Peppol is mandatory
-# (a client not on Peppol gets nothing and needs manual sending) and email
-# is added for clients with an address.
+# Peppol not during dev
 INVOICE_USE_PEPPOL = False
 INVOICE_USE_EMAIL = True
 
@@ -102,6 +99,19 @@ def _cart_font(bold: bool) -> QFont:
     font.setPixelSize(FONT_SIZE_CART)
     font.setBold(bold)
     return font
+
+def size_cart_columns(table: QTableWidget):
+    """Qty, price and total get fixed widths that already fit a refund's minus
+    sign, so a negative line doesn't resize the columns; the description
+    stretches over the rest. Shared by the POS cart and the customer display."""
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    metrics = QFontMetrics(_cart_font(bold=True))
+    # Up to 1000 in each column. shortcut: anything wider is elided, widen a sample if a shop needs more.
+    for column, widest in ((0, "-1000"), (2, "1000.00/kg"), (3, "-1000.00")):
+        header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+        table.setColumnWidth(column, metrics.horizontalAdvance(widest) + 12 + 4)  # 12px = cell padding in main.qss
+
 
 def _item_cells(item: CartItem) -> list[str]:
     """An item row's four column texts: quantity, name, unit price, line
@@ -270,10 +280,7 @@ class POSScreen(QWidget):
         self.cart_table = TicketTable(0, 4)
         self.cart_table.setObjectName("cartTable")
         self.cart_table.setHorizontalHeaderLabels(["Qty", "Description", "Price", "Total"])
-        self.cart_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.cart_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.cart_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.cart_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        size_cart_columns(self.cart_table)
         self.cart_table.horizontalHeader().hide()
         self.cart_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cart_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -1608,13 +1615,16 @@ class POSScreen(QWidget):
                 return
             with get_session() as session:
                 client = ClientService.get_by_id(session, client_id)
-            is_domestic = not client or client.country == BELGIUM
+            if client is None:
+                self._show_overlay("Client not found", kind="error")
+                return
+            is_domestic = client.country == BELGIUM
             if self.reopened_ticket and is_domestic != self.cart.is_domestic:
                 self._show_overlay("Invoice client cannot change")
                 return
             if self.sale_finished:
                 self._unfreeze_ticket()
-            self.client_label.setText("INVOICE - " + client_name)
+            self.client_label.setText("INVOICE — " + client_name)
             self.client_label.show()
             self.client_id = client_id
             self.is_invoice = True

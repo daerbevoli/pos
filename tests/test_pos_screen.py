@@ -720,6 +720,15 @@ def test_set_client_marks_invoice_and_shows_label(screen):
     assert "Acme" in screen.client_label.text()
 
 
+def test_set_client_unknown_id_is_refused(screen):
+    screen.set_client(999999, "Ghost")
+
+    assert screen.is_invoice is False
+    assert screen.client_id is None
+    assert screen.client_label.isHidden()
+    assert not screen.overlay.isHidden()
+
+
 def test_set_client_foreign_country_zeroes_tax_and_nets_price_on_existing_items(screen):
     pid, barcode, _ = _add_product(barcode="tax1", price=10.0, tax=21)
     _scan(screen, barcode)

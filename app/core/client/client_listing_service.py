@@ -1,9 +1,8 @@
 """
 Client Listing Service
 Per-client purchase totals over a date range, built from the issued
-invoices and credit notes (Invoice rows) — till sales are purged at each Z
-report and aren't tied to a client anyway, so invoices are the only record of
-what a client bought. Credit notes carry negative amounts and so net out of
+invoices and credit notes (Invoice rows).
+Credit notes carry negative amounts and so net out of
 their client's totals. Exported as CSV or as a PDF table.
 """
 import csv
@@ -56,8 +55,7 @@ class ClientListingService:
     def build(session: Session, start: date, end: date) -> list[ClientListingRow]:
         """One row per client with an invoice/credit note issued between
         start and end (both inclusive), sorted by company name. Name and VAT
-        number come from the client's most recent document in the range —
-        the frozen snapshot, not the live Client, which may have changed since."""
+        number come from the client's most recent document in the range."""
         since, until = local_days_range(start, end)
         invoices = (
             session.query(Invoice)

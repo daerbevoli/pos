@@ -6,7 +6,7 @@ price incl. VAT) and the totals at the bottom.
 
 Stock isn't counted in on every delivery yet, so each product is valued as
 a quantity of 1, the total is the sum of the prices. Prices are the shelf
-prices (VAT included); open-price products have no fixed price and count 0.
+prices (VAT included); open-price products have no fixed price and are left out.
 """
 
 import csv
@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core.sale.cart import calc_tax
 from app.core.inventory.product_service import ProductService
+from app.utils.clock import format_local, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ HEADERS = ("Barcode", "Product", "VAT %", "Excl. VAT", "Price")
 class InventoryLine:
     barcode: str
     name: str
-    tax_rate: int  # 0, 6, 12, 21
+    tax_rate: int  # 0, 6, 21, 12
     price: float  # VAT included
 
     @property
@@ -64,12 +65,9 @@ class InventoryReportService:
         # By barcode, products without one last.
         products = sorted(ProductService.get_all(session, active_only=True),
                           key=lambda p: (not p.barcode, p.barcode or "", p.id))
-        lines = []
-        for p in products:
-            if p.is_open_price:
-                continue
-            lines.append(InventoryLine(p.barcode or "", p.name, p.tax, round(p.price, 2)))
-        snapshot = InventorySnapshot(datetime.now(), lines)
+        lines = [InventoryLine(p.barcode or "", p.name, p.tax, round(p.price, 2))
+                 for p in products if not p.is_open_price]
+        snapshot = InventorySnapshot(utc_now(), lines)
         logger.info("Inventory taken: %d products, total %.2f (excl. VAT %.2f)",
                     len(lines), snapshot.total, snapshot.total_excl_vat)
         return snapshot
@@ -114,7 +112,7 @@ class InventoryReportService:
 
         story = [
             Paragraph("Inventory", styles["Title"]),
-            Paragraph(f"Taken on {snapshot.taken_at:%d/%m/%Y} — "
+            Paragraph(f"Taken on {format_local(snapshot.taken_at, '%d/%m/%Y')} — "
                       f"{len(snapshot.lines)} products", styles["Normal"]),
             Spacer(1, 6 * mm),
             table,

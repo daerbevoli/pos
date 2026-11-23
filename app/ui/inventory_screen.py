@@ -61,6 +61,7 @@ from app.ui.dialogs.inventory_format_dialog import InventoryFormatDialog
 from app.ui.dialogs.label_sheet_dialog import LabelSheetDialog
 from app.ui.widgets.form_fields import FieldRow, PickerDisplay
 from app.ui.widgets.shortcut_grid import ShortcutGrid
+from app.utils.clock import format_local
 from app.utils.utils import FunctionButton, SelectionKeepingView, TapToDismissOverlay
 
 logger = logging.getLogger(__name__)
@@ -720,7 +721,7 @@ class ArticleDetailPanel(QFrame):
             return
         as_csv = file_format == "csv"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Inventory", f"inventory_{snapshot.taken_at:%Y%m%d}.{file_format}",
+            self, "Save Inventory", f"inventory_{format_local(snapshot.taken_at, '%Y%m%d')}.{file_format}",
             "CSV Files (*.csv)" if as_csv else "PDF Files (*.pdf)",
         )
         if not path:
@@ -884,7 +885,7 @@ class InventoryScreen(QWidget):
 
         self.category_filter = QComboBox()
         self.category_filter.setFixedHeight(LIST_FILTER_HEIGHT)
-        self.category_filter.addItem("-", None)
+        self.category_filter.addItem("—", None)
         self.category_filter.currentIndexChanged.connect(self.refresh)
         toolbar.addWidget(self.category_filter)
 

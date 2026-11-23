@@ -3,9 +3,7 @@ Customer Display
 Customer-facing window that continuously mirrors the active POS ticket
 panel: V-tab title, date/time, client, the cart rows exactly as the
 cashier sees them (minus selection) and the running total, or the paid
-total and change once the sale is done. Its widgets reuse the ticket
-panel's object names, so main.qss styles both identically — light while
-the ticket is open, dark ("frozen") once it is paid/finished.
+total and change once the sale is done.
 Fed by POSScreen.display_changed; opens full screen on a second monitor
 when one is connected, otherwise as a normal window toggled from Settings.
 """
@@ -14,7 +12,6 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QStackedWidget,
     QTableWidget,
@@ -31,6 +28,7 @@ from app.constants import (
     FONT_SIZE_PAID_FOOTER,
     SPACING_XS,
 )
+from app.ui.pos_screen import size_cart_columns
 
 
 class CustomerDisplay(QWidget):
@@ -70,11 +68,8 @@ class CustomerDisplay(QWidget):
         self.cart_table.setObjectName("cartTable")
         hh = self.cart_table.horizontalHeader()
         hh.hide()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.cart_table.verticalHeader().setVisible(False)
+        size_cart_columns(self.cart_table)
+        self.cart_table.verticalHeader().hide()
         self.cart_table.verticalHeader().setMinimumSectionSize(0)  # else Windows raises rows to 24px, see POSScreen
         self.cart_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.cart_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

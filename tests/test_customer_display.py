@@ -175,7 +175,7 @@ def test_client_bar_mirrors_invoice_client(pos, display):
     assert display.client_label.isHidden()
     pos.set_client(_make_client(), "ACME")
     assert not display.client_label.isHidden()
-    assert display.client_label.text() == "INVOICE - ACME"
+    assert display.client_label.text() == "INVOICE — ACME"
 
 
 def test_display_follows_pos_while_another_screen_is_in_front(window, pos, display):
@@ -184,7 +184,7 @@ def test_display_follows_pos_while_another_screen_is_in_front(window, pos, displ
     pos.set_client(_make_client(), "ACME")
     window._navigate(SCREENS["inventory"])
     pos.emit_display()
-    assert display.client_label.text() == "INVOICE - ACME"
+    assert display.client_label.text() == "INVOICE — ACME"
     assert not display.client_label.isHidden()
 
 

@@ -157,9 +157,7 @@ class Cart:
 
     def _effective_price(self, base_price: float, base_tax_rate: int) -> float:
         """The price actually charged: the domestic (VAT-incl.) price as-is
-        for a Belgian client, netted of VAT for a non-domestic one — the
-        store's own margin is unaffected either way, only the VAT portion
-        it would otherwise have collected and remitted."""
+        for a Belgian client, netted of VAT for a non-domestic one."""
         if self.is_domestic or base_tax_rate == 0:
             return base_price
         return round(base_price / (1 + base_tax_rate / 100), 2)
