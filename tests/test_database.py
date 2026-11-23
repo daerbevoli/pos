@@ -67,11 +67,7 @@ def test_init_db_creates_tables_and_seeds(monkeypatch):
         "label_printer_vendor_id", "label_printer_product_id",
         "erp_url", "erp_db", "erp_api_key",
     }
-    assert {c.name for c in categories} == {
-        "Fruit & Vegetables", "Dairy & Eggs", "Meat & Fish", "Bakery",
-        "Frozen", "Beverages", "Snacks & Confectionery",
-        "Cleaning & Household", "Personal Care", "Other",
-    }
+    assert categories == []  # each shop sets up its own
 
 
 def test_seed_defaults_is_idempotent(monkeypatch):
@@ -84,7 +80,7 @@ def test_seed_defaults_is_idempotent(monkeypatch):
 
     with database.SessionFactory() as session:
         assert session.query(Settings).count() == 13
-        assert session.query(Category).count() == 10
+        assert session.query(Category).count() == 0
 
 
 def test_seed_defaults_preserves_user_edited_values(monkeypatch):

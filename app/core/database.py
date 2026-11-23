@@ -11,7 +11,7 @@ from typing import NamedTuple
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models.models import Base, Category, Settings
+from app.models.models import Base, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ def get_session() -> Session:
 
 
 def _seed_defaults():
-    """Insert default settings and categories on first run."""
+    """Insert default settings on first run."""
     with SessionFactory() as session:
         # Default settings
         defaults = [

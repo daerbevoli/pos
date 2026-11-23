@@ -43,7 +43,10 @@ def test_empty_state(screen):
     assert screen.summary_label.text() == "0 product(s) shown"
 
 
-def test_category_filter_seeded_with_default_categories(screen):
+def test_category_filter_lists_categories(screen):
+    with get_session() as session:
+        ProductService.create_category(session, "Bakery")
+    screen.refresh()
     labels = [screen.category_filter.itemText(i) for i in range(screen.category_filter.count())]
     assert labels[:2] == ["-", "All"]
     assert "Bakery" in labels
@@ -645,6 +648,8 @@ def test_import_resolves_category_by_name(screen, monkeypatch, tmp_path):
         writer.writeheader()
         writer.writerow({"barcode": "CATBC", "name": "Categorized", "price": "1", "tax": "0",
                           "unit": "pcs", "stock_quantity": "0", "min_stock_level": "5", "category": "Bakery"})
+    with get_session() as session:
+        ProductService.create_category(session, "Bakery")
 
     _import_from(screen, monkeypatch, csv_path)
 
