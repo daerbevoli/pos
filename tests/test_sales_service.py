@@ -678,9 +678,9 @@ def test_credit_note_lines_leave_out_voided_pairs():
 # ── VAT on the discounted amount ─────────────────────────────────────────
 
 def test_vat_is_charged_on_the_discounted_line_amount(db_session):
-    from app.core.sale.cart import DiscountEntry
     product = _make_product(db_session, price=12.10, tax=21)
-    cart = _cart_with(_item_for(product), DiscountEntry(amount=2.10, label="MANUAL DISCOUNT 2.10"))
+    cart = _cart_with(_item_for(product))
+    cart.apply_amount_discount(2.10)
 
     sale = SalesService.finalize_sale(db_session, cart)
 
@@ -691,11 +691,11 @@ def test_vat_is_charged_on_the_discounted_line_amount(db_session):
 
 
 def test_section_discount_vat_is_split_per_rate(db_session):
-    from app.core.sale.cart import DiscountEntry, SubtotalMarker
+    from app.core.sale.cart import SubtotalMarker
     food = _make_product(db_session, name="Food", price=10.60, tax=6)
     drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
-    cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker(),
-                      DiscountEntry(amount=2.27, label="MANUAL DISCOUNT 10%"))
+    cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker())
+    cart.apply_percent_discount(10)
 
     sale = SalesService.finalize_sale(db_session, cart)
 
@@ -707,13 +707,13 @@ def test_section_discount_vat_is_split_per_rate(db_session):
 
 def test_invoice_lines_fold_manual_discount_into_each_line(db_session):
     from app.core.client.client_service import ClientService
-    from app.core.sale.cart import DiscountEntry, SubtotalMarker
+    from app.core.sale.cart import SubtotalMarker
     from app.core.sale.sales_service import invoice_lines
     client = ClientService.create(db_session, name="C", vatNumber="V9", street="s", zip_code="1000", city="Brussels")
     food = _make_product(db_session, name="Food", price=10.60, tax=6)
     drink = _make_product(db_session, name="Drink", price=12.10, tax=21)
-    cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker(),
-                      DiscountEntry(amount=2.27, label="MANUAL DISCOUNT 10%"))
+    cart = _cart_with(_item_for(food), _item_for(drink), SubtotalMarker())
+    cart.apply_percent_discount(10)
 
     invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
     lines = invoice_lines(invoice)

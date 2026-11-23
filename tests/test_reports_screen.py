@@ -6,7 +6,7 @@ from app.constants.screens import SCREENS
 from app.ui.reports_screen import ReportsScreen
 from app.core.sale.report_service import _payment_breakdown, _discounts_and_mistakes, _sum_payment_breakdowns
 from app.core.inventory.product_service import ProductService
-from app.core.sale.cart import Cart, CartItem, DiscountEntry
+from app.core.sale.cart import Allocation, Cart, CartItem, DiscountEntry
 from app.core.sale.sales_service import SalesService
 from app.core.client.client_service import ClientService
 from app.core.database import get_session
@@ -99,9 +99,10 @@ def _item(name, qty, price=2.0, **kw):
 
 
 def test_discounts_split_manual_and_promo():
+    a = _item("A", 1)
     sale = _SnapshotSale(Cart(entries=[
-        _item("A", 1), DiscountEntry(amount=0.5, label="Promo", is_promo=True),
-        DiscountEntry(amount=1.0, label="10%"),
+        a, DiscountEntry(amount=0.5, label="Promo", is_promo=True, allocations=[Allocation(a, 0.5)]),
+        DiscountEntry(amount=1.0, label="10%", allocations=[Allocation(a, 1.0)]),
     ]))
     discounts, mistakes = _discounts_and_mistakes([sale, sale])
     assert discounts == {"manual": 2.0, "promo": 1.0}
@@ -487,9 +488,11 @@ def test_close_z_report_stores_discounts_and_mistakes(patched_db):
         def line(qty, **kw):
             return CartItem(product_id=product.id, product_name="Cola", product_barcode="",
                             unit_price=2.0, quantity=qty, tax_rate=21, **kw)
+        kept = line(1)
         cart = Cart(entries=[
-            line(2, has_reversal=True), line(1),
-            DiscountEntry(amount=0.5, label="10%"), line(-2, is_reversal=True),
+            line(2, has_reversal=True), kept,
+            DiscountEntry(amount=0.5, label="10%", allocations=[Allocation(kept, 0.5)]),
+            line(-2, is_reversal=True),
         ])
         SalesService.finalize_sale(session, cart, payment_method="cash")
 
@@ -509,10 +512,10 @@ def _make_client_id():
 def _invoice_with_discount(product, client_id):
     """An invoice for 1 x product with a 2.00 manual discount on it."""
     with get_session() as session:
+        item = CartItem(product_id=product.id, product_name=product.name, product_barcode="",
+                        unit_price=product.price, quantity=1, tax_rate=product.tax)
         cart = Cart(entries=[
-            CartItem(product_id=product.id, product_name=product.name, product_barcode="",
-                     unit_price=product.price, quantity=1, tax_rate=product.tax),
-            DiscountEntry(amount=2.0, label="MANUAL DISCOUNT 2.00"),
+            item, DiscountEntry(amount=2.0, label="MANUAL DISCOUNT 2.00", allocations=[Allocation(item, 2.0)]),
         ])
         return SalesService.finalize_invoice(session, cart, payment_method="cash", client_id=client_id)
 
