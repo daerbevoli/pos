@@ -302,6 +302,7 @@ class POSScreen(QWidget):
         self.cart_table.enter_pressed.connect(self._on_barcode_enter)
         self.cart_table.text_entered.connect(self._on_ticket_text)
         self.cart_table.barcode_scanned.connect(self._on_barcode_scan)
+        self.cart_table.itemSelectionChanged.connect(self.emit_display)
 
         col.addWidget(self.cart_table, stretch=1)
 
@@ -690,7 +691,7 @@ class POSScreen(QWidget):
             # treat anything over 6 characters (incl. the decimal point) as
             # an attempted scan and block it until the amount is filled in.
             if len(query) > 6:
-                self._show_overlay("Enter the pending amount before scanning another item")
+                self._show_overlay("Enter the pending amount first")
                 self.cart_input.clear()
                 return True
             amount = self._read_amount_input()
@@ -866,7 +867,7 @@ class POSScreen(QWidget):
         """Blocks subtotal/payment while a line still awaits its weight or
         price. Returns True (and shows an overlay) if the action should be blocked."""
         if any(isinstance(e, CartItem) and e.pending for e in self.cart.entries):
-            self._show_overlay("Fill in pending amount first")
+            self._show_overlay("Enter pending amount first")
             return True
         return False
 
@@ -1048,8 +1049,10 @@ class POSScreen(QWidget):
             "date": self.ticket_date.text(),
             "client": "" if self.client_label.isHidden() else self.client_label.text(),
             "frozen": self._cart_frozen(),
-            "paid": self.sale_finished,
+            "selected_row": next((i.row() for i in self.cart_table.selectionModel().selectedRows()), None),
+            "input_page": self.input_stack.currentIndex(),
             "total": self.ticket_total_lbl.text(),
+            "total_visible": not self.ticket_total_lbl.isHidden(),
             "footer_total": self.footer_total_lbl.text(),
             "footer_change": self.footer_change_lbl.text(),
             "rows": self._display_rows(),
@@ -1641,7 +1644,7 @@ class POSScreen(QWidget):
         if self._guard_payment_in_progress():
             return
         if self._selected_pending_item() is not None:
-            self._show_overlay("Enter the pending amount before adding another item")
+            self._show_overlay("Enter the pending amount first")
             return
 
         query = self.cart_input.text().strip()

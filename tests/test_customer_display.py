@@ -96,8 +96,20 @@ def test_display_rows_mark_divider_and_payment_rows(pos, display):
     assert rows[-1]["background"] is not None
 
 
-def test_display_has_no_selection(display):
+def test_customer_cannot_select_on_the_display(display):
     assert display.cart_table.selectionMode() == QAbstractItemView.SelectionMode.NoSelection
+
+
+def _selected(table):
+    return [i.row() for i in table.selectionModel().selectedRows()]
+
+
+def test_selected_row_is_mirrored(pos, display):
+    _add_item(pos)
+    _add_item(pos, barcode="2234567890123")
+    assert _selected(display.cart_table) == _selected(pos.cart_table) == [1]
+    pos._move_selection(-1)
+    assert _selected(display.cart_table) == _selected(pos.cart_table) == [0]
 
 
 def test_clearing_the_cart_empties_the_display(pos, display):
@@ -129,7 +141,7 @@ def test_active_ticket_is_light_and_paid_ticket_is_dark(pos, display):
 
 def test_open_ticket_shows_running_total(pos, display):
     _add_item(pos, price=1.25, quantity=2)
-    assert display.footer_stack.currentIndex() == 0
+    assert display.input_stack.currentIndex() == 0
     assert display.ticket_total_lbl.text() == pos.ticket_total_lbl.text() == "Total  2.50"
 
 
@@ -137,7 +149,7 @@ def test_partial_payment_shows_remaining(pos, display):
     _add_item(pos, price=10.0)
     pos.cart_input.setText("4")
     pos._open_payment("cash")
-    assert display.footer_stack.currentIndex() == 0
+    assert display.input_stack.currentIndex() == 0
     assert display.ticket_total_lbl.text() == "Remaining  6.00"
 
 
@@ -146,9 +158,45 @@ def test_paid_ticket_shows_total_and_change(pos, display):
     pos.cart_input.setText("20")
     pos._open_payment("cash")
 
-    assert display.footer_stack.currentIndex() == 1
+    assert display.input_stack.currentIndex() == 1
     assert display.footer_total_lbl.text() == pos.footer_total_lbl.text() == "Total  10.00"
     assert display.footer_change_lbl.text() == pos.footer_change_lbl.text() == "Change  -10.00"
+
+
+def _assert_mirrors(pos, display):
+    assert display.input_stack.currentIndex() == pos.input_stack.currentIndex()
+    assert display.cart_input.text() == ""
+    assert display.ticket_total_lbl.isHidden() == pos.ticket_total_lbl.isHidden()
+    assert display.ticket_total_lbl.text() == pos.ticket_total_lbl.text()
+    assert display.cart_input.property("frozen") == pos.cart_input.property("frozen")
+
+
+def test_typed_input_is_not_shown(pos, display):
+    _add_item(pos)
+    pos.cart_input.setText("3")
+    pos.emit_display()
+    assert display.cart_input.text() == ""
+
+
+def test_clearing_an_open_ticket_hides_the_total(pos, display):
+    """_clear_cart() marks the ticket finished only after its last redraw:
+    the display must follow the panel, not sale_finished."""
+    _add_item(pos)
+    pos._clear_cart(override=True)
+    assert pos.ticket_total_lbl.isHidden()
+    _assert_mirrors(pos, display)
+
+
+def test_bottom_row_mirrors_through_a_sale(window, pos, display):
+    _add_item(pos, price=10.0)
+    _assert_mirrors(pos, display)
+    pos.cart_input.setText("20")
+    pos._open_payment("cash")
+    _assert_mirrors(pos, display)
+    window._switch_vtab(2)
+    _assert_mirrors(pos, display)
+    window._switch_vtab(1)
+    _assert_mirrors(pos, display)
 
 
 # ── Header / client ──────────────────────────────────────────────────────

@@ -62,7 +62,7 @@ def test_init_db_creates_tables_and_seeds(monkeypatch):
         categories = session.query(Category).all()
 
     assert {s.key for s in settings} == {
-        "store_name", "store_address", "store_phone", "currency_symbol", "receipt_footer",
+        "company_name", "trade_name", "store_address", "store_phone", "currency_symbol", "receipt_footer",
         "receipt_printer_vendor_id", "receipt_printer_product_id",
         "label_printer_vendor_id", "label_printer_product_id",
         "erp_url", "erp_db", "erp_api_key",
@@ -83,7 +83,7 @@ def test_seed_defaults_is_idempotent(monkeypatch):
     database._seed_defaults()
 
     with database.SessionFactory() as session:
-        assert session.query(Settings).count() == 12
+        assert session.query(Settings).count() == 13
         assert session.query(Category).count() == 10
 
 
@@ -95,14 +95,14 @@ def test_seed_defaults_preserves_user_edited_values(monkeypatch):
 
     database._seed_defaults()
     with database.SessionFactory() as session:
-        row = session.query(Settings).filter_by(key="store_name").first()
+        row = session.query(Settings).filter_by(key="company_name").first()
         row.value = "My Custom Store"
         session.commit()
 
     database._seed_defaults()
 
     with database.SessionFactory() as session:
-        assert session.query(Settings).filter_by(key="store_name").first().value == "My Custom Store"
+        assert session.query(Settings).filter_by(key="company_name").first().value == "My Custom Store"
 
 
 # ── _run_migrations ──────────────────────────────────────────────────────
@@ -114,6 +114,22 @@ def test_migrations_are_noop_on_current_schema(monkeypatch):
     monkeypatch.setattr(database, "ENGINE", engine)
 
     database._run_migrations()  # should be a no-op, not raise
+
+
+def test_migrations_rename_store_name_to_company_name(monkeypatch):
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        conn.exec_driver_sql("INSERT INTO settings (key, value) VALUES ('store_name', 'Corner Shop BV')")
+        conn.commit()
+    monkeypatch.setattr(database, "ENGINE", engine)
+
+    database._run_migrations()
+    database._run_migrations()  # idempotent
+
+    with engine.connect() as conn:
+        rows = dict(conn.exec_driver_sql("SELECT key, value FROM settings").all())
+    assert rows == {"company_name": "Corner Shop BV"}
 
 
 def test_column_migration_adds_missing_column_preserving_data(monkeypatch):

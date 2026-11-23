@@ -113,6 +113,7 @@ def _run_migrations():
         _backfill_invoice_change(conn)
         _drop_client_contact_unique_indexes(conn)
         _convert_timestamps_to_utc(conn)
+        _rename_store_name_setting(conn)
 
 
 # PRAGMA user_version from which every stored timestamp is UTC. It lives in
@@ -206,6 +207,20 @@ def _backfill_invoice_change(conn):
     conn.commit()
 
 
+def _rename_store_name_setting(conn):
+    """The store_name setting became company_name (the legal name) when the
+    trade name, printed on receipts, got its own setting. Keeps the value."""
+    if not _table_columns(conn, "settings"):
+        return
+    if conn.exec_driver_sql("SELECT 1 FROM settings WHERE key = 'company_name'").first() is not None:
+        return
+    conn.exec_driver_sql(
+        "UPDATE settings SET key = 'company_name', description = 'Legal company name' "
+        "WHERE key = 'store_name'"
+    )
+    conn.commit()
+
+
 def _table_columns(conn, table: str) -> set[str]:
     """Column names of `table`, or an empty set if it doesn't exist yet —
     create_all() will have created it fresh, with every current column, so
@@ -230,7 +245,8 @@ def _seed_defaults():
     with SessionFactory() as session:
         # Default settings
         defaults = [
-            ("store_name", "My Supermarket", "Store name shown on receipts"),
+            ("company_name", "My Supermarket", "Legal company name"),
+            ("trade_name", "", "Store name printed on receipts without a logo (company name if empty)"),
             ("store_address", "", "Store address for receipts"),
             ("store_phone", "", "Store phone number"),
             ("currency_symbol", "€", "Currency symbol"),
@@ -242,22 +258,10 @@ def _seed_defaults():
             ("erp_url", "", "Odoo base URL, e.g. https://mycompany.odoo.com"),
             ("erp_db", "", "Odoo database name"),
             ("erp_api_key", "", "Odoo API key used for invoice export"),
-            # ("logo", "Browse logo", "Logo shown on receipts")
         ]
         for key, value, desc in defaults:
             exists = session.query(Settings).filter_by(key=key).first()
             if not exists:
                 session.add(Settings(key=key, value=value, description=desc))
-
-        # Default categories
-        default_categories = [
-            "Fruit & Vegetables", "Dairy & Eggs", "Meat & Fish",
-            "Bakery", "Frozen", "Beverages", "Snacks & Confectionery",
-            "Cleaning & Household", "Personal Care", "Other"
-        ]
-        for cat_name in default_categories:
-            exists = session.query(Category).filter_by(name=cat_name).first()
-            if not exists:
-                session.add(Category(name=cat_name))
 
         session.commit()

@@ -43,7 +43,8 @@ def screen(qtbot, patched_db):
 
 
 def test_loads_default_settings_on_construction(screen):
-    assert screen.store_name.text() == "My Supermarket"
+    assert screen.company_name.text() == "My Supermarket"
+    assert screen.trade_name.text() == ""
     assert screen.currency.text() == "€"
     assert screen.receipt_footer.text() == "Thank you for shopping with us!"
     assert screen.receipt_vendor.text() == ""
@@ -52,7 +53,8 @@ def test_loads_default_settings_on_construction(screen):
 def test_save_persists_edited_fields(screen, monkeypatch, patched_db):
     monkeypatch.setattr("app.ui.settings_screen.QMessageBox.information", lambda *a, **kw: None)
 
-    screen.store_name.setText("New Shop Name")
+    screen.company_name.setText("Shop BV")
+    screen.trade_name.setText("New Shop Name")
     screen.currency.setText("$")
     screen.receipt_vendor.setText("0x04b8")
 
@@ -60,7 +62,8 @@ def test_save_persists_edited_fields(screen, monkeypatch, patched_db):
 
     from app.core.database import get_session
     with get_session() as session:
-        assert SettingsService.get(session, "store_name") == "New Shop Name"
+        assert SettingsService.get(session, "company_name") == "Shop BV"
+        assert SettingsService.get(session, "trade_name") == "New Shop Name"
         assert SettingsService.get(session, "currency_symbol") == "$"
         assert SettingsService.get(session, "receipt_printer_vendor_id") == "0x04b8"
 
@@ -336,3 +339,30 @@ def test_close_pos_asks_confirmation_for_admin(screen, monkeypatch, answer, shou
     screen._admin()
     screen._close_pos()
     assert bool(quits) is should_quit
+
+
+class _FakeErp:
+    company = {"name": "Shop BV", "vat": "BE0477472701"}
+
+    def __init__(self, **kwargs):
+        pass
+
+    def connect(self):
+        return True
+
+    def get_company(self):
+        return _FakeErp.company
+
+
+@pytest.mark.parametrize("name, vat, kind", [
+    ("Other BV", "BE 0477.472.701", "info"),  # only the VAT number has to match
+    ("Shop BV", "BE0123456749", "error"),
+])
+def test_test_erp_checks_the_odoo_company_vat(screen, monkeypatch, name, vat, kind):
+    monkeypatch.setattr("app.ui.settings_screen.ErpService", _FakeErp)
+    calls = []
+    monkeypatch.setattr(screen, "_show_overlay", lambda msg, kind="info": calls.append((msg, kind)))
+    screen.company_name.setText(name)
+    screen.store_vat.setText(vat)
+    screen._test_erp_connection()
+    assert calls[0][1] == kind and "Shop BV" in calls[0][0]

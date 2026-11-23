@@ -13,7 +13,7 @@ def _printed_text(printer):
 
 def test_logo_missing_file_prints_text_header(tmp_path):
     printer = mock.Mock()
-    _print_logo(printer, {"logo_path": str(tmp_path / "nope.png"), "store_name": "Corner Shop"})
+    _print_logo(printer, {"logo_path": str(tmp_path / "nope.png"), "trade_name": "Corner Shop"})
     printer.image.assert_not_called()
     assert "Corner Shop" in _printed_text(printer)
 
@@ -22,9 +22,18 @@ def test_logo_corrupt_file_prints_text_header_instead_of_failing(tmp_path):
     bad = tmp_path / "logo.png"
     bad.write_bytes(b"not an image")
     printer = mock.Mock()
-    _print_logo(printer, {"logo_path": str(bad), "store_name": "Corner Shop"})
+    _print_logo(printer, {"logo_path": str(bad), "trade_name": "Corner Shop"})
     printer.image.assert_not_called()
     assert "Corner Shop" in _printed_text(printer)
+
+
+def test_text_header_falls_back_to_company_name_without_trade_name():
+    printer = mock.Mock()
+    _print_logo(printer, {"company_name": "Corner Shop BV", "trade_name": ""})
+    assert "Corner Shop BV" in _printed_text(printer)
+    printer = mock.Mock()
+    _print_logo(printer, {"company_name": "Corner Shop BV", "trade_name": "Corner Shop"})
+    assert "Corner Shop\n" in _printed_text(printer) and "BV" not in _printed_text(printer)
 
 
 def test_logo_valid_file_is_scaled_to_paper_width(tmp_path):

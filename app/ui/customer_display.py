@@ -1,18 +1,17 @@
 """
 Customer Display
 Customer-facing window that continuously mirrors the active POS ticket
-panel: V-tab title, date/time, client, the cart rows exactly as the
-cashier sees them (minus selection) and the running total, or the paid
-total and change once the sale is done.
+panel
 Fed by POSScreen.display_changed; opens full screen on a second monitor
 when one is connected, otherwise as a normal window toggled from Settings.
 """
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QItemSelectionModel, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QFont, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -78,19 +77,17 @@ class CustomerDisplay(QWidget):
         self.cart_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         col.addWidget(self.cart_table, stretch=1)
 
-        # Page 0: running total (open ticket), page 1: paid total / change.
-        self.footer_stack = QStackedWidget()
-        self.ticket_total_lbl = QLabel()
-        self.ticket_total_lbl.setObjectName("ticketTotalLbl")
-        self.ticket_total_lbl.setMinimumHeight(CART_INFO_BAR_HEIGHT)
-        self.ticket_total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.footer_stack.addWidget(self.ticket_total_lbl)
+        self.cart_input = QLineEdit()
+        self.cart_input.setObjectName("cartInput")
+        self.cart_input.setMinimumHeight(CART_INFO_BAR_HEIGHT)
+        self.cart_input.setReadOnly(True)
+        self.cart_input.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.payment_footer = QWidget()
         self.payment_footer.setObjectName("paymentFooter")
         self.payment_footer.setMinimumHeight(CART_INFO_BAR_HEIGHT)
         fl = QHBoxLayout(self.payment_footer)
-        fl.setContentsMargins(10, 4, 10, 4)
+        fl.setContentsMargins(5, 2, 5, 2)
         footer_font = QFont()
         footer_font.setBold(True)
         footer_font.setPixelSize(FONT_SIZE_PAID_FOOTER)
@@ -103,8 +100,20 @@ class CustomerDisplay(QWidget):
         fl.addWidget(self.footer_total_lbl)
         fl.addStretch()
         fl.addWidget(self.footer_change_lbl)
-        self.footer_stack.addWidget(self.payment_footer)
-        col.addWidget(self.footer_stack)
+
+        self.input_stack = QStackedWidget()
+        self.input_stack.addWidget(self.cart_input)
+        self.input_stack.addWidget(self.payment_footer)
+
+        self.ticket_total_lbl = QLabel()
+        self.ticket_total_lbl.setObjectName("ticketTotalLbl")
+        self.ticket_total_lbl.setMinimumHeight(CART_INFO_BAR_HEIGHT)
+        self.ticket_total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        input_row = QHBoxLayout()
+        input_row.addWidget(self.input_stack, stretch=1)
+        input_row.addWidget(self.ticket_total_lbl)
+        col.addLayout(input_row)
 
     # ── Placement ─────────────────────────────────────────────────────────
 
@@ -134,7 +143,7 @@ class CustomerDisplay(QWidget):
 
     def _set_frozen_style(self, frozen: bool):
         for widget in (self.cart_table, self.client_label, self.header_widget,
-                       self.ticket_title, self.ticket_date, self.ticket_total_lbl):
+                       self.ticket_title, self.ticket_date, self.cart_input, self.ticket_total_lbl):
             widget.setProperty("frozen", frozen)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
@@ -148,13 +157,11 @@ class CustomerDisplay(QWidget):
         self.client_label.setText(state["client"])
         self.client_label.setVisible(bool(state["client"]))
 
-        if state["paid"]:
-            self.footer_total_lbl.setText(state["footer_total"])
-            self.footer_change_lbl.setText(state["footer_change"])
-            self.footer_stack.setCurrentIndex(1)
-        else:
-            self.ticket_total_lbl.setText(state["total"])
-            self.footer_stack.setCurrentIndex(0)
+        self.input_stack.setCurrentIndex(state["input_page"])
+        self.footer_total_lbl.setText(state["footer_total"])
+        self.footer_change_lbl.setText(state["footer_change"])
+        self.ticket_total_lbl.setText(state["total"])
+        self.ticket_total_lbl.setVisible(state["total_visible"])
 
         rows = state["rows"]
         self.cart_table.setRowCount(len(rows))
@@ -173,7 +180,18 @@ class CustomerDisplay(QWidget):
                     cell.setBackground(brush)
                 self.cart_table.setItem(r, c, cell)
             self.cart_table.setRowHeight(r, 3 if row["divider"] else CART_ROW_HEIGHT)
-        # Keep the latest line in view; scroll again once layout has caught up
-        # with the rows just inserted (same issue as POSScreen._select_cart_row).
-        self.cart_table.scrollToBottom()
-        QTimer.singleShot(0, self.cart_table.scrollToBottom)
+        selected = state["selected_row"]
+        self.cart_table.clearSelection()
+        if selected is not None:
+            self.cart_table.selectionModel().select(
+                self.cart_table.model().index(selected, 0),
+                QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
+            )
+        target = len(rows) - 1 if selected is None else selected
+        if target >= 0:
+            self.cart_table.scrollTo(self.cart_table.model().index(target, 0))
+            QTimer.singleShot(0, lambda: self._scroll_to(target))
+
+    def _scroll_to(self, row: int):
+        if row < self.cart_table.rowCount():
+            self.cart_table.scrollTo(self.cart_table.model().index(row, 0))

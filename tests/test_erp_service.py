@@ -230,3 +230,23 @@ def test_email_off_sends_peppol_only(erp_with):
     odoo = FakeOdoo(email="acme@example.com", peppol="valid")
 
     assert erp_with(odoo).send_invoice(42, use_peppol=True, use_email=False) == (True, "Invoice sent via peppol")
+
+
+# ── Company behind the API key (Test ERP) ────────────────────────────────
+
+def test_get_company_reads_the_key_users_company(erp_with):
+    def odoo(model, method, payload):
+        return {
+            ("res.users", "context_get"): {"uid": 2},
+            ("res.users", "read"): [{"company_id": [1, "Shop BV"]}],
+            ("res.company", "read"): [{"name": "Shop BV", "vat": "BE0477472701"}],
+        }[(model, method)]
+    assert erp_with(odoo).get_company() == {"name": "Shop BV", "vat": "BE0477472701"}
+
+
+def test_same_vat_compares_normalized_vat_only():
+    from app.core.erp.erp_service import same_vat
+    odoo = {"name": "Shop BV", "vat": "BE0477472701"}
+    assert same_vat(odoo, "BE 0477.472.701")
+    assert not same_vat(odoo, "BE0123456749")
+    assert not same_vat({"name": "Shop BV", "vat": False}, "")  # both empty: nothing to identify by

@@ -40,7 +40,7 @@ from app.constants.screens import SCREENS
 from app.core import update_service
 from app.core.admin import admin_code_problem, check_admin_code, set_admin_code
 from app.core.database import get_session
-from app.core.erp.erp_service import ErpService
+from app.core.erp.erp_service import ErpService, same_vat
 from app.core.inventory.label_service import LabelPrinterService
 from app.core.inventory.product_service import ProductService
 from app.core.sale.receipt_service import PrinterError, PrinterNotResponding, ReceiptService
@@ -126,7 +126,9 @@ class SettingsScreen(QWidget):
         store_group = QGroupBox("Store Information")
         store_form = QFormLayout(store_group)
 
-        self.store_name = QLineEdit()
+        self.company_name = QLineEdit()
+        self.trade_name = QLineEdit()
+        self.trade_name.setPlaceholderText("Store name on receipts without a logo")
         self.store_address = QLineEdit()
         self.store_vat = QLineEdit()
         self.store_phone = QLineEdit()
@@ -147,7 +149,8 @@ class SettingsScreen(QWidget):
         logo_row.addWidget(self.logo_preview)
         logo_row.addStretch()
 
-        store_form.addRow("Store Name:", self.store_name)
+        store_form.addRow("Company Name:", self.company_name)
+        store_form.addRow("Trade Name:", self.trade_name)
         store_form.addRow("Address:", self.store_address)
         store_form.addRow("Phone:", self.store_phone)
         store_form.addRow("Vat Number:", self.store_vat)
@@ -372,7 +375,8 @@ class SettingsScreen(QWidget):
     def _load(self):
         with get_session() as session:
             s = SettingsService.get_all(session)
-        self.store_name.setText(s.get("store_name", ""))
+        self.company_name.setText(s.get("company_name", ""))
+        self.trade_name.setText(s.get("trade_name", ""))
         self.store_address.setText(s.get("store_address", ""))
         self.store_vat.setText(s.get("store_vat", ""))
         self.store_phone.setText(s.get("store_phone", ""))
@@ -614,7 +618,8 @@ class SettingsScreen(QWidget):
 
     def _save(self):
         with get_session() as session:
-            SettingsService.set(session, "store_name", self.store_name.text())
+            SettingsService.set(session, "company_name", self.company_name.text())
+            SettingsService.set(session, "trade_name", self.trade_name.text())
             SettingsService.set(session, "store_address", self.store_address.text())
             SettingsService.set(session, "store_phone", self.store_phone.text())
             SettingsService.set(session, "store_vat", self.store_vat.text())
@@ -761,11 +766,19 @@ class SettingsScreen(QWidget):
                 api_key=self.erp_api_key.text().strip()
             )
             erp.connect()
+            company = erp.get_company()
         except Exception as e:
             logger.warning("ERP connection test failed: %s", e)
             self._show_overlay("Test ERP connection Failed", kind="error")
+            return
+        # Invoices go out as the key's Odoo company, not as what the POS says.
+        if not same_vat(company, self.store_vat.text()):
+            self._show_overlay(
+                f"Connected, but invoices will be issued by Odoo company {company['name']!r} "
+                f"with VAT {company['vat'] or '(none)'}, not the Vat Number here",
+                kind="error")
         else:
-            self._show_overlay("Test ERP connection Success")
+            self._show_overlay(f"Test ERP connection Success: invoices issued by {company['name']}")
 
     def _check_update(self):
         self.update_status.setText("Checking for updates…")

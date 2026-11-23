@@ -141,7 +141,7 @@ def _open(vendor_id: str, product_id: str):
 
 def _print_text_header(printer, settings: dict):
     printer.set(align="center", bold=True, width=2, height=2, custom_size=True)
-    printer.text(f"{settings.get('store_name', '')}\n")
+    printer.text(f"{settings.get('trade_name') or settings.get('company_name', '')}\n")
     printer.text("-" * LINE_WIDTH + "\n")
     printer.set(align="left")
 

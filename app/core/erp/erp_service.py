@@ -38,6 +38,13 @@ class ERPError(Exception):
     """ERP Error thrown at connection problem, bad HTTP request or error in received HTTP data"""
 
 
+def same_vat(odoo_company: dict, vat: str) -> bool:
+    """Whether the Odoo company behind the API key (which issues the
+    invoices) has the POS's VAT number, normalized. The VAT number is what
+    identifies the company; names are allowed to differ."""
+    return normalize_vat(odoo_company.get("vat")) == normalize_vat(vat) != ""
+
+
 def _clip(value) -> str:
     text = str(value)
     return text if len(text) <= _LOG_BODY_MAX else text[:_LOG_BODY_MAX] + f"... ({len(text)} chars)"
@@ -103,6 +110,15 @@ class ErpService:
         logger.info("ERP connection OK: db %s, uid %s", self.db, user_context["uid"])
         return True
 
+
+    def get_company(self) -> dict:
+        """{"name", "vat"} of the API key's user's company: the one Odoo
+        creates, and Peppol sends, the invoices as."""
+        uid = self._call(model="res.users", method="context_get", payload={})["uid"]
+        company_id = self.read("res.users", [uid], ["company_id"])[0]["company_id"][0]
+        company = self.read("res.company", [company_id], ["name", "vat"])[0]
+        print({"name": company.get("name") or "", "vat": company.get("vat") or ""})
+        return {"name": company.get("name") or "", "vat": company.get("vat") or ""}
 
     # ORM helpers
     def search(self, model, domain, limit = 1) -> Any:
