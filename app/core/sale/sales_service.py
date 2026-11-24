@@ -1,7 +1,7 @@
 """
 Sales Service
-Saving paid tickets as sales/invoices (stock, numbering), reopened-sale
-edits, crash-recovery of open tickets, the invoice payload for the ERP,
+Saving paid tickets as sales/invoices reopened-sale edits,
+crash-recovery of open tickets, the invoice payload for the ERP,
 and sales/invoice lookups. The ticket itself lives in app.core.cart.
 """
 import json
@@ -26,10 +26,11 @@ from app.utils.clock import local_days_range, to_local, utc_now
 
 logger = logging.getLogger(__name__)
 
+NEGATIVE_INVOICE_LINE_MSG = "Negative lines can't be invoiced: use RF/CN mode."
+
 @dataclass
 class OpenTicketData:
-    """One V-tab's recovered in-progress cart, read back from `open_tickets`
-    at startup — see SalesService.load_open_tickets()."""
+    """One V-tab's recovered in-progress cart, read back from open_tickets at startup"""
     cart: Cart
     is_invoice: bool
     client_id: int | None
@@ -74,7 +75,7 @@ def clear_open_ticket(session: Session, vtab_slot: int) -> None:
 
 
 def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
-    """Every saved in-progress V-tab cart, keyed by vtab slot — read once at
+    """Every saved in-progress V-tab cart, keyed by vtab slot, read once at
     startup to recover from a crash or unclean close."""
     drafts = {}
     for row in session.query(OpenTicket).all():
@@ -98,13 +99,11 @@ def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
                     f", reopened sale {row.sale_id}" if row.sale_id else "")
     return drafts
 
-
-
 @dataclass
 class InvoiceLine:
     product_name: str
     quantity: float
-    unit_price_excl_tax: float  # full, undiscounted unit price — discount_percent conveys the discount
+    unit_price_excl_tax: float  # full, undiscounted unit price
     unit: str
     tax_rate: int
     line_total_excl_tax: float
@@ -112,10 +111,9 @@ class InvoiceLine:
 
 def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
     """One line per item, at its full unit price with every discount that
-    applies to it — promo and its share of manual ones — folded into
+    applies to it, promo and its share of manual ones, folded into
     discount_percent, so the ERP computes VAT on the discounted amount, the
-    same as the POS (Cart.net_lines). Manual discounts therefore no
-    longer go out as separate lines."""
+    same as the POS (Cart.net_lines)."""
     cart = Cart.from_snapshot(invoice.line_items_snapshot)
     lines = []
     for line in cart.net_lines():
@@ -141,29 +139,24 @@ def generate_invoice_data(invoice: Invoice) -> dict:
     issued = to_local(invoice.issued_at).date()
     invoice_data = {
         "inv_num": invoice.invoice_number,
-        # Dates as in the shop: an invoice issued at 00:30 local is dated that day.
         "inv_date": issued.strftime("%Y-%m-%d"),
-        "due_date": (issued + timedelta(weeks=1)).strftime("%Y-%m-%d")
+        "due_date": (issued + timedelta(weeks=1)).strftime("%Y-%m-%d"),
+        "to": {
+                "name": invoice.client_name,
+                "street": invoice.client_street,
+                "zip": invoice.client_zip,
+                "city": invoice.client_city,
+                "country": invoice.client_country,
+                "vat": invoice.client_vat_number,
+                "phone": invoice.client.phone,
+                "email": invoice.client.email
+        }
     }
-    receiver = {
-        "name": invoice.client_name,
-        "street": invoice.client_street,
-        "zip": invoice.client_zip,
-        "city": invoice.client_city,
-        "country": invoice.client_country,
-        "vat": invoice.client_vat_number,
-        "phone": invoice.client.phone,
-        "email": invoice.client.email
-    }
-    invoice_data["to"] = receiver
     items = invoice_lines(invoice)
     if invoice.is_credit_note:
-        # Odoo books a credit note as its own move type with positive
-        # quantities — the refund direction comes from out_refund itself,
-        # not from negative lines (which an out_invoice refuses to post).
         for line in items:
-            line.quantity = abs(line.quantity)
-            line.line_total_excl_tax = abs(line.line_total_excl_tax)
+            line.quantity = -line.quantity
+            line.line_total_excl_tax = -line.line_total_excl_tax
     invoice_data["move_type"] = "out_refund" if invoice.is_credit_note else "out_invoice"
     invoice_data["items"] = items
     invoice_data["notes"] = "Thank you for shopping."
@@ -172,12 +165,7 @@ def generate_invoice_data(invoice: Invoice) -> dict:
 
     return invoice_data
 
-    # ── Reports / Queries ─────────────────────────────────────────────────────
-
-# Highest number in a series before it wraps back to 1; also sets the
-# zero-padded width ("S-ddmmyy-042", "I-ddmmyy-042"). The date keeps a
-# number unique across days, so this caps S- (and RF-) tickets per day:
-# once all 999 of today's are in use, _next_number() refuses the next one.
+# sale and invoice numbers can only to up to a maximum of 999 -> sale/invoice every 40 s
 SALE_NUMBER_MAX = 999      # S- / RF-
 INVOICE_NUMBER_MAX = 999   # I- / CN-
 
@@ -372,6 +360,23 @@ class SalesService:
         return invoice
 
     @staticmethod
+    def _check_invoice_total(cart: Cart):
+        """Refuses a regular invoice with a negative line or a negative total:
+        taking goods back is a credit note (RF/CN mode), never a deduction on
+        an invoice. A VOID (reversal) and the line it voids don't count: the
+        pair cancels out and never reaches the invoice (invoice_lines)."""
+        if cart.is_refund:
+            return
+        negative = cart.negative_lines()
+        if negative:
+            logger.warning("Invoice refused: negative line(s) %s",
+                           ", ".join(f"{e.product_name} x{e.quantity:g}" for e in negative))
+            raise ValueError(NEGATIVE_INVOICE_LINE_MSG)
+        if round(cart.total, 2) < 0:
+            logger.warning("Invoice refused: negative total %.2f", cart.total)
+            raise ValueError("Negative total can't be invoiced: use RF/CN mode.")
+
+    @staticmethod
     def _copy_client(invoice: Invoice, client: Client):
         """Snapshots the client onto the invoice — never re-derived from the
         live client afterward, so the document can't silently change later."""
@@ -431,6 +436,8 @@ class SalesService:
         if client_id and not client:
             logger.warning("Sale update refused: %s, client %s not found", sale.sale_number, client_id)
             raise ValueError("An invoice requires a valid client.")
+        if client is not None or sale.invoice is not None:
+            SalesService._check_invoice_total(cart)
         old_total = sale.final_amount
 
         # Restore stock from the old line items before replacing them.
@@ -525,6 +532,7 @@ class SalesService:
         if not client:
             logger.warning("Invoice refused: client %s not found", client_id)
             raise ValueError("An invoice requires a valid client.")
+        SalesService._check_invoice_total(cart)
 
         sale = SalesService._save_new_sale(
             session, cart, payment_method, amount_tendered, notes, payment_breakdown)

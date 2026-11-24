@@ -184,6 +184,14 @@ class Cart:
                 resolved.append((entry, allocations))
         return items, net, resolved
 
+    def negative_lines(self) -> list["CartItem"]:
+        """Items taken back (negative quantity), not counting a VOID or the
+        line it voids: that pair cancels out. A regular invoice can't hold
+        any (credit notes are made in RF/CN mode)."""
+        return [e for e in self.entries
+                if isinstance(e, CartItem) and not (e.is_reversal or e.has_reversal)
+                and e.quantity is not None and e.quantity < 0]
+
     def _discount_targets(self) -> list["CartItem"]:
         """What a discount added now would come off: the last item, or right
         after a subtotal the last section's items (a section holding only
@@ -229,9 +237,15 @@ class Cart:
         return self._add_discount(amount, _amount_label(amount))
 
     def _add_discount(self, amount: float, label: str) -> "DiscountEntry":
+        """The amount is worked out on the whole section (discount_base, which
+        nets items taken back against items sold), but it only comes off the
+        items sold: a take-back line keeps its full refund. As the amount is
+        at most the section total, which is at most what the sold items are
+        worth, no sold item goes below zero."""
         _, net, _ = self._resolve()
+        recipients = [item for item in self._discount_targets() if net[id(item)] > 0]
         entry = DiscountEntry(amount=amount, label=label,
-                              allocations=_split(amount, self._discount_targets(), net))
+                              allocations=_split(amount, recipients, net))
         self.entries.append(entry)
         return entry
 

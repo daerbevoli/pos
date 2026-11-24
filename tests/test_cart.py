@@ -4,6 +4,8 @@ dataclasses in app.core.sales_service, and the _calc_tax helper.
 """
 import json
 
+import pytest
+
 from app.core.sale.cart import (
     Allocation, Cart, CartItem, DiscountEntry, PaymentEntry, SubtotalMarker, calc_tax,
 )
@@ -802,6 +804,24 @@ def test_section_discount_only_covers_its_own_section():
     cart = Cart(entries=[a, SubtotalMarker(), b, c, SubtotalMarker()])
     cart.apply_amount_discount(3.0)
     assert _nets(cart) == [(a, 10.0), (b, 9.0), (c, 18.0)]
+
+
+def test_section_discount_leaves_a_take_back_line_its_full_refund():
+    """The amount is a share of the section total (sold minus taken back),
+    but only comes off the items sold."""
+    sold, sold2, back = _line(20.0), _line(10.0, tax=6), _line(10.0, qty=-1)
+    cart = Cart(entries=[sold, sold2, back, SubtotalMarker()])
+    cart.apply_percent_discount(50)  # section total 20 -> 10 off
+    assert _nets(cart) == [(sold, pytest.approx(13.33)), (sold2, pytest.approx(6.67)), (back, -10.0)]
+    assert cart.total == 10.0
+
+
+def test_full_section_discount_with_take_back_keeps_sold_items_at_zero_or_more():
+    sold, back = _line(20.0), _line(10.0, qty=-1)
+    cart = Cart(entries=[sold, back, SubtotalMarker()])
+    cart.apply_percent_discount(100)
+    assert _nets(cart) == [(sold, 10.0), (back, -10.0)]
+    assert cart.total == 0.0
 
 
 def test_section_discount_rounding_remainder_keeps_the_total_exact():

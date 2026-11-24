@@ -27,7 +27,7 @@ from app.constants import (
     FONT_SIZE_PAID_FOOTER,
     SPACING_XS,
 )
-from app.ui.pos_screen import size_cart_columns
+from app.ui.pos_screen import align_cart_cell, size_cart_columns
 
 
 class CustomerDisplay(QWidget):
@@ -176,6 +176,7 @@ class CustomerDisplay(QWidget):
             for c, text in enumerate(row["texts"]):
                 cell = QTableWidgetItem(text)
                 cell.setFont(fonts[row["bold"]])
+                align_cart_cell(cell, c)
                 if brush is not None:
                     cell.setBackground(brush)
                 self.cart_table.setItem(r, c, cell)

@@ -335,6 +335,65 @@ def test_scanner_weight_unit_without_quantity_creates_pending_item(screen):
     assert screen._selected_pending_item() is item
 
 
+def _fill_pending(screen, typed):
+    for ch in typed:
+        screen._on_ticket_text(ch)
+    screen._handle_pending_or_guards()
+
+
+def test_negative_weight_takes_weighed_item_back(screen):
+    pid, _, _ = _add_product(unit="kg", price=3.0)
+    screen.isAdmin = True
+    screen.add_product_by_id(pid)  # awaits its weight
+
+    _fill_pending(screen, "-1.5")
+
+    item = screen.cart.entries[0]
+    assert item.quantity == -1.5
+    assert screen.cart.total == pytest.approx(-4.5)
+
+
+def test_negative_open_price_takes_pending_item_back(screen):
+    pid, _, _ = _add_product(price=0.0, is_open_price=True)
+    screen.isAdmin = True
+    screen.add_product_by_id(pid)  # awaits its price
+
+    _fill_pending(screen, "-10")
+
+    item = screen.cart.entries[0]
+    assert (item.quantity, item.unit_price) == (-1, 10.0)
+    assert screen.cart.total == pytest.approx(-10.0)
+
+
+@pytest.mark.parametrize("typed", ["-10", "10"])
+def test_refund_pending_amount_is_negative_either_way(screen, typed):
+    weight, _, _ = _add_product(unit="kg", price=1.0)
+    open_price, _, _ = _add_product(price=0.0, is_open_price=True)
+    screen.isAdmin = True
+    screen.set_rf_cn(True)
+
+    screen.add_product_by_id(weight)
+    _fill_pending(screen, typed)
+    screen.add_product_by_id(open_price)
+    _fill_pending(screen, typed)
+
+    assert [(e.quantity, e.unit_price) for e in screen.cart.entries] == [(-10, 1.0), (-1, 10.0)]
+
+
+@pytest.mark.parametrize("overrides", [{"unit": "kg", "price": 3.0}, {"price": 0.0, "is_open_price": True}])
+def test_invoice_refuses_negative_pending_amount(screen, overrides):
+    pid, _, _ = _add_product(**overrides)
+    screen.isAdmin = True
+    screen.set_client(_make_client_id(), "Acme")
+    screen.add_product_by_id(pid)
+
+    _fill_pending(screen, "-10")
+
+    assert screen.cart.entries[0].pending
+    assert not screen.overlay.isHidden()
+    assert screen.cart_input.text() == ""
+
+
 def test_scanner_unit_product_without_quantity_adds_one(screen):
     pid, barcode, unit = _add_product(barcode="2230000000000", price=3.0)
     screen._on_barcode_scan(barcode)
@@ -469,6 +528,48 @@ def test_discount_without_amount_shows_overlay(screen):
     screen._apply_percent_discount()
     assert not screen.overlay.isHidden()
     assert not any(isinstance(e, DiscountEntry) for e in screen.cart.entries)
+
+
+@pytest.mark.parametrize("typed", ["-5", "0"])
+@pytest.mark.parametrize("kind", ["percent", "amount"])
+def test_negative_or_zero_discount_is_refused(screen, typed, kind):
+    pid, barcode, _ = _add_product(barcode="d4", price=10.0)
+    _scan(screen, barcode)
+    screen.cart_input.setText(typed)
+
+    getattr(screen, f"_apply_{kind}_discount")()
+
+    assert not screen.overlay.isHidden()
+    assert not any(isinstance(e, DiscountEntry) for e in screen.cart.entries)
+    assert screen.cart.total == 10.0
+    assert screen.cart_input.text() == ""
+
+
+def test_numbers_are_right_aligned(screen):
+    from PyQt6.QtCore import Qt
+    pid, _, _ = _add_product()
+    screen.isAdmin = True
+    screen.add_product_by_id(pid)
+    screen._on_ticket_text("-")
+    screen.add_product_by_id(pid)
+
+    right = Qt.AlignmentFlag.AlignRight
+    for row in range(screen.cart_table.rowCount()):
+        for col in (0, 2, 3):
+            assert screen.cart_table.item(row, col).textAlignment() & right.value
+        assert not screen.cart_table.item(row, 1).textAlignment() & right.value
+
+
+def test_numpad_minus_is_admin_only_and_starts_the_amount(screen):
+    screen._unfreeze_ticket()
+    screen._numpad_press("-")
+    assert screen.cart_input.text() == ""
+    assert not screen.overlay.isHidden()
+
+    screen.isAdmin = True
+    for key in ("-", "1", "0", "-"):  # a second "-" is refused by the validator
+        screen._numpad_press(key)
+    assert screen.cart_input.text() == "-10"
 
 
 def test_discount_on_empty_cart_shows_overlay(screen):
@@ -718,6 +819,69 @@ def test_set_client_marks_invoice_and_shows_label(screen):
     assert screen.client_id == client_id
     assert not screen.client_label.isHidden()
     assert "Acme" in screen.client_label.text()
+
+
+def _make_client_id():
+    with get_session() as session:
+        return ClientService.create(
+            session, name="Acme", vatNumber="V1", street="1 Main St", zip_code="1000", city="Brussels",
+        ).id
+
+
+def test_invoice_refuses_negative_line_as_it_is_added(screen):
+    pid, barcode, _ = _add_product(barcode="5411234567890")
+    screen.isAdmin = True
+    screen.set_client(_make_client_id(), "Acme")
+    screen.add_product_by_id(pid)
+
+    screen._on_ticket_text("-")
+    screen.add_product_by_id(pid)
+    screen._on_ticket_text("-3")
+    screen._on_barcode_scan(barcode)
+    _scan(screen, "-2" + barcode)
+
+    assert [e.quantity for e in screen.cart.entries] == [1]
+    assert not screen.overlay.isHidden()
+    assert screen.cart_input.text() == ""
+
+
+def test_invoice_refuses_negative_open_price(screen):
+    pid, _, _ = _add_product(price=0.0, is_open_price=True)
+    screen.isAdmin = True
+    screen.set_client(_make_client_id(), "Acme")
+
+    screen._on_ticket_text("-4")
+    screen.add_product_by_id(pid)
+
+    assert screen.cart.entries == []
+    assert not screen.overlay.isHidden()
+
+
+def test_set_client_refused_while_ticket_has_negative_line(screen):
+    pid, _, _ = _add_product()
+    screen.isAdmin = True
+    screen.add_product_by_id(pid)
+    screen._on_ticket_text("-")
+    screen.add_product_by_id(pid)
+
+    screen.set_client(_make_client_id(), "Acme")
+
+    assert screen.is_invoice is False
+    assert screen.client_id is None
+    assert not screen.overlay.isHidden()
+
+
+def test_credit_note_still_takes_negative_lines(screen):
+    pid, _, _ = _add_product()
+    screen.isAdmin = True
+    screen.set_rf_cn(True)
+    screen.add_product_by_id(pid)
+    screen.set_client(_make_client_id(), "Acme")
+    screen._on_ticket_text("-")
+    screen.add_product_by_id(pid)
+
+    assert screen.is_invoice is True
+    assert [e.quantity for e in screen.cart.entries] == [-1, -1]
 
 
 def test_set_client_unknown_id_is_refused(screen):

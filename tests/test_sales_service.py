@@ -330,6 +330,65 @@ def test_finalize_invoice_unknown_client_id_raises(db_session):
         )
 
 
+def _client(session):
+    from app.core.client.client_service import ClientService
+    return ClientService.create(session, name="Client", vatNumber="V1", street="1 Main St",
+                                zip_code="1000", city="Brussels")
+
+
+@pytest.mark.parametrize("quantities", [(3, -1), (1, -3)], ids=["positive-total", "negative-total"])
+def test_finalize_invoice_refuses_negative_line(db_session, quantities):
+    client = _client(db_session)
+    product = _make_product(db_session)
+    cart = _cart_with(*(_item_for(product, quantity=q) for q in quantities))
+
+    with pytest.raises(ValueError, match="Negative lines"):
+        SalesService.finalize_invoice(db_session, cart, client_id=client.id)
+
+    assert db_session.query(Sale).count() == 0
+    assert db_session.query(Invoice).count() == 0
+    assert ProductService.get_by_id(db_session, product.id).stock_quantity == 100
+
+
+def test_update_sale_refuses_invoicing_negative_line(db_session):
+    client = _client(db_session)
+    product = _make_product(db_session)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    edited = _cart_with(_item_for(product, quantity=3), _item_for(product, quantity=-1))
+
+    with pytest.raises(ValueError, match="Negative lines"):
+        SalesService.update_sale(db_session, sale.id, edited, client_id=client.id)
+
+    assert SalesService.get_by_id(db_session, sale.id).invoice is None
+    assert ProductService.get_by_id(db_session, product.id).stock_quantity == 99
+
+
+def test_update_sale_allows_void_on_reopened_invoice(db_session):
+    """A VOID is a negative line too, but it cancels its original and
+    neither reaches the invoice: voiding on a reopened invoice still works."""
+    client = _client(db_session)
+    product = _make_product(db_session)
+    original = _item_for(product, quantity=2)
+    cart = _cart_with(original)
+    invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
+
+    cart.reverse(original)
+    cart.entries.append(_item_for(product, quantity=1))
+    updated = SalesService.update_sale(db_session, invoice.sale_id, cart, client_id=client.id)
+
+    assert updated.invoice.final_amount == pytest.approx(10.0)
+
+
+def test_update_sale_allows_negative_total_on_plain_receipt(db_session):
+    product = _make_product(db_session)
+    sale = SalesService.finalize_sale(db_session, _cart_with(_item_for(product, quantity=1)))
+    negative = _cart_with(_item_for(product, quantity=1), _item_for(product, quantity=-3))
+
+    updated = SalesService.update_sale(db_session, sale.id, negative)
+
+    assert updated.final_amount == pytest.approx(-20.0)
+
+
 def test_finalize_invoice_snapshot_survives_later_client_edits(db_session):
     from app.core.client.client_service import ClientService
     client = ClientService.create(db_session, name="Original Name", vatNumber="VORIG", street="1 Main St", zip_code="1000", city="Brussels")
@@ -617,6 +676,22 @@ def test_generate_invoice_data_sends_credit_note_as_out_refund_with_positive_lin
     assert data["move_type"] == "out_refund"
     assert [line.quantity for line in data["items"]] == [2]
     assert all(line.line_total_excl_tax > 0 for line in data["items"])
+
+
+def test_generate_invoice_data_flips_mixed_sign_credit_note_lines(db_session):
+    """A positive line on a credit note is a charge: it goes out negative,
+    so Odoo's credited total matches the POS (abs() would credit it too)."""
+    from app.core.sale.sales_service import generate_invoice_data
+    client = _client(db_session)
+    product = _make_product(db_session)
+    cart = _cart_with(_item_for(product, quantity=-3), _item_for(product, quantity=1))
+    cart.is_refund = True
+    invoice = SalesService.finalize_invoice(db_session, cart, client_id=client.id)
+
+    items = generate_invoice_data(invoice)["items"]
+    assert [line.quantity for line in items] == [3, -1]
+    sent_excl = sum(line.line_total_excl_tax for line in items)
+    assert sent_excl == pytest.approx(-(invoice.final_amount - invoice.tax_amount), abs=0.01)
 
 
 def test_update_sale_moves_invoice_to_another_client(db_session):

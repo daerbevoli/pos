@@ -68,6 +68,7 @@ from app.core.erp.erp_worker import InvoiceSendWorker
 from app.core.inventory.product_service import ProductService
 from app.core.sale.receipt_service import PrinterError, PrinterNotResponding, ReceiptService
 from app.core.sale.sales_service import (
+    NEGATIVE_INVOICE_LINE_MSG,
     SalesService,
     clear_open_ticket,
     generate_invoice_data,
@@ -111,6 +112,14 @@ def size_cart_columns(table: QTableWidget):
     for column, widest in ((0, "-1000"), (2, "1000.00/kg"), (3, "-1000.00")):
         header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
         table.setColumnWidth(column, metrics.horizontalAdvance(widest) + 12 + 4)  # 12px = cell padding in main.qss
+
+
+def align_cart_cell(cell: QTableWidgetItem, column: int):
+    """Qty, unit price and total are right-aligned, so a minus sign grows
+    the number to the left and the digits and decimal points stay lined up
+    under each other. Shared by the POS cart and the customer display."""
+    if column in (0, 2, 3):
+        cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
 
 def _item_cells(item: CartItem) -> list[str]:
@@ -478,11 +487,12 @@ class POSScreen(QWidget):
             ("7", 0, 0), ("8", 0, 1), ("9", 0, 2),
             ("4", 1, 0), ("5", 1, 1), ("6", 1, 2),
             ("1", 2, 0), ("2", 2, 1), ("3", 2, 2),
-            ("0", 3, 0), (".", 3, 1), ("⌫", 3, 2),
+            # "-" instead of a backspace: the Error key already removes the last typed character.
+            ("0", 3, 0), (".", 3, 1), ("-", 3, 2),
         ]
         for label, r, c in keys:
             btn = QPushButton(label)
-            btn.setObjectName("numKey" if label != "⌫" else "numKeyDel")
+            btn.setObjectName("numKey")
             btn.setMinimumHeight(FUNCTION_BUTTON_HEIGHT)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -627,9 +637,10 @@ class POSScreen(QWidget):
 
 
     def _numpad_press(self, label: str):
-        text = self.cart_input.text()
-        if label == "⌫":
-            self.cart_input.setText(text[:-1])
+        if label == "-":
+            # Same as the keyboard's "-": admin only, and only at the start
+            # of the amount (the validator refuses it anywhere else).
+            self._on_ticket_text("-")
         elif label == ".":
             self._insert_decimal_point()
         else:
@@ -695,12 +706,22 @@ class POSScreen(QWidget):
                 self.cart_input.clear()
                 return True
             amount = self._read_amount_input()
-            if amount is None or amount <= 0:
+            if amount is None or amount == 0:
                 self._show_overlay("Enter a valid amount")
                 return True
+            # A negative amount takes the item back, as a negative typed
+            # quantity/price does when adding: the weight or price stays
+            # positive and the line's quantity goes negative (always so in
+            # RF/CN mode). Not on a regular invoice.
+            take_back = amount < 0 or self.cart.is_refund
+            if amount < 0 and self._refuse_negative_on_invoice(amount):
+                return True
+            amount = abs(amount)
             if pending_entry.quantity is None:
-                pending_entry.quantity = -amount if self.cart.is_refund else amount
+                pending_entry.quantity = -amount if take_back else amount
             else:
+                if take_back:
+                    pending_entry.quantity = -abs(pending_entry.quantity)
                 self.cart.set_open_price(pending_entry, amount)
             self.cart.sync_promo_discounts()
             self.cart_input.clear()
@@ -755,6 +776,8 @@ class POSScreen(QWidget):
                 quantity = None
             else:
                 quantity = 1
+            if self._refuse_negative_on_invoice(quantity):
+                return
             self.cart.add_product(product, quantity=quantity)
             self._refresh_cart(select_last=True)
 
@@ -856,6 +879,11 @@ class POSScreen(QWidget):
         if value is None:
             self._show_overlay("Enter a number first")
             return
+        # A negative discount would put money on (a surcharge), 0 does nothing.
+        if value <= 0:
+            self._show_overlay("No negative discount" if value < 0 else "Enter a valid amount")
+            self.cart_input.clear()
+            return
         if apply(value) is None:
             self._show_overlay("Nothing to discount")
             return
@@ -909,6 +937,7 @@ class POSScreen(QWidget):
         for col, text in enumerate(texts):
             cell = QTableWidgetItem(text)
             cell.setFont(font)
+            align_cart_cell(cell, col)
             if brush is not None:
                 cell.setBackground(brush)
             self.cart_table.setItem(row, col, cell)
@@ -1580,6 +1609,16 @@ class POSScreen(QWidget):
             return True
         return False
 
+    def _refuse_negative_on_invoice(self, quantity: float | None) -> bool:
+        """A regular invoice can't take an item back (SalesService refuses it
+        at payment too): refused as the line is added, with the reason on
+        screen and the input cleared. True if the caller should stop."""
+        if self.is_invoice and not self.cart.is_refund and quantity is not None and quantity < 0:
+            self._show_overlay(NEGATIVE_INVOICE_LINE_MSG)
+            self.cart_input.clear()
+            return True
+        return False
+
     def _typed_quantity(self, query: str, product) -> float | None:
         """The line quantity for an amount typed before adding a product.
         Under 1, a weight/volume item takes it as its exact weight; any
@@ -1624,6 +1663,11 @@ class POSScreen(QWidget):
             is_domestic = client.country == BELGIUM
             if self.reopened_ticket and is_domestic != self.cart.is_domestic:
                 self._show_overlay("Invoice client cannot change")
+                return
+            # A finished ticket is cleared by the unfreeze below, so only an
+            # open one's negative lines stand in the way of invoicing it.
+            if not self.sale_finished and not self.cart.is_refund and self.cart.negative_lines():
+                self._show_overlay(NEGATIVE_INVOICE_LINE_MSG)
                 return
             if self.sale_finished:
                 self._unfreeze_ticket()
@@ -1672,6 +1716,9 @@ class POSScreen(QWidget):
                 # positive price, the same way refunds and reversals do it.
                 quantity = -1 if open_price < 0 else 1
                 open_price = abs(open_price)
+            # After the unfreeze above: a new ticket after a paid invoice isn't one.
+            if self._refuse_negative_on_invoice(quantity):
+                return
             self.cart.add_product(product, quantity=quantity, price=open_price)
         # Outside the session: this autosaves the ticket through its own session.
         self._refresh_cart(select_last=True)
