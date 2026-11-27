@@ -210,7 +210,7 @@ QPushButton#ZRBtn {
 QPushButton#navBtn {
     background-color: #8fd4d0;
     border: 1px solid #5fb7b2;
-    color: #103330;
+    color: #000000;
     font-size: 20px;
     font-weight: 700;
 }
@@ -222,7 +222,7 @@ QPushButton#navBtn:hover {
 QPushButton#secFunc {
     background-color: #9fd6cd;
     border: 1px solid #6fb8ad;
-    color: #0f3530;
+    color: #000000;
     font-size: 13px;
 }
 
@@ -233,7 +233,7 @@ QPushButton#secFunc:hover {
 QPushButton#errorBtn {
     background-color: #e8973a;
     border: 1px solid #c97c1f;
-    color: #fffaf0;
+    color: #000000;
     font-weight: 700;
 }
 
@@ -244,7 +244,7 @@ QPushButton#errorBtn:hover {
 QPushButton#clearBtn {
     background-color: #d94f3f;
     border: 1px solid #b3392b;
-    color: #fff5f2;
+    color: #000000;
     font-weight: 700;
 }
 
@@ -255,7 +255,7 @@ QPushButton#clearBtn:hover {
 QPushButton#closePosBtn {
     background-color: #f2b8b0;
     border: 1px solid #e0897d;
-    color: #6b1d14;
+    color: #000000;
     font-weight: 700;
     font-size: 13px;
 }
@@ -301,7 +301,7 @@ QPushButton#cardBtn:hover {
 QPushButton#okBtn {
     background-color: #f4e84a;
     border: 1px solid #d8cc2f;
-    color: #2a2410;
+    color: #000000;
     font-weight: 700;
     font-size: 16px;
 }
@@ -329,7 +329,7 @@ QPushButton#payAltBtn:hover {
 QPushButton#subtotalBtn {
     background-color: #9aa6b5;
     border: 1px solid #7c8896;
-    color: #fff;
+    color: #000000;
     font-weight: 700;
     font-size: 15px;
 }
@@ -341,7 +341,7 @@ QPushButton#subtotalBtn:hover {
 QPushButton#cashBtn {
     background-color: #7ea8d8;
     border: 1px solid #5c87bd;
-    color: #ffffff;
+    color: #000000;
     font-weight: 700;
     font-size: 18px;
 }
@@ -363,7 +363,7 @@ QPushButton#blankBtnLight:hover {
 QPushButton#productBtn {
     background-color: #f0c25a;
     border: 1px solid #d6a73d;
-    color: #3a2a06;
+    color: #000000;
     font-weight: 600;
 }
 
@@ -374,7 +374,7 @@ QPushButton#productBtn:hover {
 QPushButton#generalBtn {
     background-color: #c9c8e0;
     border: 1px solid #a9a8c8;
-    color: #2a2840;
+    color: #000000;
     font-weight: 700;
     font-size: 13px;
 }
@@ -386,7 +386,7 @@ QPushButton#generalBtn:hover {
 QPushButton#categoryBtn {
     background-color: #d96b7a;
     border: 1px solid #b9505e;
-    color: #fff5f5;
+    color: #000000;
     font-weight: 700;
     font-size: 13px;
 }
@@ -398,7 +398,7 @@ QPushButton#categoryBtn:hover {
 QPushButton#categoryBtn[active="true"] {
     background-color: #a53443;
     border: 2px solid #f0c25a;
-    color: #ffffff;
+    color: #000000;
 }
 
 QPushButton#checkoutBtn {
@@ -428,7 +428,7 @@ QPushButton#numKey:hover {
 QPushButton#numKeyDel {
     background-color: #d94f3f;
     border: 1px solid #b3392b;
-    color: #fff5f2;
+    color: #000000;
     font-size: 16px;
     font-weight: 700;
 }

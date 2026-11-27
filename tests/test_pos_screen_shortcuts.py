@@ -164,3 +164,54 @@ def test_shortcut_deleted_while_on_other_tab_is_dropped(screen):
 
     assert screen.shortcut_grid.active_shortcut_id is None
     assert screen.shortcut_grid._slot_product_ids == [None] * screen.shortcut_grid.SLOT_COUNT
+
+
+def test_more_shortcuts_than_buttons_pages_through_them(screen):
+    grid = screen.shortcut_grid
+    cap = len(grid.shortcut_buttons)
+    p = _make_products(["X"])
+    names = [f"S{i:02d}" for i in range(cap + 5)]  # 2 pages of cap - 1
+    for n in names:
+        _shortcut(n, [p["X"]])
+    screen.reload_shortcuts()
+
+    assert [b.text() for b in grid.shortcut_buttons[:-1]] == names[: cap - 1]
+    assert grid.shortcut_buttons[-1].text() == "More ▸"
+
+    grid._on_shortcut_pressed(cap - 1)
+    assert [b.text() for b in grid.shortcut_buttons[:6]] == names[cap - 1:]
+    assert not grid.shortcut_buttons[6].isEnabled()
+    assert grid.shortcut_buttons[-1].text() == "◂ Back"
+
+    grid._on_shortcut_pressed(0)  # opens the shortcut on this page, not page 1's
+    with get_session() as session:
+        assert grid.active_shortcut_id == ProductService.get_all_shortcuts(session)[cap - 1].id
+    assert grid.shortcut_buttons[0].property("active") is True
+
+    grid._on_shortcut_pressed(cap - 1)  # back to the first page
+    assert grid.shortcut_buttons[0].text() == names[0]
+    assert grid.shortcut_buttons[0].property("active") is False
+
+
+def test_more_products_than_slots_pages_through_them(screen):
+    grid = screen.shortcut_grid
+    cap = grid.SLOT_COUNT
+    p = _make_products([f"P{i:02d}" for i in range(cap + 3)])
+    ids = list(p.values())
+    _shortcut("Big", ids)
+    screen.reload_shortcuts()
+    grid._on_shortcut_pressed(0)
+
+    assert grid._slot_product_ids[: cap - 1] == ids[: cap - 1]
+    assert grid.slot_buttons[-1].text() == "More ▸"
+
+    grid._on_slot_pressed(cap - 1)
+    assert grid._slot_product_ids[:4] == ids[cap - 1:]
+    assert grid.slot_buttons[-1].text() == "◂ Back"
+    assert screen.cart.entries == []  # paging adds nothing to the cart
+
+    screen.reload_shortcuts()  # e.g. a price change keeps the page
+    assert grid._slot_product_ids[0] == ids[cap - 1]
+
+    grid._on_slot_pressed(cap - 1)
+    assert grid._slot_product_ids[0] == ids[0]
