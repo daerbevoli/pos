@@ -103,7 +103,7 @@ def load_open_tickets(session: Session) -> dict[int, OpenTicketData]:
 class InvoiceLine:
     product_name: str
     quantity: float
-    unit_price_excl_tax: float  # full, undiscounted unit price
+    unit_price_excl_tax: float  # full, undiscounted unit price, 4 decimals
     unit: str
     tax_rate: int
     line_total_excl_tax: float
@@ -126,11 +126,11 @@ def invoice_lines(invoice: Invoice) -> list[InvoiceLine]:
         lines.append(InvoiceLine(
             product_name=entry.product_name,
             quantity=entry.quantity,
-            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 3),
+            unit_price_excl_tax=round(entry.unit_price / (1 + entry.tax_rate / 100), 4),
             unit=entry.unit,
             tax_rate=entry.tax_rate,
             line_total_excl_tax=line.net_excl,
-            discount_percent=round(line.discount / line.gross * 100, 2) if line.gross else 0.0,
+            discount_percent=round(line.discount / line.gross * 100, 4) if line.gross else 0.0,
         ))
     return lines
 
@@ -159,6 +159,7 @@ def generate_invoice_data(invoice: Invoice) -> dict:
             line.line_total_excl_tax = -line.line_total_excl_tax
     invoice_data["move_type"] = "out_refund" if invoice.is_credit_note else "out_invoice"
     invoice_data["items"] = items
+    invoice_data["total"] = abs(invoice.final_amount)
     invoice_data["notes"] = "Thank you for shopping."
     logger.debug("ERP payload built for %s: %s, %d lines",
                  invoice.invoice_number, invoice_data["move_type"], len(items))

@@ -80,7 +80,7 @@ def test_stacked_item_and_subtotal_discounts_on_invoice():
     assert cart.total == 12.15
     assert [(l.unit_price_excl_tax, l.discount_percent, l.line_total_excl_tax) for l in lines] == [
         (9.434, 19.0, 7.64),
-        (1.415, 10.0, 3.82),
+        (1.4151, 10.0, 3.82),
     ]
     assert round(sum(l.line_total_excl_tax for l in lines), 2) == 11.46
 
@@ -89,7 +89,7 @@ def test_two_subtotal_discounts_stack_exactly_with_rounding_on_the_lines():
     """3 broccoli at 1.50 + 15 kg carrot at 0.99 = 19.35, subtotal, 10% off
     twice: the second comes off what's left (1.94 then 1.74, 19% not 20%).
     Each discount's shares sum to it exactly; the cent rounding shows only
-    in the per-line % (18.89 / 19.06 instead of 19.00)."""
+    in the per-line % (18.8889 / 19.0572 instead of 19.00)."""
     cart = Cart()
     cart.add_product(_product(1, 1.5, tax=6), quantity=3)
     cart.add_product(_product(2, 0.99, tax=6, unit="kg"), quantity=15)
@@ -103,7 +103,7 @@ def test_two_subtotal_discounts_stack_exactly_with_rounding_on_the_lines():
     assert round(sum(_nets(cart)), 2) == cart.total
 
     lines = invoice_lines(_invoice_for(cart))
-    assert [(l.discount_percent, l.line_total_excl_tax) for l in lines] == [(18.89, 3.44), (19.06, 11.34)]
+    assert [(l.discount_percent, l.line_total_excl_tax) for l in lines] == [(18.8889, 3.44), (19.0572, 11.34)]
 
 
 def test_reversing_a_discounted_line_also_voids_its_discount():

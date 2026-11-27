@@ -31,11 +31,12 @@ CUSTOMER = {"name": "Acme", "street": "Kerkstraat 1", "zip": "2000", "city": "An
 
 
 class FakeOdoo:
-    def __init__(self, partner=None, move=None, email="acme@example.com", peppol="valid"):
+    def __init__(self, partner=None, move=None, email="acme@example.com", peppol="valid", amount_total=24.2):
         self.partner = partner        # existing res.partner record (dict) or None
         self.move = move              # existing account.move record (dict) or None
         self.email = email
         self.peppol = peppol
+        self.amount_total = amount_total  # what Odoo computes for a created invoice
         self.calls = []
 
     def __call__(self, model, method, payload):
@@ -57,7 +58,8 @@ class FakeOdoo:
         if (model, method) == ("account.move", "search"):
             return [self.move["id"]] if self.move else []
         if (model, method) == ("account.move", "read"):
-            return [self.move or {"state": "posted", "partner_id": [9, "Acme"], "peppol_move_state": False}]
+            return [self.move or {"state": "posted", "partner_id": [9, "Acme"], "peppol_move_state": False,
+                                  "amount_total": self.amount_total}]
         if method == "create":
             return [77]
         return True
@@ -77,14 +79,14 @@ def erp_with(monkeypatch):
 
 def _invoice_data(price=10.0):
     return {"inv_num": "I-041126-001", "inv_date": "2026-11-04", "due_date": "2026-11-11",
-            "to": CUSTOMER, "move_type": "out_invoice", "notes": "",
+            "to": CUSTOMER, "move_type": "out_invoice", "notes": "", "total": 24.2,
             "items": [InvoiceLine(product_name="A", quantity=2, unit_price_excl_tax=price, unit="pcs",
                                   tax_rate=21, line_total_excl_tax=2 * price)]}
 
 
-def _move(state="posted", sent=False):
+def _move(state="posted", sent=False, amount_total=24.2):
     return {"id": 42, "state": state, "is_move_sent": sent, "peppol_move_state": False,
-            "partner_id": [9, "Acme"]}
+            "partner_id": [9, "Acme"], "amount_total": amount_total}
 
 
 def _existing_partner(**changes):
@@ -250,3 +252,40 @@ def test_same_vat_compares_normalized_vat_only():
     assert same_vat(odoo, "BE 0477.472.701")
     assert not same_vat(odoo, "BE0123456749")
     assert not same_vat({"name": "Shop BV", "vat": False}, "")  # both empty: nothing to identify by
+
+
+def test_new_invoice_a_rounding_cent_off_is_posted(erp_with):
+    """10.00 incl. 21% is 8.26 + 1.73 = 9.99 in Odoo: rounding, so posted."""
+    odoo = FakeOdoo(partner=_existing_partner(), amount_total=24.19)
+
+    assert erp_with(odoo).create_post_invoice(_invoice_data()) == (77, False)
+    assert odoo.made("account.move", "action_post") == [{"ids": [77], "context": {}}]
+
+
+def test_new_invoice_with_a_real_total_mismatch_is_deleted_not_posted(erp_with):
+    odoo = FakeOdoo(partner=_existing_partner(), amount_total=24.50)
+
+    with pytest.raises(ERPError, match="24.50 doesn't match the POS total 24.20"):
+        erp_with(odoo).create_post_invoice(_invoice_data())
+
+    assert odoo.made("account.move", "action_post") == []
+    assert odoo.made("account.move", "unlink") == [{"ids": [77]}]
+
+
+def test_existing_draft_with_a_total_mismatch_is_not_posted(erp_with):
+    odoo = FakeOdoo(partner=_existing_partner(), move=_move(state="draft", amount_total=30.0))
+
+    with pytest.raises(ERPError, match="doesn't match"):
+        erp_with(odoo).create_post_invoice(_invoice_data())
+
+    assert odoo.made("account.move", "action_post") == []
+    assert odoo.made("account.move", "unlink") == [{"ids": [42]}]
+
+
+def test_credit_note_total_is_compared_unsigned(erp_with):
+    """generate_invoice_data sends the POS total unsigned; Odoo's
+    amount_total of an out_refund is positive too."""
+    data = dict(_invoice_data(), move_type="out_refund")
+    odoo = FakeOdoo(partner=_existing_partner(), amount_total=24.2)
+
+    assert erp_with(odoo).create_post_invoice(data) == (77, False)

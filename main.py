@@ -6,9 +6,9 @@ import platform
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
+from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR, QLockFile
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app.__version__ import __version__
 from app.core.database import DB_PATH, get_session, init_db
@@ -41,6 +41,16 @@ def _log_startup_banner():
                     get("erp_url"))
 
 
+def acquire_instance_lock(path: Path) -> QLockFile | None:
+    """The lock that keeps a second POS from running on the same database
+    (two windows would overwrite each other's open tickets and race for sale
+    numbers). None if another running POS holds it; a crashed one's lock is
+    taken over (Qt checks whether its process still exists)."""
+    lock = QLockFile(str(path))
+    lock.setStaleLockTime(0)  # stale only when its process is gone, never by age
+    return lock if lock.tryLock(0) else None
+
+
 def main():
     setup_logging(LOG_DIR)
 
@@ -55,6 +65,13 @@ def main():
     app.setOrganizationName("SKBC bv")
     app.setApplicationVersion(__version__)
     app.setWindowIcon(QIcon(str(BUNDLE_DIR / "resources" / "icons" / "kassa.ico")))
+
+    lock = acquire_instance_lock(Path(DB_PATH).parent / "superpos.lock")
+    if lock is None:
+        logger.warning("POS already running: second start refused")
+        QMessageBox.warning(None, "SuperPOS", "SuperPOS is already running.")
+        sys.exit(1)
+    app.instance_lock = lock  # restart_app() releases it so the new process can start
 
     # From here on, unhandled exceptions get logged and shown to the user
     # instead of crashing the app.

@@ -116,6 +116,9 @@ def restart_app():
     """Start a fresh POS process, then quit this one — after a restore every
     screen still holds data read from the old database."""
     args = sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv
+    lock = getattr(QApplication.instance(), "instance_lock", None)
+    if lock is not None:
+        lock.unlock()  # else the new process finds it held and exits
     QProcess.startDetached(sys.executable, args)
     QApplication.quit()
 

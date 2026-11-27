@@ -34,6 +34,12 @@ def _partner_values(customer_info: dict) -> dict:
 # carry the API key.
 _LOG_BODY_MAX = 2000
 
+# Odoo works an invoice out from ex-VAT unit prices, the POS from VAT-included
+# ones, so they can differ by a rounding cent per line (10.00 incl. 21% is
+# 8.26 + 1.73 = 9.99 in Odoo). Anything bigger is a real mismatch.
+TOTAL_TOLERANCE_PER_LINE = 0.01
+
+
 class ERPError(Exception):
     """ERP Error thrown at connection problem, bad HTTP request or error in received HTTP data"""
 
@@ -117,7 +123,6 @@ class ErpService:
         uid = self._call(model="res.users", method="context_get", payload={})["uid"]
         company_id = self.read("res.users", [uid], ["company_id"])[0]["company_id"][0]
         company = self.read("res.company", [company_id], ["name", "vat"])[0]
-        print({"name": company.get("name") or "", "vat": company.get("vat") or ""})
         return {"name": company.get("name") or "", "vat": company.get("vat") or ""}
 
     # ORM helpers
@@ -300,8 +305,9 @@ class ErpService:
             limit=1,
         )
         if existing:
-            return self._resume_invoice(existing[0], inv_num)
+            return self._resume_invoice(existing[0], inv_num, invoice_data["total"], len(items))
 
+        expected = invoice_data["total"]
         invoice_id = self.create(
             model="account.move",
             vals={
@@ -316,28 +322,51 @@ class ErpService:
         )
         logger.info("ERP %s %s created: id %s, partner %s, %d lines",
                     move_type, inv_num, invoice_id, partner_id, len(items))
+        amount_total = self.read("account.move", [invoice_id], ["amount_total"])[0]["amount_total"]
+        self._check_total(invoice_id, inv_num, expected, amount_total, len(items))
 
         self.button("account.move", "action_post", [invoice_id])
         logger.info("ERP %s %s (id %s) posted", move_type, inv_num, invoice_id)
         return invoice_id, False
 
-    def _resume_invoice(self, invoice_id: int, inv_num: str) -> tuple[int, bool]:
+    def _resume_invoice(self, invoice_id: int, inv_num: str, expected: float,
+                        line_count: int) -> tuple[int, bool]:
         """The invoice already in Odoo under this reference, taken as it is:
-        logged, not compared with the POS nor created again. A draft is
-        posted so it can be sent; a canceled one can't be sent at all."""
+        logged, not created again. A draft (left by a crash before posting)
+        gets the same total check as a new invoice, then is posted so it can
+        be sent; a canceled one can't be sent at all."""
         move = self.read(
             model="account.move",
             ids=[invoice_id],
-            fields=["state", "is_move_sent"],
+            fields=["state", "is_move_sent", "amount_total"],
         )[0]
         logger.info("ERP invoice %s already exists (id %s, state %s, sent %s)",
                     inv_num, invoice_id, move["state"], bool(move["is_move_sent"]))
         if move["state"] == "cancel":
             raise ERPError(f"Invoice {inv_num} is cancelled in the ERP")
         if move["state"] == "draft":
+            self._check_total(invoice_id, inv_num, expected, move["amount_total"], line_count)
             self.button("account.move", "action_post", [invoice_id])
             logger.info("ERP invoice %s (id %s) posted", inv_num, invoice_id)
         return invoice_id, bool(move["is_move_sent"])
+
+    def _check_total(self, invoice_id: int, inv_num: str, expected: float,
+                     amount_total: float, line_count: int):
+        """Deletes the draft and raises ERPError when Odoo's total is further
+        from the POS total than rounding explains (TOTAL_TOLERANCE_PER_LINE):
+        an invoice that doesn't match what was paid never gets posted. Deleted,
+        not left as a draft, so a retry doesn't post it unchecked."""
+        allowed = TOTAL_TOLERANCE_PER_LINE * max(line_count, 1) + 0.0001  # float slack
+        if abs(abs(amount_total) - expected) <= allowed:
+            if abs(amount_total) != expected:
+                logger.info("ERP invoice %s total %.2f, POS %.2f: rounding difference",
+                            inv_num, abs(amount_total), expected)
+            return
+        self._call("account.move", "unlink", {"ids": [invoice_id]})
+        logger.warning("ERP invoice %s (id %s) deleted: total %.2f, POS %.2f",
+                       inv_num, invoice_id, abs(amount_total), expected)
+        raise ERPError(f"Odoo total {abs(amount_total):.2f} doesn't match the POS total "
+                       f"{expected:.2f}: invoice not posted, check it by hand")
 
     def send_invoice(self, invoice_id: int, use_peppol: bool, use_email: bool) -> tuple[bool, str]:
         """
